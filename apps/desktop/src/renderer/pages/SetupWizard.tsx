@@ -1,53 +1,34 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 const steps = [
   'Webwright Root',
-  'Python venv',
-  'API Provider',
-  'API Key',
+  'Python',
+  'API Provider / Key',
   'Playwright Browser',
   'Smoke Test',
-  'Project Path'
+  'Project Path',
+  'Complete'
 ]
 
 export function SetupWizard() {
   const [step, setStep] = useState(0)
   const [webwrightRoot, setWebwrightRoot] = useState('')
   const [pythonPath, setPythonPath] = useState('python')
+  const [apiProvider, setApiProvider] = useState('openai')
   const [apiKey, setApiKey] = useState('')
   const [projectRoot, setProjectRoot] = useState('')
   const [health, setHealth] = useState<string>('')
   const setSetupComplete = useAppStore((s) => s.setSetupComplete)
-  const navigate = useNavigate()
 
   const saveSettings = useMutation({
-    mutationFn: async () => {
-      const current = await api.settings.get()
-      const updated = {
-        ...current,
-        webwright: {
-          ...(current.webwright as object),
-          root: webwrightRoot,
-          python: pythonPath,
-          executionMode: 'native'
-        },
-        generator: {
-          ...(current.generator as object),
-          projectRoot
-        }
-      }
-      await api.settings.update(updated)
-      if (apiKey) {
-        await window.electronAPI?.credentialSet('tc-studio', 'openai', apiKey)
-      }
-    }
+    mutationFn: saveDraftSettings
   })
 
   async function checkHealth() {
+    await saveSettings.mutateAsync()
     const res = await api.settings.validate()
     setHealth(JSON.stringify(res, null, 2))
   }
@@ -60,7 +41,28 @@ export function SetupWizard() {
   async function finish() {
     await saveSettings.mutateAsync()
     setSetupComplete(true)
-    navigate('/')
+  }
+
+  async function saveDraftSettings() {
+    const current = await api.settings.get()
+    const updated = {
+      ...current,
+      webwright: {
+        ...(current.webwright as object),
+        root: webwrightRoot,
+        python: pythonPath,
+        apiProvider,
+        executionMode: 'native'
+      },
+      generator: {
+        ...(current.generator as object),
+        projectRoot
+      }
+    }
+    await api.settings.update(updated)
+    if (apiKey) {
+      await window.electronAPI?.credentialSet('tc-studio', apiProvider, apiKey)
+    }
   }
 
   return (
@@ -75,27 +77,43 @@ export function SetupWizard() {
         </div>
       )}
       {step === 1 && (
-        <input className="w-full p-2 rounded bg-slate-800" value={pythonPath} onChange={(e) => setPythonPath(e.target.value)} placeholder="Python path" />
+        <div className="space-y-2">
+          <input className="w-full p-2 rounded bg-slate-800" value={pythonPath} onChange={(e) => setPythonPath(e.target.value)} placeholder="Python path or venv interpreter" />
+          <button className="px-4 py-2 bg-slate-700 rounded" onClick={() => pickDir(setPythonPath)}>Browse venv</button>
+        </div>
       )}
-      {step === 2 && <p className="text-slate-300">OpenAI provider (default)</p>}
+      {step === 2 && (
+        <div className="space-y-2">
+          <select className="w-full p-2 rounded bg-slate-800" value={apiProvider} onChange={(e) => setApiProvider(e.target.value)}>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="azure-openai">Azure OpenAI</option>
+          </select>
+          <input className="w-full p-2 rounded bg-slate-800" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API Key (stored in OS keychain)" />
+        </div>
+      )}
       {step === 3 && (
-        <input className="w-full p-2 rounded bg-slate-800" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API Key (stored in OS keychain)" />
-      )}
-      {step === 4 && (
         <div>
           <button className="px-4 py-2 bg-blue-600 rounded" onClick={checkHealth}>Check Webwright / Python</button>
           {health && <pre className="mt-2 text-xs bg-slate-900 p-2 rounded overflow-auto">{health}</pre>}
         </div>
       )}
-      {step === 5 && (
+      {step === 4 && (
         <div>
           <button className="px-4 py-2 bg-blue-600 rounded" onClick={checkHealth}>Run Smoke Test</button>
+          {health && <pre className="mt-2 text-xs bg-slate-900 p-2 rounded overflow-auto">{health}</pre>}
         </div>
       )}
-      {step === 6 && (
+      {step === 5 && (
         <div className="space-y-2">
           <input className="w-full p-2 rounded bg-slate-800" value={projectRoot} onChange={(e) => setProjectRoot(e.target.value)} placeholder="Default project root" />
           <button className="px-4 py-2 bg-slate-700 rounded" onClick={() => pickDir(setProjectRoot)}>Browse</button>
+        </div>
+      )}
+      {step === 6 && (
+        <div className="space-y-3 text-slate-300">
+          <p>Setup is ready to finish.</p>
+          {health && <pre className="text-xs bg-slate-900 p-2 rounded overflow-auto">{health}</pre>}
         </div>
       )}
 

@@ -2,6 +2,13 @@
 
 TestRail, Excel, Google Sheets 등의 TC를 Webwright raw code로 변환하고, 구조화된 Playwright 자동화 프로젝트를 생성·실행·결과 반영하는 로컬 QA 자동화 IDE.
 
+제품은 [Product Workspaces](docs/PRODUCT_PILLARS.md) 기준 **두 workspace**로 구성된다:
+
+1. **Generate Raw** — TC import, LLM/prompt, Webwright raw code/action/artifact 생성
+2. **Automation IDE** — mapping, structure, generated project 편집, run, results, export
+
+Setup Wizard와 Settings는 supporting surface이며 product workspace가 아니다.
+
 ## 문서
 
 - [Architecture](webwright_automation_generator_architecture.md)
@@ -29,8 +36,8 @@ packages/generated-template/  Playwright pytest project template
 
 ## 요구사항
 
-- Node.js 20+
-- Python 3.11+
+- Node.js 20+ (see `.nvmrc`, `package.json` `engines`)
+- Python 3.11+ (see `.python-version`)
 - (선택) Webwright CLI 설치 환경
 
 ## 개발 실행

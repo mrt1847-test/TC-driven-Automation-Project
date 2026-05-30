@@ -1,8 +1,10 @@
 # Structuring Spec
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 이 문서는 Webwright가 만든 raw output을 유지보수 가능한 Playwright/pytest 프로젝트로 바꾸는 구조화 계약을 정의한다.
+
+**Product workspace:** Automation IDE ([PRODUCT_PILLARS.md — Workspace 2](./PRODUCT_PILLARS.md#workspace-2-automation-ide---structure--edit--run)). Generate Raw는 raw input(`RawAction`, artifacts)만 제공한다.
 
 ## Conclusion
 

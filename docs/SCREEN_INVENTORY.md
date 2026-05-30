@@ -1,63 +1,102 @@
 # Screen Inventory
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 이 문서는 Electron + React GUI 화면의 책임, 주요 상태, 연결 API, 체크리스트 항목을 정리한다. GUI는 자동화 로직을 소유하지 않고 Local Worker와 generated automation project를 오케스트레이션한다.
 
-UI/UX 방향은 [UI_UX_DIRECTION.md](./UI_UX_DIRECTION.md)를 따른다. 전체 화면은 Cursor 같은 IDE형 작업공간을 참고하되, 중심 객체는 코드 파일이 아니라 TC와 `automation_key`다.
+**제품 정보구조의 기준:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md). 사용자-facing 앱은 **Generate Raw**와 **Automation IDE** 두 workspace로 조직한다. flat tab 목록이 아니다.
 
-Top-level product structure follows [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md). The user-facing app should be organized into two large workspaces, not a flat list of unrelated tabs.
+UI/UX 방향: [UI_UX_DIRECTION.md](./UI_UX_DIRECTION.md). Cursor 같은 IDE형 작업공간을 참고하되, 중심 객체는 코드 파일이 아니라 TC와 `automation_key`다.
 
 ## Workspace Inventory
 
-| Workspace | Purpose | Contained surfaces | Primary checklist |
-|-----------|---------|--------------------|-------------------|
-| Generate Raw | TC를 불러오고 LLM/Webwright 설정과 prompt를 구성해 raw code/action/artifact 생성 | Dashboard, Source Import, Cases, LLM/API Key Setup, Prompt Composer, Webwright Generate, Raw Artifacts | D1, D2, D3, D4 |
-| Automation IDE | raw code를 구조화하고 생성된 자동화 프로젝트를 편집·수정·실행·결과·export | Mapping Review, Normalized Flow, Page Object Plan, File Tree, Editor, Runner, Results, Export | D5, D6, D7, D8, C6, C7 |
+| Workspace | Purpose | Main surfaces (PRODUCT_PILLARS) | Checklist |
+|-----------|---------|----------------------------------|-----------|
+| **Generate Raw** | TC import → LLM/prompt → Webwright raw code/action/artifact | Dashboard, Source Import, Cases, LLM/API Key, Prompt Composer, Webwright Runs, Raw Artifacts | D3, D4 |
+| **Automation IDE** | structure → edit → run → results → export | Mapping Review, Normalized Flow, POM Plan, Structure Validation, File Tree, Editor, Runner, Results, Export | D5, D6, D7*, D8* |
+| **Supporting** | first-run setup, global config | Setup Wizard, Settings | D2, D9 |
+
+\* Runner, Results, Export는 Automation IDE **내부 패널**이다. peer top-level product area가 아니다.
 
 Setup and Settings are supporting surfaces outside the two product workspaces.
 
 ## Navigation Shell
 
-These routes/components may exist internally, but the visible navigation should group them by workspace.
+Visible navigation groups routes by workspace. Internal React routes may stay granular; user-facing IA follows PRODUCT_PILLARS.
 
-| Route | Page | Component | Primary checklist |
-|-------|------|-----------|-------------------|
-| `/` | Project Dashboard | `DashboardPage` | D1-04 |
-| `/import` | TC Import | `ImportPage` | D3-01, D3-02 |
-| `/cases` | TC List | `CasesPage` | D3-03 |
-| `/webwright` | Webwright Generate | `WebwrightPage` | D4-01, D4-02, D4-03 |
-| `/mapping` | Mapping & Review | `MappingPage` | D5-01, D5-02, D5-03 |
-| `/ide` | Project IDE | `IdePage` | D6-01-D6-06 |
-| `/runner` | Runner Panel | `RunnerPage` | D7-01, D7-02 |
-| `/results` | Results Panel | `ResultsPage` | D8-01, D8-02 |
-| `/export` | Export Panel | `ExportPage` | D8-03 |
+### Generate Raw — visible nav
+
+| Route | Page | Component | Checklist | Notes |
+|-------|------|-----------|-----------|-------|
+| `/` | Project Dashboard | `DashboardPage` | D1-04 | workspace entry + project switch |
+| `/import` | TC Import | `ImportPage` | D3-01, D3-02 | source connector + preview |
+| `/cases` | TC List | `CasesPage` | D3-03 | TC-centric hub |
+| `/prompt` | Prompt Composer | planned | D4-05, D4-06 | batch/per-case prompt, presets, preview |
+| `/llm-settings` | LLM/API Key Setup | planned or Settings embed | D4-04, D2-03 | keytar-backed secrets |
+| `/webwright` | Webwright Runs | `WebwrightPage` | D4-01, D4-02 | run queue, retry, cancel, logs |
+| `/artifacts` | Raw Artifacts | planned or Webwright tab | D4-03 | script, trajectory, screenshots |
+
+Current baseline shell (`D1-01`) groups Import/Cases/Webwright under Generate Raw. Prompt Composer and Raw Artifacts routes are planned refinements aligned with PRODUCT_PILLARS nav.
+
+### Automation IDE — visible nav
+
+| Route | Page | Component | Checklist | Notes |
+|-------|------|-----------|-----------|-------|
+| `/mapping` | Mapping & Review | `MappingPage` | D5-01–D5-03 | TC step ↔ raw action |
+| `/structure/flow` | Normalized Flow | planned | D5-04 | StructuredFlow editor |
+| `/structure/page-objects` | Page Object Plan | planned | D5-05 | POM method planner |
+| `/structure/validation` | Structure Validation | planned | D5-06 | stale/conflict panel |
+| `/ide` | Project IDE | `IdePage` | D6-01–D6-08 | file tree, editor, embedded run/export |
+| `/runner` | Runner Panel | `RunnerPage` | D7-01, D7-02 | **embedded panel**, not peer workspace |
+| `/results` | Results Panel | `ResultsPage` | D8-01, D8-02 | **embedded panel** |
+| `/export` | Export Panel | `ExportPage` | D8-03 | **embedded panel** |
+
+Current baseline maps Mapping, IDE, Runner, Results, Export under Automation IDE workspace switcher.
+
+### Supporting — global
+
+| Route | Page | Component | Checklist |
+|-------|------|-----------|-----------|
 | `/settings` | Settings | `SettingsPage` | D9-01 |
-| setup gate | Setup Wizard | `SetupWizard` | D2-01-D2-07 |
+| setup gate | Setup Wizard | `SetupWizard` | D2-01–D2-07 |
 
-### Workspace Route Grouping
+### Workspace route grouping (target IA)
 
 ```text
 Generate Raw
   /
   /import
   /cases
-  future: /prompt
-  future: /llm-settings
+  /prompt
+  /llm-settings
   /webwright
+  /artifacts
 
 Automation IDE
   /mapping
-  future: /structure/flow
-  future: /structure/page-objects
-  future: /structure/validation
+  /structure/flow
+  /structure/page-objects
+  /structure/validation
   /ide
-  /runner
-  /results
-  /export
+  /runner      # panel inside IDE workspace
+  /results     # panel inside IDE workspace
+  /export      # panel inside IDE workspace
+
+Supporting
+  setup gate
+  /settings
 ```
 
-Runner, Results, and Export are panels inside the Automation IDE workspace. They can keep routes for implementation convenience, but they should not be presented as peer top-level product areas.
+## Handoff Surfaces
+
+PRODUCT_PILLARS handoff contract를 GUI에서 지원한다.
+
+| Direction | Trigger | GUI behavior | Checklist |
+|-----------|---------|--------------|-----------|
+| W1 → W2 | TC ready (stable `automation_key`, Webwright run + raw actions) | Open Mapping in Automation IDE with selected TC | D1-05, D3-03 |
+| W2 → W1 | missing raw action, prompt issue, Webwright rerun needed | Jump to Generate Raw → Webwright with TC context; preserve selection | D1-06, D4-02 |
+| W2 internal (structure → runner) | approved structure / generated files | Run from IDE/Runner panel without leaving workspace | D6-07, D7-01 |
+| W2 internal (runner → structure) | failed result linked to mapping/POM | Jump to Mapping, Flow, or generated file from result row | D8-01, D8-02, D6-08 |
 
 ## Global UI Contracts
 
@@ -76,7 +115,9 @@ Checklist: D2-01-D2-07
 
 ### Purpose
 
-Prepare the local environment before the main app opens.
+Prepare the local environment before the main app opens. **One-time onboarding gate** — not the only place to change these values.
+
+After `setupComplete`, the same configuration must remain editable in [Settings](#settings) (D9-02). Optional full wizard re-run: D9-03.
 
 ### Required Steps
 
@@ -95,6 +136,17 @@ Prepare the local environment before the main app opens.
 - Full OAuth login.
 - Remote SaaS account management.
 - Editing generated code.
+- Locking Setup values after first run (post-setup edit belongs in Settings).
+
+### Field parity with Settings (D9-02)
+
+| Setup Wizard step (D2) | Settings re-edit (D9-02) |
+|------------------------|--------------------------|
+| Webwright Root (D2-01) | Webwright root path + browse |
+| Python (D2-02) | Python / venv path |
+| API Provider + Key (D2-03) | Provider selector + keytar secret update |
+| Playwright / Smoke (D2-04, D2-05) | Health check + smoke via `/settings/validate` |
+| Project Path (D2-06) | Generator default project root |
 
 ## Project Dashboard
 
@@ -349,20 +401,26 @@ Preview and write execution results back to the original TC management target fr
 
 ## Settings
 
-Checklist: D9-01
+Checklist: D9-01, D9-02, D9-03
 
 ### Purpose
 
-Configure Webwright, generator, runner, and integrations without storing secrets in plain text.
+Configure Webwright, generator, runner, and integrations **at any time after Setup Wizard**, without storing secrets in plain text. Setup Wizard (D2) is first-run onboarding; Settings is the durable edit surface.
 
 ### Required Content
 
+- **D9-01:** integrations, runner defaults, template paths, execution mode (baseline may include raw JSON editor).
+- **D9-02:** form-level re-edit of all D2 fields (see Setup Wizard field parity table), Save via `PUT /settings`, re-validate via `/settings/validate` or `/health`.
+- **D9-03 (optional):** action to re-open Setup Wizard from Settings while keeping `setupComplete` true.
+
+Shared fields (D9-02 parity with D2):
+
 - Webwright root, Python path, execution mode.
+- API provider + secret entry buttons that write to keytar (never echo stored secrets into settings JSON).
 - Base/model config names.
 - Generated project root/template path.
 - Default browser/env/headless.
 - Integration base URLs and enabled flags.
-- Secret entry buttons that write to keytar.
 
 ### APIs
 

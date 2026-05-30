@@ -1,16 +1,16 @@
 # Next Actions
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
-Goal: keep the next development batch to roughly one PR. Direction lives in [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md). Progress should be tracked by flipping exactly one line in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md) from `[ ]` to `[x]`.
+Goal: keep the next development batch to roughly one PR. Direction lives in [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md). **Product workspace IA** lives in [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md). Progress should be tracked by flipping exactly one line in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md) from `[ ]` to `[x]`.
 
 **`[x]` = baseline shipped, not full product parity.** A checked line means the architecture-level baseline for that item exists and has been verified enough to support the next dependent checklist line.
 
 ## Spec Sources
 
 - [Architecture](../webwright_automation_generator_architecture.md): product definition, system boundaries, TC-centered flow, GUI/worker/generated-project responsibilities.
-- [Spec Index](./SPEC_INDEX.md): implementation-facing spec document map.
-- [Product Workspaces](./PRODUCT_PILLARS.md): top-level 2-workspace product structure.
+- [Spec Index](./SPEC_INDEX.md): implementation-facing spec document map and workspace map.
+- [Product Workspaces](./PRODUCT_PILLARS.md): top-level 2-workspace product structure, handoff, completion signals.
 - [API Spec](./API_SPEC.md): Local Worker HTTP/WebSocket contract.
 - [Screen Inventory](./SCREEN_INVENTORY.md): GUI screen responsibilities and connected APIs.
 - [UI/UX Direction](./UI_UX_DIRECTION.md): Cursor-inspired IDE/workbench interaction direction.
@@ -33,23 +33,22 @@ Goal: keep the next development batch to roughly one PR. Direction lives in [web
 
 ## Current batch
 
-**Section:** A1. Monorepo / DevEnv
+**Section:** D1. 공통 / Shell
 
 **Checklist line (exact line done when this is `[x]`):**
 
-- [ ] **A1-04** 통합 dev 스크립트 — §4.1 | Phase 0 | Layer: Infra | Depends: A1-02, A1-03
+- [ ] **D1-02** Zustand 전역 상태 — §5.1 | Phase 0 | Layer: GUI | Depends: A1-02
 
 ### Scope (only what closes the line above)
 
-- Verify root `package.json` provides a single entry to run worker + desktop together (`npm run dev`) and separate targets (`dev:worker`, `dev:desktop`).
-- Confirm `install:worker` installs Python deps and both dev targets start without manual path hacks.
+- Verify Zustand store holds baseline global state: setup flag, current project, logs buffer.
+- Confirm pages read/write shared state without duplicating local-only copies of the same data.
 - If already present, close the checklist line with a short note such as `(baseline scaffold verified)`.
 
 ### Out of scope for this batch
 
-- Production packaging, CI pipelines, or Docker.
-- Worker auto-start from Electron main process (A4-01).
-- README/version pinning polish (A1-05).
+- Workspace handoff state (D1-05, D1-06).
+- Cursor-like layout panels (D1-03).
 - Marking multiple already-present checklist lines in the same PR.
 
 ---
@@ -60,13 +59,13 @@ Pick only unchecked lines from below when replacing **Current batch**.
 
 | Suggested order | Section | Checklist line |
 |-----------------|---------|----------------|
-| 1 | A1 | A1-05 루트 README, `.gitignore`, Python/Node 버전 고정 — §15 |
-| 2 | A4 | A4-01 Worker subprocess 자동 기동 — §5.2 |
+| 1 | D1 | D1-03 Cursor-like layout/activity bar/context/log panels — Spec: UI_UX_DIRECTION |
+| 2 | D1 | D1-04 Project Dashboard — §10.2 |
 
 ## Review Notes
 
-- `IMPLEMENTATION_CHECKLIST.md` is currently the authoritative progress tracker, but it appears behind the repository state because all lines are unchecked while baseline files already exist.
-- Raw-to-structured conversion needs its own schema work before C7/C8 can be considered durable; see `STRUCTURING_SPEC.md` and `DB_SCHEMA.md`.
-- UI work should be organized around the two product workspaces, not a flat list of tabs; see `PRODUCT_PILLARS.md`.
+- All docs under `docs/` are aligned to [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md) as of 2026-05-31 (workspace map, handoff, nav IA).
+- GUI implementation should follow **Generate Raw** vs **Automation IDE** grouping; Runner/Results/Export are IDE panels, not peer workspaces.
+- Raw-to-structured conversion needs schema work before C7/C8 are durable; see `STRUCTURING_SPEC.md` and `DB_SCHEMA.md`.
 - Prefer small sync PRs that verify and mark one baseline at a time before moving into deeper Phase 1 feature work.
 - Keep each batch tied to the architecture principle it supports: TC as the center, Webwright raw code as material, GUI as orchestrator, worker as local service, and generated project as independently runnable automation.

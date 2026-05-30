@@ -15,6 +15,13 @@ from worker.services.result_export import export_excel, export_google_sheets, ex
 router = APIRouter(prefix="/projects/{project_id}/executions", tags=["executions"])
 
 
+def _get_execution_run(session: Session, project_id: str, execution_id: str) -> ExecutionRun:
+    run = session.get(ExecutionRun, execution_id)
+    if not run or run.project_id != project_id:
+        raise HTTPException(404, "Execution not found")
+    return run
+
+
 async def _run_execution(project_id: str, request: ExecutionRequest, job_id: str):
     from worker.core.database import engine
     from sqlmodel import Session as SQLSession
@@ -42,9 +49,7 @@ def list_executions(project_id: str, session: Session = Depends(get_session)):
 
 @router.get("/{execution_id}")
 def get_execution(project_id: str, execution_id: str, session: Session = Depends(get_session)):
-    run = session.get(ExecutionRun, execution_id)
-    if not run:
-        raise HTTPException(404, "Execution not found")
+    run = _get_execution_run(session, project_id, execution_id)
     results = session.exec(select(ExecutionResult).where(ExecutionResult.execution_run_id == execution_id)).all()
     summary = None
     if run.result_path and Path(run.result_path).exists():
@@ -55,6 +60,9 @@ def get_execution(project_id: str, execution_id: str, session: Session = Depends
 @router.post("/{execution_id}/rerun-failed")
 async def rerun_failed_execution(project_id: str, execution_id: str, background: BackgroundTasks, session: Session = Depends(get_session)):
     project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    _get_execution_run(session, project_id, execution_id)
     job_id = f"rerun_{execution_id}"
     background.add_task(rerun_failed, session, project, execution_id, job_id)
     return {"jobId": job_id, "status": "queued"}
@@ -62,9 +70,7 @@ async def rerun_failed_execution(project_id: str, execution_id: str, background:
 
 @router.post("/{execution_id}/cancel")
 def cancel_execution(project_id: str, execution_id: str, session: Session = Depends(get_session)):
-    run = session.get(ExecutionRun, execution_id)
-    if not run:
-        raise HTTPException(404, "Execution not found")
+    run = _get_execution_run(session, project_id, execution_id)
     run.status = "cancelled"
     session.add(run)
     session.commit()
@@ -76,25 +82,23 @@ export_router = APIRouter(prefix="/projects/{project_id}/executions/{execution_i
 
 @export_router.post("/testrail-clone")
 async def export_tc(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
-    run = session.get(ExecutionRun, execution_id)
-    if not run:
-        raise HTTPException(404, "Execution not found")
+    run = _get_execution_run(session, project_id, execution_id)
     return await export_testrail_clone(session, run, request.preview)
 
 
 @export_router.post("/testrail")
 async def export_tr(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
-    run = session.get(ExecutionRun, execution_id)
+    run = _get_execution_run(session, project_id, execution_id)
     return await export_testrail(session, run, request.preview)
 
 
 @export_router.post("/excel")
 def export_xl(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
-    run = session.get(ExecutionRun, execution_id)
+    run = _get_execution_run(session, project_id, execution_id)
     return export_excel(session, run, request.preview)
 
 
 @export_router.post("/google-sheets")
 async def export_gs(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
-    run = session.get(ExecutionRun, execution_id)
+    run = _get_execution_run(session, project_id, execution_id)
     return await export_google_sheets(session, run, request.preview)

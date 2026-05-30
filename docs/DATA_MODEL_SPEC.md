@@ -1,11 +1,23 @@
 # Data Model Spec
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 이 문서는 Local Worker의 SQLite/SQLModel 데이터 모델 계약을 정리한다. 모델은 `automation_key`를 중심으로 TC, raw run, mapping, structured flow, generated file, execution result를 연결한다.
 
 Full relational DDL is specified in [DB_SCHEMA.md](./DB_SCHEMA.md). Raw-to-structured conversion is specified in [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md).
 Artifact-backed self-healing is specified in [SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md).
+
+## Product Workspace Ownership
+
+[PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md) 기준 엔티티 소유 workspace:
+
+| Workspace | Primary entities | Handoff object |
+|-----------|------------------|----------------|
+| **Generate Raw** | `TestCase`, `WebwrightRun`, `RawAction`, prompt payload (C2), import metadata | `TestCase` + latest `WebwrightRun` + `RawAction[]` |
+| **Automation IDE** | `CaseActionMapping`, `StructuredFlow`, `StructuredStep`, `PageObject`, `PageObjectMethod`, `GeneratedFile`, `ExecutionRun`, `ExecutionResult`, `ExportLog`, `HealingProposal` | reviewed mappings, generated files, execution results |
+| **Shared** | `Project`, settings (file), credentials (OS store) | `project_id`, app config |
+
+Reverse handoff (Automation IDE → Generate Raw rerun) reuses `TestCase` and `WebwrightRun`; no separate handoff table at baseline.
 
 ## Storage Principles
 

@@ -4,20 +4,21 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from worker.core.config import load_settings
+from worker.core.config import get_settings_path, load_settings
 
 
 def check_health() -> dict:
     settings = load_settings()
+    settings_path = get_settings_path()
+    template_path = Path(settings.generator.get("templatePath", ""))
+    webwright_root = settings.webwright.get("root")
     checks = {
         "worker": {"ok": True, "message": "Worker running"},
+        "settings": {"ok": settings_path.exists(), "path": str(settings_path)},
         "python": _check_command(["python", "--version"]),
-        "webwrightRoot": {"ok": bool(settings.webwright.get("root")), "path": settings.webwright.get("root")},
-        "templatePath": {"ok": Path(settings.generator.get("templatePath", "")).exists()},
+        "webwrightRoot": {"ok": bool(webwright_root) and Path(webwright_root).exists(), "path": webwright_root},
+        "templatePath": {"ok": template_path.exists(), "path": str(template_path)},
     }
-    ww_root = settings.webwright.get("root")
-    if ww_root and Path(ww_root).exists():
-        checks["webwrightRoot"]["ok"] = True
     checks["allOk"] = all(v.get("ok", False) for k, v in checks.items() if k != "allOk")
     return checks
 

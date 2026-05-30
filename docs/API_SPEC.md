@@ -1,10 +1,10 @@
 # API Spec
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 Base URL in development: `http://127.0.0.1:8765`
 
-이 문서는 Local Worker(FastAPI)가 Electron GUI와 generated automation project를 연결하기 위해 제공하는 HTTP/WebSocket 계약을 정리한다.
+이 문서는 Local Worker(FastAPI)가 Electron GUI와 generated automation project를 연결하기 위해 제공하는 HTTP/WebSocket 계약을 정리한다. GUI 호출은 [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)의 workspace별 surface와 대응한다.
 
 ## Principles
 
@@ -13,6 +13,16 @@ Base URL in development: `http://127.0.0.1:8765`
 - 모든 프로젝트 종속 리소스는 가능하면 `/projects/{project_id}/...` 아래에 둔다.
 - 장기 작업은 즉시 `jobId`를 반환하고 로그는 `/ws/logs/{job_id}`로 스트리밍한다.
 - `automation_key`는 TC, raw action, structured test, execution result를 잇는 핵심 키다.
+
+## API By Product Workspace
+
+| Workspace | API groups | Primary GUI surfaces |
+|-----------|------------|----------------------|
+| **Generate Raw** | Projects, Cases/Import, Webwright Runs, Prompt (C2), Settings/Health | Dashboard, Import, Cases, Prompt, Webwright, Artifacts |
+| **Automation IDE** | Mapping, Generation, IDE files, Executions, Export, Healing | Mapping, Structure, IDE, Runner/Results/Export panels |
+| **Supporting** | Settings, Health | Setup Wizard, Settings |
+
+Handoff note: reverse handoff (Automation IDE → Generate Raw rerun) reuses **Webwright Runs** and **Cases** APIs with the same `project_id` and `case_id`; no separate handoff endpoint is required at baseline.
 
 ## Status Legend
 

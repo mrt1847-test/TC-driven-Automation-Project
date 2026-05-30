@@ -1,8 +1,10 @@
 # Generated Project Spec
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 Generated automation project는 실제 Playwright/pytest 실행 단위다. GUI 없이도 독립 실행 가능해야 하고, CI에서도 같은 CLI로 실행되어야 한다.
+
+**Product workspace:** primary output of **Automation IDE** ([PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)). Webwright `final_script.py` from Generate Raw is input material, not the final executable project.
 
 ## Design Rules
 

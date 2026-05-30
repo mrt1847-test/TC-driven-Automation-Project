@@ -1,10 +1,10 @@
 # UI/UX Direction
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 이 제품의 UI/UX는 Cursor 같은 작업 중심 IDE를 참고한다. 목표는 마케팅형 SaaS 화면이 아니라, QA 자동화 담당자가 TC를 가져오고, raw automation을 검토하고, 구조화된 프로젝트를 편집·실행하는 로컬 작업 환경이다.
 
-Top-level product structure follows [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md): `TC -> Webwright Raw Code Studio` and `Automation IDE: Structure / Edit / Run`.
+**제품 정보구조의 기준:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md) — `Generate Raw`와 `Automation IDE: Structure / Edit / Run`. flat tab 목록이 아니다.
 
 ## Product Feel
 
@@ -34,7 +34,14 @@ Top: compact titlebar / project switcher / global actions
 Left Activity Bar:
   - Generate Raw
   - Automation IDE
-  - Settings
+  - Settings (supporting, not a product workspace)
+
+Generate Raw secondary nav (when active):
+  - Dashboard, Import, Cases, Prompt, LLM/API Key, Webwright Runs, Raw Artifacts
+
+Automation IDE secondary nav (when active):
+  - Mapping, Flow, POM Plan, Validation, IDE, Runner, Results, Export
+  - Runner/Results/Export are panels, not peer workspaces
 
 Primary Work Area:
   - active workspace surface
@@ -102,6 +109,24 @@ Contained surfaces:
 - export preview
 
 Runner belongs inside Automation IDE as an execution panel, not as an unrelated top-level tab.
+
+## Workspace Handoff UX
+
+Follow [PRODUCT_PILLARS.md — Handoff Contract](./PRODUCT_PILLARS.md#handoff-contract).
+
+| Transition | UX requirement |
+|------------|------------------|
+| Generate Raw → Automation IDE | When TC meets W1 completion signal, offer "Open in Mapping" with `automation_key` selected |
+| Automation IDE → Generate Raw | From mapping gap or result diagnosis, offer "Rerun Webwright" / "Fix in Generate Raw" without losing TC selection |
+| Automation IDE internal | Failed run links to Mapping, Flow, POM plan, or generated file in same workspace |
+| Cross-workspace | Project and selected TC stay visible in shell header or context panel |
+
+## Completion Signals (UI)
+
+Surface readiness using PRODUCT_PILLARS completion signals, not only HTTP success:
+
+- **Generate Raw ready for handoff:** stable `automation_key`, Webwright run completed (or mock), raw actions + artifact paths visible.
+- **Automation IDE useful:** mapping editable, structure/generation runnable, results link to `automation_key`, export preview available.
 
 ## Navigation
 

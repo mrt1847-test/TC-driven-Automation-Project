@@ -8,29 +8,49 @@ const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`
 
 let mainWindow: BrowserWindow | null = null
 let workerProcess: ChildProcessWithoutNullStreams | null = null
+let workerKillTimer: ReturnType<typeof setTimeout> | null = null
 
-function workerEntry(): string {
-  const devPath = join(__dirname, '../../../worker/worker/main.py')
-  if (existsSync(devPath)) return devPath
-  return join(process.resourcesPath, 'worker', 'worker', 'main.py')
+function getWorkerDir(): string {
+  const devWorkerDir = join(__dirname, '../../../worker')
+  if (existsSync(join(devWorkerDir, 'worker', 'main.py'))) return devWorkerDir
+  return join(process.resourcesPath, 'worker')
 }
 
 function startWorker(): void {
-  const workerDir = join(__dirname, '../../../../worker')
+  if (workerProcess) return
+
+  const workerDir = getWorkerDir()
   const python = process.env.PYTHON || 'python'
   workerProcess = spawn(
     python,
     ['-m', 'uvicorn', 'worker.main:app', '--host', '127.0.0.1', '--port', String(WORKER_PORT)],
-    { cwd: workerDir, shell: process.platform === 'win32', env: { ...process.env, TC_STUDIO_DATA_DIR: join(app.getPath('userData'), 'data') } }
+    { cwd: workerDir, env: { ...process.env, TC_STUDIO_DATA_DIR: join(app.getPath('userData'), 'data') } }
   )
   workerProcess.stdout.on('data', (d) => console.log('[worker]', d.toString()))
   workerProcess.stderr.on('data', (d) => console.error('[worker]', d.toString()))
+  workerProcess.on('exit', () => {
+    workerProcess = null
+    if (workerKillTimer) {
+      clearTimeout(workerKillTimer)
+      workerKillTimer = null
+    }
+  })
 }
 
 function stopWorker(): void {
-  if (workerProcess) {
-    workerProcess.kill()
-    workerProcess = null
+  if (!workerProcess) return
+
+  const processToStop = workerProcess
+  workerProcess = null
+  processToStop.kill('SIGTERM')
+  workerKillTimer = setTimeout(() => {
+    if (processToStop.exitCode === null) {
+      processToStop.kill('SIGKILL')
+    }
+    workerKillTimer = null
+  }, 2000)
+  if (typeof workerKillTimer.unref === 'function') {
+    workerKillTimer.unref()
   }
 }
 
@@ -62,6 +82,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => stopWorker())
+app.on('will-quit', () => stopWorker())
 
 ipcMain.handle('get-worker-url', () => WORKER_URL)
 

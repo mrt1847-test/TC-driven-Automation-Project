@@ -1,8 +1,10 @@
 # Self-Healing Spec
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 Webwright는 raw code뿐 아니라 logs, screenshots, trajectory, run metadata를 만든다. 이 산출물은 구조화 이후에도 버리지 않고 selector healing, failure diagnosis, regeneration hint에 활용한다.
+
+**Product workspace:** Automation IDE ([PRODUCT_PILLARS.md — Workspace 2](./PRODUCT_PILLARS.md#workspace-2-automation-ide---structure--edit--run)). Raw artifacts originate in Generate Raw; healing applies after structure and execution inside the IDE workspace.
 
 ## Goal
 

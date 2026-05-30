@@ -1,10 +1,18 @@
 # DB Schema
 
-Last aligned: 2026-05-30
+Last aligned: 2026-05-31
 
 This document defines the relational schema needed to support TC import, Webwright raw action extraction, mapping review, structuring, project generation, execution, and result export.
 
 The current code already has a baseline subset. The schema below is the intended contract for the next durable implementation.
+
+**Product workspace map** ([PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)):
+
+| Layer | Tables | Workspace |
+|-------|--------|-----------|
+| Project shell | `projects` | Shared |
+| Generate Raw | `test_cases`, `webwright_runs`, `raw_actions`, artifact metadata | Generate Raw |
+| Automation IDE | `case_action_mappings`, `structured_flows`, `structured_steps`, `page_objects`, `page_object_methods`, `generated_files`, `execution_runs`, `execution_results`, `export_logs`, healing tables | Automation IDE |
 
 ## Schema Principles
 

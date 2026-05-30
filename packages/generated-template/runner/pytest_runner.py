@@ -28,7 +28,7 @@ def run_pytest(case_keys: list[str], env: str, browser: str, headed: bool, run_i
             capture_output=True,
             text=True,
             cwd=str(project_root()),
-            env={**__import__("os").environ, **env_vars},
+            env={**__import__("os").environ, "TC_ENV": env},
         )
         status = "passed" if proc.returncode == 0 else "failed"
         error = proc.stderr.strip() or proc.stdout.strip() if proc.returncode != 0 else None

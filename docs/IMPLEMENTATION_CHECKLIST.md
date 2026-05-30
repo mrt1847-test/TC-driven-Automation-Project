@@ -1,6 +1,6 @@
 # Implementation Checklist
 
-**Last updated:** 2026-05-30  
+**Last updated:** 2026-05-31  
 **Current phase:** Phase 0  
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
@@ -21,11 +21,11 @@
 
 | Category | Done | Total |
 |----------|------|-------|
-| A. Infra | 3 | 33 |
+| A. Infra | 25 | 33 |
 | B. Template | 0 | 18 |
 | C. Worker | 0 | 74 |
-| D. GUI | 0 | 44 |
-| E. E2E | 0 | 7 |
+| D. GUI | 1 | 47 |
+| E. E2E | 0 | 8 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
 | H. MVP Gates | 0 | 4 |
@@ -40,18 +40,18 @@
 - [x] **A1-01** 루트 monorepo 구조 생성 — §4.1 | Phase 0 | Layer: Infra (baseline scaffold verified)
 - [x] **A1-02** desktop: Electron + React + TypeScript + Tailwind — §5.1 | Phase 0 | Layer: Infra | Depends: A1-01 (baseline scaffold verified; dev launch confirmed)
 - [x] **A1-03** worker: FastAPI + Uvicorn + Pydantic + SQLModel — §5.2 | Phase 0 | Layer: Infra | Depends: A1-01 (baseline scaffold verified; root and /health respond 200)
-- [ ] **A1-04** 통합 dev 스크립트 — §4.1 | Phase 0 | Layer: Infra | Depends: A1-02, A1-03
-- [ ] **A1-05** 루트 README, `.gitignore`, Python/Node 버전 고정 — §15 | Phase 0 | Layer: Infra | Depends: A1-01
+- [x] **A1-04** 통합 dev 스크립트 — §4.1 | Phase 0 | Layer: Infra | Depends: A1-02, A1-03 (baseline scaffold verified; dev, dev:worker, dev:desktop confirmed)
+- [x] **A1-05** 루트 README, `.gitignore`, Python/Node 버전 고정 — §15 | Phase 0 | Layer: Infra | Depends: A1-01 (baseline scaffold verified; README, gitignore, .nvmrc, .python-version)
 
 ### A2. SQLite / Data Layer — §6
 
-- [ ] **A2-01** `Project` 모델 + migration — §6.1 | Phase 0 | Layer: Worker | Depends: A1-03
-- [ ] **A2-02** `TestCase` 모델 — §6.2 | Phase 0 | Layer: Worker | Depends: A2-01
-- [ ] **A2-03** `WebwrightRun` 모델 — §6.3 | Phase 0 | Layer: Worker | Depends: A2-01
-- [ ] **A2-04** `RawAction` 모델 — §6.4 | Phase 0 | Layer: Worker | Depends: A2-03
-- [ ] **A2-05** `CaseActionMapping` 모델 — §6.5 | Phase 0 | Layer: Worker | Depends: A2-02, A2-04
-- [ ] **A2-06** `ExecutionRun` / `ExecutionResult` 모델 — §6.6, §6.7 | Phase 0 | Layer: Worker | Depends: A2-01
-- [ ] **A2-07** DB 초기화 및 프로젝트별 데이터 격리 — §5.3 | Phase 0 | Layer: Worker | Depends: A2-06
+- [x] **A2-01** `Project` 모델 + migration — §6.1 | Phase 0 | Layer: Worker | Depends: A1-03 (baseline scaffold verified; init_db creates project table; POST/GET /projects persist)
+- [x] **A2-02** `TestCase` 모델 — §6.2 | Phase 0 | Layer: Worker | Depends: A2-01 (baseline scaffold verified; testcase table + Excel import/list)
+- [x] **A2-03** `WebwrightRun` 모델 — §6.3 | Phase 0 | Layer: Worker | Depends: A2-01 (baseline scaffold verified; SQLModel table, init_db create_all, and Webwright run create/list flow confirmed)
+- [x] **A2-04** `RawAction` 모델 — §6.4 | Phase 0 | Layer: Worker | Depends: A2-03 (baseline scaffold verified; SQLModel table, extraction persistence, and actions list flow confirmed)
+- [x] **A2-05** `CaseActionMapping` 모델 — §6.5 | Phase 0 | Layer: Worker | Depends: A2-02, A2-04 (baseline scaffold verified; SQLModel table, auto-map persistence, and mappings list flow confirmed)
+- [x] **A2-06** `ExecutionRun` / `ExecutionResult` 모델 — §6.6, §6.7 | Phase 0 | Layer: Worker | Depends: A2-01 (baseline scaffold verified; SQLModel tables, execution create/list/detail, and result persistence confirmed)
+- [x] **A2-07** DB 초기화 및 프로젝트별 데이터 격리 — §5.3 | Phase 0 | Layer: Worker | Depends: A2-06 (baseline scaffold verified; configured data-dir create_all and project-scoped case/run/execution isolation confirmed)
 - [ ] **A2-08** `CaseActionMappingAction` join 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05
 - [ ] **A2-09** `StructuredFlow` / `StructuredStep` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05
 - [ ] **A2-10** `PageObject` / `PageObjectMethod` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09
@@ -63,25 +63,25 @@
 
 ### A3. Settings / Credential — §8
 
-- [ ] **A3-01** `settings.json` 스키마 — §8.1 | Phase 0 | Layer: Worker | Depends: A1-03
-- [ ] **A3-02** executionMode 설정 UI + 저장 — §8.1 | Phase 0 | Layer: GUI | Depends: A3-01
-- [ ] **A3-03** Electron keytar 연동 — §8.2 | Phase 0 | Layer: GUI | Depends: A1-02
-- [ ] **A3-04** Settings CRUD API — §8 | Phase 0 | Layer: Worker | Depends: A3-01
-- [ ] **A3-05** Health check API — §8 | Phase 0 | Layer: Worker | Depends: A3-04
-- [ ] **A3-06** Setup Wizard 7단계 — §10.1 | Phase 0 | Layer: GUI | Depends: A3-05, A4-02
+- [x] **A3-01** `settings.json` 스키마 — §8.1 | Phase 0 | Layer: Worker | Depends: A1-03 (baseline scaffold verified; AppSettings defaults create persisted settings.json and validate Webwright/generator/runner/integration sections)
+- [x] **A3-02** executionMode 설정 UI + 저장 — §8.1 | Phase 0 | Layer: GUI | Depends: A3-01 (baseline scaffold verified; Settings UI exposes Native/WSL mode and save/reload persists through Worker settings API)
+- [x] **A3-03** Electron keytar 연동 — §8.2 | Phase 0 | Layer: GUI | Depends: A1-02 (baseline scaffold verified; keytar-backed main IPC, preload helpers, renderer types, and wizard API key storage confirmed)
+- [x] **A3-04** Settings CRUD API — §8 | Phase 0 | Layer: Worker | Depends: A3-01 (baseline scaffold verified; GET/PUT /settings validate AppSettings and persist settings.json)
+- [x] **A3-05** Health check API — §8 | Phase 0 | Layer: Worker | Depends: A3-04 (baseline scaffold verified; /health and /settings/validate cover worker/settings/python/template/Webwright readiness)
+- [x] **A3-06** Setup Wizard 7단계 — §10.1 | Phase 0 | Layer: GUI | Depends: A3-05, A4-02 (baseline scaffold verified; 7-step setup flow saves settings and runs health validation)
 
 ### A4. Electron ↔ Worker 통신 — §5.1, §5.2
 
-- [ ] **A4-01** Worker subprocess 자동 기동 — §5.2 | Phase 0 | Layer: GUI | Depends: A1-02, A1-03
-- [ ] **A4-02** HTTP API 클라이언트 (TanStack Query) — §5.2 | Phase 0 | Layer: GUI | Depends: A4-01
-- [ ] **A4-03** WebSocket/SSE 로그 스트림 — §5.2 | Phase 0 | Layer: Worker, GUI | Depends: A4-01
-- [ ] **A4-04** CORS / localhost 바인딩 — §5.2 | Phase 0 | Layer: Worker | Depends: A1-03
-- [ ] **A4-05** Worker graceful shutdown — §5.2 | Phase 0 | Layer: GUI | Depends: A4-01
+- [x] **A4-01** Worker subprocess 자동 기동 — §5.2 | Phase 0 | Layer: GUI | Depends: A1-02, A1-03 (baseline scaffold verified; Electron-only dev reaches worker /)
+- [x] **A4-02** HTTP API 클라이언트 (TanStack Query) — §5.2 | Phase 0 | Layer: GUI | Depends: A4-01 (baseline scaffold verified; initApiBase + DashboardPage useQuery projects)
+- [x] **A4-03** WebSocket/SSE 로그 스트림 — §5.2 | Phase 0 | Layer: Worker, GUI | Depends: A4-01 (baseline scaffold verified; /ws/logs/{job_id}, buffered broadcast, and renderer connectLogStream confirmed)
+- [x] **A4-04** CORS / localhost 바인딩 — §5.2 | Phase 0 | Layer: Worker | Depends: A1-03 (baseline scaffold verified; 127.0.0.1 bind + CORS allows localhost:5173)
+- [x] **A4-05** Worker graceful shutdown — §5.2 | Phase 0 | Layer: GUI | Depends: A4-01 (baseline scaffold verified; Electron lifecycle stops worker subprocess with SIGTERM and fallback cleanup)
 
 ### A5. Project API — §7.1
 
-- [ ] **A5-01** `GET/POST /projects` — §7.1 | Phase 0 | Layer: Worker | Depends: A2-01
-- [ ] **A5-02** `GET/PATCH/DELETE /projects/{id}` — §7.1 | Phase 0 | Layer: Worker | Depends: A5-01
+- [x] **A5-01** `GET/POST /projects` — §7.1 | Phase 0 | Layer: Worker | Depends: A2-01 (baseline scaffold verified; list/create return §6.1 project fields)
+- [x] **A5-02** `GET/PATCH/DELETE /projects/{id}` — §7.1 | Phase 0 | Layer: Worker | Depends: A5-01 (baseline scaffold verified; get, patch, delete, and missing-project 404 responses confirmed)
 
 ---
 
@@ -235,15 +235,28 @@
 
 ## D. GUI 작업공간 (Electron + React)
 
-### D1. 공통 / Shell
+Product workspace alignment: [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md). GUI checklist items belong to **Generate Raw**, **Automation IDE**, or **supporting** shell—not a flat tab list.
 
-- [ ] **D1-01** 2-workspace shell (`Generate Raw`, `Automation IDE`) — Spec: PRODUCT_PILLARS, UI_UX_DIRECTION | Phase 0-1 | Layer: GUI | Depends: A1-02
+| Workspace | Checklist sections | Primary surfaces |
+|-----------|-------------------|------------------|
+| **Generate Raw** | D3, D4 | Import, Cases, Prompt/LLM, Webwright, Raw Artifacts |
+| **Automation IDE** | D5, D6, D7*, D8* | Mapping, Structure, IDE, Runner/Results/Export panels |
+| **Supporting** | D1, D2, D9 | 2-workspace shell, Setup Wizard (first run), Settings (post-setup re-edit) |
+
+\* D7/D8 are **embedded panels** inside Automation IDE, not peer product workspaces.
+
+### D1. 공통 / Shell — Workspace: supporting + cross-workspace
+
+- [x] **D1-01** 2-workspace shell (`Generate Raw`, `Automation IDE`) — Spec: PRODUCT_PILLARS, UI_UX_DIRECTION | Phase 0-1 | Layer: GUI | Depends: A1-02 (baseline shell verified; workspace switcher + grouped nav)
 - [ ] **D1-02** Zustand 전역 상태 — §5.1 | Phase 0 | Layer: GUI | Depends: A1-02
 - [ ] **D1-03** Cursor-like layout/activity bar/context/log panels — Spec: UI_UX_DIRECTION | Phase 0 | Layer: GUI | Depends: D1-01
 - [ ] **D1-04** Project Dashboard — §10.2 | Phase 0 | Layer: GUI | Depends: A5-01
 - [ ] **D1-05** selected TC/workspace handoff state — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: D1-02, D3-03
+- [ ] **D1-06** Generate Raw rerun handoff (W2→W1) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: GUI | Depends: D1-05, D4-02
 
-### D2. Setup Wizard — §10.1
+### D2. Setup Wizard — §10.1 — Workspace: supporting
+
+First-run onboarding only. Values persist to `settings.json` / keytar; **post-setup re-edit is D9-02**, not a second wizard run unless user chooses D9-03.
 
 - [ ] **D2-01** Webwright Root 선택 — §10.1 | Phase 0 | Layer: GUI | Depends: A3-06
 - [ ] **D2-02** Python venv 선택 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-01
@@ -253,14 +266,14 @@
 - [ ] **D2-06** 프로젝트 경로 설정 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-05
 - [ ] **D2-07** Wizard 완료 + 저장 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-06
 
-### D3. TC Import / List — §10.3
+### D3. TC Import / List — §10.3 — Workspace: Generate Raw
 
 - [ ] **D3-01** source type 선택 — §10.3 | Phase 1 | Layer: GUI | Depends: C1-02
 - [ ] **D3-02** Excel import UI — §10.3 | Phase 1 | Layer: GUI | Depends: C1-03
 - [ ] **D3-03** TC List — §10.3 | Phase 1 | Layer: GUI | Depends: C1-07
 - [ ] **D3-04** source connector preview/config UI — Spec: PRODUCT_PILLARS, SCREEN_INVENTORY | Phase 3-4 | Layer: GUI | Depends: C1-04
 
-### D4. Webwright Generate — §10.4
+### D4. Webwright Generate — §10.4 — Workspace: Generate Raw
 
 - [ ] **D4-01** TC별 status 테이블 — §10.4 | Phase 1 | Layer: GUI | Depends: C4-04
 - [ ] **D4-02** Run/Stop/Retry — §10.4 | Phase 1 | Layer: GUI | Depends: D4-01
@@ -269,7 +282,7 @@
 - [ ] **D4-05** prompt composer(batch shared + per-case override) — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: C2-04
 - [ ] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06
 
-### D5. Automation IDE: Mapping & Structure — §10.5
+### D5. Automation IDE: Mapping & Structure — §10.5 — Workspace: Automation IDE
 
 - [ ] **D5-01** 3-pane layout — §10.5 | Phase 1 | Layer: GUI | Depends: C6-06
 - [ ] **D5-02** raw code/screenshot/logs — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01
@@ -279,7 +292,7 @@
 - [ ] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09
 - [ ] **D5-07** selector candidate/evidence viewer — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-02
 
-### D6. Automation IDE: Project Editing — §10.6
+### D6. Automation IDE: Project Editing — §10.6 — Workspace: Automation IDE
 
 - [ ] **D6-01** 파일 트리 — §10.6 | Phase 2 | Layer: GUI | Depends: C11-01
 - [ ] **D6-02** Monaco Editor — §10.6 | Phase 2 | Layer: GUI | Depends: C11-02
@@ -290,21 +303,25 @@
 - [ ] **D6-07** runner/results/export panels embedded in Automation IDE — Spec: PRODUCT_PILLARS | Phase 2 | Layer: GUI | Depends: D6-05, D8-01
 - [ ] **D6-08** failure diagnosis + healing proposal panel — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-05, D6-06
 
-### D7. Runner — §10.7
+### D7. Automation IDE — Runner Panel (embedded) — §10.7
 
 - [ ] **D7-01** 실행 옵션 UI — §10.7 | Phase 1 | Layer: GUI | Depends: C9-05
 - [ ] **D7-02** 실시간 로그 — §10.7 | Phase 1 | Layer: GUI | Depends: A4-03
 
-### D8. Execution Result / Export — §10.8
+### D8. Automation IDE — Results & Export (embedded) — §10.8
 
 - [ ] **D8-01** summary + case table — §10.8 | Phase 1 | Layer: GUI | Depends: C9-04
 - [ ] **D8-02** artifact 링크 — §10.8 | Phase 1 | Layer: GUI | Depends: D8-01
 - [ ] **D8-03** Result Export + preview — §10.8 | Phase 3-4 | Layer: GUI | Depends: C10-06
 - [ ] **D8-04** accept/reject healing proposal + rerun failed UI — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: D6-08, C12-06
 
-### D9. Settings — §10
+### D9. Settings — §10 — Workspace: supporting
+
+Persistent settings surface after Setup Wizard. Same fields as D2 must remain editable here (not one-time only).
 
 - [ ] **D9-01** integrations/webwright/LLM/runner UI — §10 | Phase 0 | Layer: GUI | Depends: A3-04
+- [ ] **D9-02** post-setup re-edit (D2 field parity: Webwright root, Python, API provider/key, project root, execution mode) + `/settings/validate` — §10.1, Spec: SCREEN_INVENTORY | Phase 0 | Layer: GUI | Depends: D2-07, D9-01, A3-05
+- [ ] **D9-03** Settings에서 Setup Wizard 재실행 (선택, `setupComplete` 유지) — §10.1 | Phase 0 | Layer: GUI | Depends: D9-02, A3-06
 
 ---
 
@@ -316,7 +333,8 @@
 - [ ] **E-04** Project Generation E2E — §11.4 | Phase 1 | Layer: E2E | Depends: C8-03
 - [ ] **E-05** Automation IDE runner E2E — §11.5 | Phase 1 | Layer: E2E | Depends: D6-07, D7-02
 - [ ] **E-06** Result Export E2E — §11.6 | Phase 3-4 | Layer: E2E | Depends: D8-03
-- [ ] **E-07** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06
+- [ ] **E-07** Reverse handoff rerun E2E (Automation IDE → Generate Raw) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: E2E | Depends: D1-06, E-02
+- [ ] **E-08** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06
 
 ---
 
@@ -350,6 +368,6 @@
 
 - [ ] **I-01** Project Health Check — §17.4 | Phase 5 | Layer: Worker | Depends: C9-01
 - [ ] **I-02** Install Dependencies 버튼 — §12.3 | Phase 5 | Layer: GUI | Depends: I-01
-- [ ] **I-03** Smoke test — §10.1 | Phase 0 | Layer: E2E | Depends: D2-05
+- [ ] **I-03** Smoke test — §10.1 | Phase 0 | Layer: E2E | Depends: D2-05, D9-02
 - [ ] **I-04** CI standalone 가이드 — §3.5 | Phase 5 | Layer: Docs | Depends: B2-07
 - [ ] **I-05** Electron Windows installer — §15 | Phase 5 | Layer: Infra | Depends: A1-02

@@ -25,7 +25,7 @@ async def _process_runs(project_id: str, request: WebwrightRunRequest, job_id: s
         use_mock = not settings.webwright.get("root")
         for case_id in request.case_ids:
             case = session.get(TestCase, case_id)
-            if not case:
+            if not case or case.project_id != project_id:
                 continue
             if use_mock:
                 run = await create_mock_run(session, project_id, case, job_id)
@@ -63,10 +63,10 @@ def get_run(project_id: str, run_id: str, session: Session = Depends(get_session
 @router.post("/{run_id}/retry")
 async def retry_run(project_id: str, run_id: str, background: BackgroundTasks, session: Session = Depends(get_session)):
     run = session.get(WebwrightRun, run_id)
-    if not run:
+    if not run or run.project_id != project_id:
         raise HTTPException(404, "Run not found")
     case = session.get(TestCase, run.test_case_id)
-    if not case:
+    if not case or case.project_id != project_id:
         raise HTTPException(404, "Case not found")
     job_id = f"ww_retry_{run_id}"
     background.add_task(_process_runs, project_id, WebwrightRunRequest(case_ids=[case.id]), job_id)
@@ -76,7 +76,7 @@ async def retry_run(project_id: str, run_id: str, background: BackgroundTasks, s
 @router.post("/{run_id}/cancel")
 def cancel_run(project_id: str, run_id: str, session: Session = Depends(get_session)):
     run = session.get(WebwrightRun, run_id)
-    if not run:
+    if not run or run.project_id != project_id:
         raise HTTPException(404, "Run not found")
     run.status = "cancelled"
     session.add(run)
