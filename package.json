@@ -1,0 +1,22 @@
+{
+  "name": "tc-automation-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TC-driven Automation Project Studio",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:worker\" \"npm run dev:desktop\"",
+    "dev:desktop": "npm run dev --workspace=apps/desktop",
+    "dev:worker": "cd apps/worker && python -m uvicorn worker.main:app --reload --host 127.0.0.1 --port 8765",
+    "build": "npm run build --workspace=apps/desktop",
+    "install:worker": "cd apps/worker && pip install -r requirements.txt"
+  },
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

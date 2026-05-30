@@ -1,0 +1,144 @@
+let baseUrl = 'http://127.0.0.1:8765'
+
+export async function initApiBase(): Promise<string> {
+  if (window.electronAPI) {
+    baseUrl = await window.electronAPI.getWorkerUrl()
+  }
+  return baseUrl
+}
+
+export function getBaseUrl(): string {
+  return baseUrl
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${baseUrl}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
+    ...options
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || res.statusText)
+  }
+  return res.json()
+}
+
+export const api = {
+  health: () => request<{ allOk: boolean }>('/health'),
+  settings: {
+    get: () => request<Record<string, unknown>>('/settings'),
+    update: (body: unknown) => request('/settings', { method: 'PUT', body: JSON.stringify(body) }),
+    validate: () => request('/settings/validate')
+  },
+  projects: {
+    list: () => request<Project[]>('/projects'),
+    create: (body: { name: string; rootPath?: string }) =>
+      request<Project>('/projects', { method: 'POST', body: JSON.stringify(body) }),
+    get: (id: string) => request<Project>(`/projects/${id}`),
+    delete: (id: string) => request(`/projects/${id}`, { method: 'DELETE' })
+  },
+  cases: {
+    list: (projectId: string) => request<TestCase[]>(`/projects/${projectId}/cases`),
+    previewExcel: (projectId: string, body: unknown) =>
+      request(`/projects/${projectId}/cases/import/excel/preview`, { method: 'POST', body: JSON.stringify(body) }),
+    importExcel: (projectId: string, body: unknown) =>
+      request(`/projects/${projectId}/cases/import/excel`, { method: 'POST', body: JSON.stringify(body) }),
+    importTestrailClone: (projectId: string, body: unknown) =>
+      request(`/projects/${projectId}/cases/import/testrail-clone`, { method: 'POST', body: JSON.stringify(body) })
+  },
+  webwright: {
+    list: (projectId: string) => request<WebwrightRun[]>(`/projects/${projectId}/webwright-runs`),
+    run: (projectId: string, body: { caseIds: string[] }) =>
+      request(`/projects/${projectId}/webwright-runs`, { method: 'POST', body: JSON.stringify(body) }),
+    retry: (projectId: string, runId: string) =>
+      request(`/projects/${projectId}/webwright-runs/${runId}/retry`, { method: 'POST' })
+  },
+  mapping: {
+    actions: (projectId: string, caseId: string) =>
+      request(`/projects/${projectId}/cases/${caseId}/actions`),
+    get: (projectId: string, caseId: string) =>
+      request(`/projects/${projectId}/cases/${caseId}/mappings`),
+    save: (projectId: string, caseId: string, body: unknown) =>
+      request(`/projects/${projectId}/cases/${caseId}/mappings`, { method: 'PUT', body: JSON.stringify(body) }),
+    normalize: (projectId: string, caseId: string) =>
+      request(`/projects/${projectId}/cases/${caseId}/normalize`, { method: 'POST' })
+  },
+  generation: {
+    generate: (projectId: string, body?: unknown) =>
+      request(`/projects/${projectId}/generate`, { method: 'POST', body: JSON.stringify(body || {}) }),
+    files: (projectId: string) => request<{ path: string; type: string }[]>(`/projects/${projectId}/generated-files`),
+    content: (projectId: string, path: string) =>
+      request<{ content: string }>(`/projects/${projectId}/generated-files/content?path=${encodeURIComponent(path)}`),
+    save: (projectId: string, path: string, content: string) =>
+      request(`/projects/${projectId}/generated-files/content`, {
+        method: 'PUT',
+        body: JSON.stringify({ path, content })
+      }),
+    search: (projectId: string, q: string) =>
+      request(`/projects/${projectId}/search?q=${encodeURIComponent(q)}`)
+  },
+  executions: {
+    list: (projectId: string) => request<ExecutionRun[]>(`/projects/${projectId}/executions`),
+    run: (projectId: string, body: unknown) =>
+      request(`/projects/${projectId}/executions`, { method: 'POST', body: JSON.stringify(body) }),
+    get: (projectId: string, id: string) => request(`/projects/${projectId}/executions/${id}`),
+    rerunFailed: (projectId: string, id: string) =>
+      request(`/projects/${projectId}/executions/${id}/rerun-failed`, { method: 'POST' }),
+    export: (projectId: string, id: string, target: string, preview = false) =>
+      request(`/projects/${projectId}/executions/${id}/export/${target}`, {
+        method: 'POST',
+        body: JSON.stringify({ preview })
+      })
+  },
+  projectHealth: (projectId: string, generatedPath: string) =>
+    request(`/projects/${projectId}/health?generated_path=${encodeURIComponent(generatedPath)}`, { method: 'POST' }),
+  installDeps: (projectId: string, generatedPath: string) =>
+    request(`/projects/${projectId}/install-dependencies?generated_path=${encodeURIComponent(generatedPath)}`, {
+      method: 'POST'
+    })
+}
+
+export interface Project {
+  id: string
+  name: string
+  root_path: string
+  generated_project_path?: string
+  default_env: string
+}
+
+export interface TestCase {
+  id: string
+  project_id: string
+  title: string
+  automation_key: string
+  source_type: string
+  source_case_id: string
+  status: string
+  start_url?: string
+  steps_json?: string
+}
+
+export interface WebwrightRun {
+  id: string
+  test_case_id: string
+  automation_key: string
+  status: string
+  output_path?: string
+  final_script_path?: string
+  error_message?: string
+}
+
+export interface ExecutionRun {
+  id: string
+  run_id: string
+  env: string
+  browser: string
+  status: string
+  result_path?: string
+}
+
+export function connectLogStream(jobId: string, onMessage: (msg: string) => void): WebSocket {
+  const ws = new WebSocket(`${baseUrl.replace('http', 'ws')}/ws/logs/${jobId}`)
+  ws.onmessage = (e) => onMessage(String(e.data))
+  return ws
+}

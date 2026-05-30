@@ -1,0 +1,12 @@
+{
+  "appId": "com.tcautomation.studio",
+  "productName": "TC Automation Studio",
+  "directories": { "output": "release" },
+  "files": ["out"],
+  "win": {
+    "target": ["nsis"]
+  },
+  "extraResources": [
+    { "from": "../worker", "to": "worker", "filter": ["**/*"] }
+  ]
+}

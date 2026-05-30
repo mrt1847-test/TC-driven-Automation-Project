@@ -2537,3 +2537,11 @@ TestRail / Google Sheets / Excel write-back
 
 따라서 초기 목표는 **Excel 기반 TC → Webwright → 구조화 프로젝트 생성 → GUI 실행**으로 잡는 것이 좋다.
 
+---
+
+## 20. 구현 진행 추적
+
+아키텍처 문서는 **설계 스펙**이다. 실제 구현 진행은 아래 체크리스트 문서에서 항목 단위로 추적한다.
+
+- [docs/IMPLEMENTATION_CHECKLIST.md](docs/IMPLEMENTATION_CHECKLIST.md) — Phase별 체크리스트, Layer 태그, Depends on, MVP Gate
+
