@@ -1,12 +1,15 @@
-import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 export function MappingPage() {
+  const navigate = useNavigate()
   const project = useAppStore((s) => s.currentProject)
-  const [caseId, setCaseId] = useState('')
+  const storeSelectedCase = useAppStore((s) => s.selectedCase)
+  const setSelectedCase = useAppStore((s) => s.setSelectedCase)
   const qc = useQueryClient()
+  const selectedCaseId = storeSelectedCase?.project_id === project?.id ? storeSelectedCase.id : ''
 
   const { data: cases = [] } = useQuery({
     queryKey: ['cases', project?.id],
@@ -14,7 +17,7 @@ export function MappingPage() {
     enabled: !!project
   })
 
-  const selectedCase = cases.find((c) => c.id === caseId) || cases[0]
+  const selectedCase = cases.find((c) => c.id === selectedCaseId) || cases[0]
 
   const { data: actions = [] } = useQuery({
     queryKey: ['actions', project?.id, selectedCase?.id],
@@ -37,13 +40,33 @@ export function MappingPage() {
 
   const steps = selectedCase ? JSON.parse(selectedCase.steps_json || '[]') : []
 
+  function rerunInGenerateRaw() {
+    if (!selectedCase) return
+    setSelectedCase(selectedCase)
+    navigate('/webwright')
+  }
+
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">Mapping & Review</h2>
-      <select className="p-2 rounded bg-slate-800" value={selectedCase?.id || ''} onChange={(e) => setCaseId(e.target.value)}>
+      <select
+        className="p-2 rounded bg-slate-800"
+        value={selectedCase?.id || ''}
+        onChange={(e) => {
+          const next = cases.find((c) => c.id === e.target.value)
+          if (next) setSelectedCase(next)
+        }}
+      >
         {cases.map((c) => <option key={c.id} value={c.id}>{c.automation_key} — {c.title}</option>)}
       </select>
       <button className="px-4 py-2 bg-blue-600 rounded" onClick={() => normalizeMut.mutate()}>Auto Map</button>
+      <button
+        className="px-4 py-2 bg-slate-700 rounded disabled:opacity-50"
+        disabled={!selectedCase}
+        onClick={rerunInGenerateRaw}
+      >
+        Rerun in Generate Raw
+      </button>
 
       <div className="grid grid-cols-3 gap-4 min-h-64">
         <div className="bg-slate-900 p-3 rounded">

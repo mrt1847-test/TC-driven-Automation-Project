@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -8,7 +9,9 @@ import { api, connectLogStream } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 export function IdePage() {
+  const navigate = useNavigate()
   const project = useAppStore((s) => s.currentProject)
+  const selectedCase = useAppStore((s) => s.selectedCase)
   const appendLog = useAppStore((s) => s.appendLog)
   const logs = useAppStore((s) => s.logs)
   const [selectedPath, setSelectedPath] = useState('')
@@ -67,11 +70,17 @@ export function IdePage() {
   if (!project) return <p>Select a project first.</p>
 
   const fileOnly = files.filter((f) => f.type === 'file')
+  const selectedCaseInProject = selectedCase?.project_id === project.id ? selectedCase : null
 
   return (
     <div className="space-y-3 h-[calc(100vh-6rem)] flex flex-col">
       <div className="flex gap-2">
         <h2 className="text-2xl font-bold flex-1">Project IDE</h2>
+        {selectedCaseInProject && (
+          <button className="px-3 py-1 bg-slate-700 rounded" onClick={() => navigate('/webwright')}>
+            Rerun Raw
+          </button>
+        )}
         <button className="px-3 py-1 bg-purple-600 rounded" onClick={() => generateMut.mutate()}>Generate Project</button>
         <button className="px-3 py-1 bg-green-600 rounded" disabled={!selectedPath} onClick={() => saveMut.mutate()}>Save</button>
         <button className="px-3 py-1 bg-blue-600 rounded" onClick={() => runMut.mutate()}>Run Linked TC</button>

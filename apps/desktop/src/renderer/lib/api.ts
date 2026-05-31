@@ -39,6 +39,12 @@ export const api = {
   },
   cases: {
     list: (projectId: string) => request<TestCase[]>(`/projects/${projectId}/cases`),
+    get: (projectId: string, caseId: string) => request<NormalizedTestCase>(`/projects/${projectId}/cases/${caseId}`),
+    patch: (projectId: string, caseId: string, body: { startUrl?: string; status?: string }) =>
+      request<NormalizedTestCase>(`/projects/${projectId}/cases/${caseId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      }),
     previewExcel: (projectId: string, body: unknown) =>
       request(`/projects/${projectId}/cases/import/excel/preview`, { method: 'POST', body: JSON.stringify(body) }),
     importExcel: (projectId: string, body: unknown) =>
@@ -49,9 +55,11 @@ export const api = {
   webwright: {
     list: (projectId: string) => request<WebwrightRun[]>(`/projects/${projectId}/webwright-runs`),
     run: (projectId: string, body: { caseIds: string[] }) =>
-      request(`/projects/${projectId}/webwright-runs`, { method: 'POST', body: JSON.stringify(body) }),
+      request<JobResponse>(`/projects/${projectId}/webwright-runs`, { method: 'POST', body: JSON.stringify(body) }),
     retry: (projectId: string, runId: string) =>
-      request(`/projects/${projectId}/webwright-runs/${runId}/retry`, { method: 'POST' })
+      request<JobResponse>(`/projects/${projectId}/webwright-runs/${runId}/retry`, { method: 'POST' }),
+    cancel: (projectId: string, runId: string) =>
+      request<WebwrightRun>(`/projects/${projectId}/webwright-runs/${runId}/cancel`, { method: 'POST' })
   },
   mapping: {
     actions: (projectId: string, caseId: string) =>
@@ -114,8 +122,24 @@ export interface TestCase {
   source_type: string
   source_case_id: string
   status: string
-  start_url?: string
+  priority?: string | null
+  start_url?: string | null
   steps_json?: string
+  expected_result?: string | null
+}
+
+export interface NormalizedTestCase {
+  id: string
+  source_type: string
+  source_id: string
+  title: string
+  preconditions: string[]
+  steps: { index: number; action: string; expected?: string | null }[]
+  expected_result?: string | null
+  automation_key: string
+  priority?: string | null
+  start_url?: string | null
+  status: string
 }
 
 export interface WebwrightRun {
@@ -125,7 +149,16 @@ export interface WebwrightRun {
   status: string
   output_path?: string
   final_script_path?: string
+  trajectory_path?: string
   error_message?: string
+  started_at?: string | null
+  ended_at?: string | null
+}
+
+export interface JobResponse {
+  jobId: string
+  status: string
+  caseIds?: string[]
 }
 
 export interface ExecutionRun {

@@ -1,7 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
+
+type HealthCheck = {
+  ok?: boolean
+  message?: string
+  path?: string
+  browser?: string
+}
+
+type HealthResponse = Record<string, HealthCheck | boolean>
+
+type SetupWizardProps = {
+  mode?: 'first-run' | 'rerun'
+}
 
 const steps = [
   'Webwright Root',
@@ -13,24 +26,36 @@ const steps = [
   'Complete'
 ]
 
-export function SetupWizard() {
+export function SetupWizard({ mode = 'first-run' }: SetupWizardProps) {
   const [step, setStep] = useState(0)
   const [webwrightRoot, setWebwrightRoot] = useState('')
   const [pythonPath, setPythonPath] = useState('python')
   const [apiProvider, setApiProvider] = useState('openai')
   const [apiKey, setApiKey] = useState('')
   const [projectRoot, setProjectRoot] = useState('')
-  const [health, setHealth] = useState<string>('')
+  const [health, setHealth] = useState<HealthResponse | null>(null)
   const setSetupComplete = useAppStore((s) => s.setSetupComplete)
+  const closeSetupWizardRerun = useAppStore((s) => s.closeSetupWizardRerun)
 
   const saveSettings = useMutation({
     mutationFn: saveDraftSettings
   })
 
+  useEffect(() => {
+    api.settings.get().then((current) => {
+      const webwright = current.webwright as Record<string, string> | undefined
+      const generator = current.generator as Record<string, string> | undefined
+      if (webwright?.root) setWebwrightRoot(webwright.root)
+      if (webwright?.python) setPythonPath(webwright.python)
+      if (webwright?.apiProvider) setApiProvider(webwright.apiProvider)
+      if (generator?.projectRoot) setProjectRoot(generator.projectRoot)
+    })
+  }, [])
+
   async function checkHealth() {
     await saveSettings.mutateAsync()
-    const res = await api.settings.validate()
-    setHealth(JSON.stringify(res, null, 2))
+    const res = await api.settings.validate() as HealthResponse
+    setHealth(res)
   }
 
   async function pickDir(setter: (v: string) => void) {
@@ -40,11 +65,27 @@ export function SetupWizard() {
 
   async function finish() {
     await saveSettings.mutateAsync()
+    if (mode === 'rerun') {
+      closeSetupWizardRerun()
+      return
+    }
     setSetupComplete(true)
+  }
+
+  function cancelRerun() {
+    closeSetupWizardRerun()
+  }
+
+  async function nextStep() {
+    if (step === 0 || step === 1 || step === 2 || step === 5) {
+      await saveSettings.mutateAsync()
+    }
+    setStep(step + 1)
   }
 
   async function saveDraftSettings() {
     const current = await api.settings.get()
+    const webwright = current.webwright as Record<string, unknown> | undefined
     const updated = {
       ...current,
       webwright: {
@@ -52,7 +93,7 @@ export function SetupWizard() {
         root: webwrightRoot,
         python: pythonPath,
         apiProvider,
-        executionMode: 'native'
+        executionMode: webwright?.executionMode || 'native'
       },
       generator: {
         ...(current.generator as object),
@@ -65,9 +106,21 @@ export function SetupWizard() {
     }
   }
 
+  function getHealthCheck(key: string): HealthCheck | null {
+    const value = health?.[key]
+    return typeof value === 'object' && value !== null ? value : null
+  }
+
+  const browserCheck = getHealthCheck('playwrightBrowser')
+  const smokeTestRan = typeof health?.allOk === 'boolean'
+  const smokeTestPassed = health?.allOk === true
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <h2 className="text-2xl font-bold">Setup Wizard</h2>
+      {mode === 'rerun' && (
+        <p className="text-sm text-slate-400">Re-running setup from Settings. Your main app access stays enabled.</p>
+      )}
       <p className="text-slate-400">Step {step + 1} / {steps.length}: {steps[step]}</p>
 
       {step === 0 && (
@@ -93,15 +146,38 @@ export function SetupWizard() {
         </div>
       )}
       {step === 3 && (
-        <div>
-          <button className="px-4 py-2 bg-blue-600 rounded" onClick={checkHealth}>Check Webwright / Python</button>
-          {health && <pre className="mt-2 text-xs bg-slate-900 p-2 rounded overflow-auto">{health}</pre>}
+        <div className="space-y-3">
+          <button className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50" disabled={saveSettings.isPending} onClick={checkHealth}>
+            {saveSettings.isPending ? 'Checking...' : 'Check Playwright Browser'}
+          </button>
+          {browserCheck && (
+            <div className={`rounded border p-3 text-sm ${browserCheck.ok ? 'border-green-700 bg-green-950/30' : 'border-yellow-700 bg-yellow-950/30'}`}>
+              <div className="font-medium">{browserCheck.ok ? 'Browser ready' : 'Browser needs attention'}</div>
+              <div className="mt-1 text-xs text-slate-300">{browserCheck.browser || 'chromium'}</div>
+              {(browserCheck.path || browserCheck.message) && (
+                <div className="mt-1 break-all text-xs text-slate-400">{browserCheck.path || browserCheck.message}</div>
+              )}
+            </div>
+          )}
+          {health && <pre className="mt-2 text-xs bg-slate-900 p-2 rounded overflow-auto">{JSON.stringify(health, null, 2)}</pre>}
         </div>
       )}
       {step === 4 && (
-        <div>
-          <button className="px-4 py-2 bg-blue-600 rounded" onClick={checkHealth}>Run Smoke Test</button>
-          {health && <pre className="mt-2 text-xs bg-slate-900 p-2 rounded overflow-auto">{health}</pre>}
+        <div className="space-y-3">
+          <button className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50" disabled={saveSettings.isPending} onClick={checkHealth}>
+            {saveSettings.isPending ? 'Running...' : 'Run Smoke Test'}
+          </button>
+          {smokeTestRan && (
+            <div className={`rounded border p-3 text-sm ${smokeTestPassed ? 'border-green-700 bg-green-950/30' : 'border-red-700 bg-red-950/30'}`}>
+              <div className="font-medium">{smokeTestPassed ? 'Smoke test passed' : 'Smoke test failed'}</div>
+              <div className="mt-1 text-xs text-slate-400">
+                {smokeTestPassed
+                  ? 'Worker, settings, Python, Webwright, template, and Playwright checks are ready.'
+                  : 'Review the failed checks below before finishing setup.'}
+              </div>
+            </div>
+          )}
+          {health && <pre className="mt-2 text-xs bg-slate-900 p-2 rounded overflow-auto">{JSON.stringify(health, null, 2)}</pre>}
         </div>
       )}
       {step === 5 && (
@@ -113,16 +189,23 @@ export function SetupWizard() {
       {step === 6 && (
         <div className="space-y-3 text-slate-300">
           <p>Setup is ready to finish.</p>
-          {health && <pre className="text-xs bg-slate-900 p-2 rounded overflow-auto">{health}</pre>}
+          {health && <pre className="text-xs bg-slate-900 p-2 rounded overflow-auto">{JSON.stringify(health, null, 2)}</pre>}
         </div>
       )}
 
       <div className="flex gap-2">
+        {mode === 'rerun' && (
+          <button className="px-4 py-2 bg-slate-700 rounded" onClick={cancelRerun}>Cancel</button>
+        )}
         {step > 0 && <button className="px-4 py-2 bg-slate-700 rounded" onClick={() => setStep(step - 1)}>Back</button>}
         {step < steps.length - 1 ? (
-          <button className="px-4 py-2 bg-blue-600 rounded" onClick={() => setStep(step + 1)}>Next</button>
+          <button className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50" disabled={saveSettings.isPending} onClick={nextStep}>
+            {saveSettings.isPending ? 'Saving...' : 'Next'}
+          </button>
         ) : (
-          <button className="px-4 py-2 bg-green-600 rounded" onClick={finish}>Finish</button>
+          <button className="px-4 py-2 bg-green-600 rounded disabled:opacity-50" disabled={saveSettings.isPending} onClick={finish}>
+            {saveSettings.isPending ? 'Saving...' : 'Finish'}
+          </button>
         )}
       </div>
     </div>

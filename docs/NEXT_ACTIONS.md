@@ -33,22 +33,22 @@ Goal: keep the next development batch to roughly one PR. Direction lives in [web
 
 ## Current batch
 
-**Section:** D1. 공통 / Shell
+**Section:** D4. Webwright Generate
 
 **Checklist line (exact line done when this is `[x]`):**
 
-- [ ] **D1-02** Zustand 전역 상태 — §5.1 | Phase 0 | Layer: GUI | Depends: A1-02
+- [ ] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06
 
 ### Scope (only what closes the line above)
 
-- Verify Zustand store holds baseline global state: setup flag, current project, logs buffer.
-- Confirm pages read/write shared state without duplicating local-only copies of the same data.
-- If already present, close the checklist line with a short note such as `(baseline scaffold verified)`.
+- Add or verify a baseline prompt preset selector in Generate Raw.
+- Add or verify a prompt preview surface that combines selected TC context, batch prompt, selected-case override, and preset guidance.
+- Keep preview local/client-side if the server-side prompt preview API is not available yet.
 
 ### Out of scope for this batch
 
-- Workspace handoff state (D1-05, D1-06).
-- Cursor-like layout panels (D1-03).
+- Building durable worker prompt preview/storage APIs.
+- Changing Webwright run execution semantics.
 - Marking multiple already-present checklist lines in the same PR.
 
 ---
@@ -59,8 +59,8 @@ Pick only unchecked lines from below when replacing **Current batch**.
 
 | Suggested order | Section | Checklist line |
 |-----------------|---------|----------------|
-| 1 | D1 | D1-03 Cursor-like layout/activity bar/context/log panels — Spec: UI_UX_DIRECTION |
-| 2 | D1 | D1-04 Project Dashboard — §10.2 |
+| 1 | D5 | D5-01 3-pane layout — §10.5 |
+| 2 | D5 | D5-02 raw code/screenshot/logs — §10.5 |
 
 ## Review Notes
 

@@ -18,11 +18,20 @@ const qc = new QueryClient()
 
 export function App() {
   const setupComplete = useAppStore((s) => s.setupComplete)
+  const setupWizardRerunOpen = useAppStore((s) => s.setupWizardRerunOpen)
 
   if (!setupComplete) {
     return (
       <QueryClientProvider client={qc}>
-        <SetupWizard />
+        <SetupWizard mode="first-run" />
+      </QueryClientProvider>
+    )
+  }
+
+  if (setupWizardRerunOpen) {
+    return (
+      <QueryClientProvider client={qc}>
+        <SetupWizard mode="rerun" />
       </QueryClientProvider>
     )
   }

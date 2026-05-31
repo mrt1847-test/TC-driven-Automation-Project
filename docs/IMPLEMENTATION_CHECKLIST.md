@@ -24,7 +24,7 @@
 | A. Infra | 25 | 33 |
 | B. Template | 0 | 18 |
 | C. Worker | 0 | 74 |
-| D. GUI | 1 | 47 |
+| D. GUI | 24 | 47 |
 | E. E2E | 0 | 8 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
@@ -248,38 +248,38 @@ Product workspace alignment: [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md). GUI che
 ### D1. 공통 / Shell — Workspace: supporting + cross-workspace
 
 - [x] **D1-01** 2-workspace shell (`Generate Raw`, `Automation IDE`) — Spec: PRODUCT_PILLARS, UI_UX_DIRECTION | Phase 0-1 | Layer: GUI | Depends: A1-02 (baseline shell verified; workspace switcher + grouped nav)
-- [ ] **D1-02** Zustand 전역 상태 — §5.1 | Phase 0 | Layer: GUI | Depends: A1-02
-- [ ] **D1-03** Cursor-like layout/activity bar/context/log panels — Spec: UI_UX_DIRECTION | Phase 0 | Layer: GUI | Depends: D1-01
-- [ ] **D1-04** Project Dashboard — §10.2 | Phase 0 | Layer: GUI | Depends: A5-01
-- [ ] **D1-05** selected TC/workspace handoff state — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: D1-02, D3-03
-- [ ] **D1-06** Generate Raw rerun handoff (W2→W1) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: GUI | Depends: D1-05, D4-02
+- [x] **D1-02** Zustand 전역 상태 — §5.1 | Phase 0 | Layer: GUI | Depends: A1-02 (baseline scaffold verified; setup flag, persisted current project, and capped log buffer shared through store)
+- [x] **D1-03** Cursor-like layout/activity bar/context/log panels — Spec: UI_UX_DIRECTION | Phase 0 | Layer: GUI | Depends: D1-01 (baseline shell panels verified; activity bar, secondary nav, context panel, and bottom logs frame)
+- [x] **D1-04** Project Dashboard — §10.2 | Phase 0 | Layer: GUI | Depends: A5-01 (baseline dashboard verified; project list/create/select, summary counts, quick links, and recent executions)
+- [x] **D1-05** selected TC/workspace handoff state — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: D1-02, D3-03 (baseline selected TC handoff verified; TC list/Webwright set shared case state and Mapping/Layout read it)
+- [x] **D1-06** Generate Raw rerun handoff (W2→W1) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: GUI | Depends: D1-05, D4-02 (baseline rerun handoff preserves selected TC from Mapping/IDE into Generate Raw)
 
 ### D2. Setup Wizard — §10.1 — Workspace: supporting
 
 First-run onboarding only. Values persist to `settings.json` / keytar; **post-setup re-edit is D9-02**, not a second wizard run unless user chooses D9-03.
 
-- [ ] **D2-01** Webwright Root 선택 — §10.1 | Phase 0 | Layer: GUI | Depends: A3-06
-- [ ] **D2-02** Python venv 선택 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-01
-- [ ] **D2-03** API Provider + Key — §10.1 | Phase 0 | Layer: GUI | Depends: A3-03
-- [ ] **D2-04** Playwright browser 확인 — §10.1 | Phase 0 | Layer: GUI | Depends: A3-05
-- [ ] **D2-05** Smoke Test — §10.1 | Phase 0 | Layer: GUI | Depends: D2-04
-- [ ] **D2-06** 프로젝트 경로 설정 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-05
-- [ ] **D2-07** Wizard 완료 + 저장 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-06
+- [x] **D2-01** Webwright Root 선택 — §10.1 | Phase 0 | Layer: GUI | Depends: A3-06 (baseline root selection verified; directory picker and settings persistence on step advance)
+- [x] **D2-02** Python venv 선택 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-01 (baseline Python selection verified; path input/directory picker and settings persistence on step advance)
+- [x] **D2-03** API Provider + Key — §10.1 | Phase 0 | Layer: GUI | Depends: A3-03 (baseline provider/key storage verified; provider persists to settings and key saves through keytar IPC on step advance)
+- [x] **D2-04** Playwright browser 확인 — §10.1 | Phase 0 | Layer: GUI | Depends: A3-05 (baseline browser check verified; settings validation reports Playwright package/browser readiness and wizard renders browser status)
+- [x] **D2-05** Smoke Test — §10.1 | Phase 0 | Layer: GUI | Depends: D2-04 (baseline smoke test verified; validation path runs from wizard and renders pass/fail summary)
+- [x] **D2-06** 프로젝트 경로 설정 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-05 (baseline project path verified; directory picker, text input, and settings persistence on step advance)
+- [x] **D2-07** Wizard 완료 + 저장 — §10.1 | Phase 0 | Layer: GUI | Depends: D2-06 (baseline wizard finish verified; Finish saves settings, persists setupComplete, and opens main shell)
 
 ### D3. TC Import / List — §10.3 — Workspace: Generate Raw
 
-- [ ] **D3-01** source type 선택 — §10.3 | Phase 1 | Layer: GUI | Depends: C1-02
-- [ ] **D3-02** Excel import UI — §10.3 | Phase 1 | Layer: GUI | Depends: C1-03
-- [ ] **D3-03** TC List — §10.3 | Phase 1 | Layer: GUI | Depends: C1-07
+- [x] **D3-01** source type 선택 — §10.3 | Phase 1 | Layer: GUI | Depends: C1-02 (baseline source type selector verified; Excel, testrail-clone, TestRail, Google Sheets drive distinct import panels)
+- [x] **D3-02** Excel import UI — §10.3 | Phase 1 | Layer: GUI | Depends: C1-03 (baseline Excel import UI verified; file picker, sheet name, column mapping, preview table, import summary, and cases query invalidation)
+- [x] **D3-03** TC List — §10.3 | Phase 1 | Layer: GUI | Depends: C1-07 (baseline TC list verified; searchable/filterable table, case detail panel, and start URL/status quick edit)
 - [ ] **D3-04** source connector preview/config UI — Spec: PRODUCT_PILLARS, SCREEN_INVENTORY | Phase 3-4 | Layer: GUI | Depends: C1-04
 
 ### D4. Webwright Generate — §10.4 — Workspace: Generate Raw
 
-- [ ] **D4-01** TC별 status 테이블 — §10.4 | Phase 1 | Layer: GUI | Depends: C4-04
-- [ ] **D4-02** Run/Stop/Retry — §10.4 | Phase 1 | Layer: GUI | Depends: D4-01
-- [ ] **D4-03** raw script/log/folder — §10.4 | Phase 1 | Layer: GUI | Depends: D4-01
-- [ ] **D4-04** LLM provider/API key 입력 + 검증 UI — Spec: PRODUCT_PILLARS, UI_UX_DIRECTION | Phase 1 | Layer: GUI | Depends: A3-03, A3-05
-- [ ] **D4-05** prompt composer(batch shared + per-case override) — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: C2-04
+- [x] **D4-01** TC별 status 테이블 — §10.4 | Phase 1 | Layer: GUI | Depends: C4-04 (baseline TC status table verified; cases and latest Webwright runs render per-TC lifecycle status)
+- [x] **D4-02** Run/Stop/Retry — §10.4 | Phase 1 | Layer: GUI | Depends: D4-01 (baseline run controls verified; selected/individual run, stop/cancel, retry, log stream, and query refresh wired)
+- [x] **D4-03** raw script/log/folder — §10.4 | Phase 1 | Layer: GUI | Depends: D4-01 (baseline raw artifact links verified; folder, final script, trajectory, stdout, and stderr open from latest run data)
+- [x] **D4-04** LLM provider/API key 입력 + 검증 UI — Spec: PRODUCT_PILLARS, UI_UX_DIRECTION | Phase 1 | Layer: GUI | Depends: A3-03, A3-05 (baseline Generate Raw LLM provider/key panel verified; provider saves to settings, key saves through keytar, and key presence check runs before raw generation)
+- [x] **D4-05** prompt composer(batch shared + per-case override) — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: C2-04 (baseline Generate Raw prompt composer verified; batch prompt and selected-case override persist through settings)
 - [ ] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06
 
 ### D5. Automation IDE: Mapping & Structure — §10.5 — Workspace: Automation IDE
@@ -319,9 +319,9 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 
 Persistent settings surface after Setup Wizard. Same fields as D2 must remain editable here (not one-time only).
 
-- [ ] **D9-01** integrations/webwright/LLM/runner UI — §10 | Phase 0 | Layer: GUI | Depends: A3-04
-- [ ] **D9-02** post-setup re-edit (D2 field parity: Webwright root, Python, API provider/key, project root, execution mode) + `/settings/validate` — §10.1, Spec: SCREEN_INVENTORY | Phase 0 | Layer: GUI | Depends: D2-07, D9-01, A3-05
-- [ ] **D9-03** Settings에서 Setup Wizard 재실행 (선택, `setupComplete` 유지) — §10.1 | Phase 0 | Layer: GUI | Depends: D9-02, A3-06
+- [x] **D9-01** integrations/webwright/LLM/runner UI — §10 | Phase 0 | Layer: GUI | Depends: A3-04 (baseline settings sections verified; structured webwright/LLM, generator, runner, integrations fields plus advanced JSON editor and PUT save)
+- [x] **D9-02** post-setup re-edit (D2 field parity: Webwright root, Python, API provider/key, project root, execution mode) + `/settings/validate` — §10.1, Spec: SCREEN_INVENTORY | Phase 0 | Layer: GUI | Depends: D2-07, D9-01, A3-05 (baseline D2 field parity verified; structured re-edit fields, keytar save on Save, and Validate Settings via /settings/validate)
+- [x] **D9-03** Settings에서 Setup Wizard 재실행 (선택, `setupComplete` 유지) — §10.1 | Phase 0 | Layer: GUI | Depends: D9-02, A3-06 (baseline wizard re-run verified; Settings action opens rerun mode, Finish/Cancel return to main shell without resetting setupComplete)
 
 ---
 
