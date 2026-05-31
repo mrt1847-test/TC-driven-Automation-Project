@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, connectLogStream, type WebwrightRun } from '@/lib/api'
+import { api, connectLogStream, type TestCase, type WebwrightRun } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 type AppSettings = {
@@ -15,12 +15,47 @@ type AppSettings = {
 type PromptComposerSettings = {
   batchPrompt?: string
   caseOverrides?: Record<string, string>
+  presetId?: string
 }
 
 type LlmCheckState = {
   status: 'idle' | 'ok' | 'error'
   message: string
 }
+
+type PromptPreset = {
+  id: string
+  label: string
+  guidance: string
+}
+
+const promptPresets: PromptPreset[] = [
+  {
+    id: 'general',
+    label: 'General automation',
+    guidance: 'Prefer stable selectors, explicit waits, readable steps, and assertions tied to the expected result.'
+  },
+  {
+    id: 'login-required',
+    label: 'Login-required flow',
+    guidance: 'Account for authentication setup, session reuse, guarded redirects, and post-login landing state before executing TC steps.'
+  },
+  {
+    id: 'search-flow',
+    label: 'Search flow',
+    guidance: 'Treat query entry, result loading, empty states, and result assertions as first-class checkpoints.'
+  },
+  {
+    id: 'crud-flow',
+    label: 'CRUD flow',
+    guidance: 'Use deterministic test data, verify create/update/delete transitions, and clean up records where the flow allows it.'
+  },
+  {
+    id: 'assertion-heavy',
+    label: 'Assertion-heavy',
+    guidance: 'Favor explicit UI assertions, state checks, and clear failure messages over only navigation or click completion.'
+  }
+]
 
 const statusStyles: Record<string, string> = {
   imported: 'bg-slate-700 text-slate-100',
@@ -60,6 +95,61 @@ function providerLabel(provider: string) {
     : provider.charAt(0).toUpperCase() + provider.slice(1)
 }
 
+function selectedPreset(id: string) {
+  return promptPresets.find((preset) => preset.id === id) || promptPresets[0]
+}
+
+function parseSteps(stepsJson?: string) {
+  try {
+    const steps = JSON.parse(stepsJson || '[]') as { index?: number; action?: string; expected?: string | null }[]
+    return Array.isArray(steps) ? steps : []
+  } catch {
+    return []
+  }
+}
+
+function buildPromptPreview(
+  testCase: TestCase | undefined,
+  preset: PromptPreset,
+  batchPrompt: string,
+  caseOverride: string
+) {
+  if (!testCase) return 'Select a TC to preview the prompt payload.'
+
+  const steps = parseSteps(testCase.steps_json)
+  const stepText = steps.length
+    ? steps.map((step, index) => {
+      const stepNo = step.index ?? index + 1
+      const expected = step.expected ? `\n   Expected: ${step.expected}` : ''
+      return `${stepNo}. ${step.action || 'Untitled step'}${expected}`
+    }).join('\n')
+    : 'No structured steps available.'
+
+  return [
+    'You are generating a Playwright Python automation draft for the following QA test case.',
+    '',
+    `Automation Key: ${testCase.automation_key}`,
+    `Title: ${testCase.title}`,
+    `Start URL: ${testCase.start_url || 'Use configured/default start URL'}`,
+    `Priority: ${testCase.priority || 'Not specified'}`,
+    '',
+    'Preset Guidance:',
+    preset.guidance,
+    '',
+    'Batch Shared Prompt:',
+    batchPrompt.trim() || 'None',
+    '',
+    'Selected TC Override:',
+    caseOverride.trim() || 'None',
+    '',
+    'Steps:',
+    stepText,
+    '',
+    'Expected Result:',
+    testCase.expected_result || 'As described in steps'
+  ].join('\n')
+}
+
 export function WebwrightPage() {
   const project = useAppStore((s) => s.currentProject)
   const appendLog = useAppStore((s) => s.appendLog)
@@ -74,6 +164,7 @@ export function WebwrightPage() {
   })
   const [batchPrompt, setBatchPrompt] = useState('')
   const [casePromptOverrides, setCasePromptOverrides] = useState<Record<string, string>>({})
+  const [promptPresetId, setPromptPresetId] = useState('general')
   const [promptStatus, setPromptStatus] = useState('Prompt changes not saved yet.')
   const seededCaseIdRef = useRef<string | null>(null)
   const qc = useQueryClient()
@@ -102,6 +193,7 @@ export function WebwrightPage() {
     const promptComposer = (settings as AppSettings | undefined)?.webwright?.promptComposer
     setBatchPrompt(promptComposer?.batchPrompt || '')
     setCasePromptOverrides(promptComposer?.caseOverrides || {})
+    setPromptPresetId(promptComposer?.presetId || 'general')
   }, [settings])
 
   useEffect(() => {
@@ -211,7 +303,8 @@ export function WebwrightPage() {
           ...(current.webwright || {}),
           promptComposer: {
             batchPrompt,
-            caseOverrides: cleanedOverrides
+            caseOverrides: cleanedOverrides,
+            presetId: promptPresetId
           }
         }
       }
@@ -248,6 +341,8 @@ export function WebwrightPage() {
 
   const promptCase = cases.find((c) => c.id === selectedCaseId) || cases.find((c) => selected.includes(c.id))
   const caseOverride = promptCase ? casePromptOverrides[promptCase.id] || '' : ''
+  const preset = selectedPreset(promptPresetId)
+  const promptPreview = buildPromptPreview(promptCase, preset, batchPrompt, caseOverride)
 
   return (
     <div className="space-y-4">
@@ -358,6 +453,30 @@ export function WebwrightPage() {
               placeholder="Extra instructions only for the selected TC..."
             />
           </label>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,240px)_1fr]">
+          <label className="block text-xs text-slate-400">
+            Prompt preset
+            <select
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-slate-100"
+              value={promptPresetId}
+              onChange={(e) => {
+                setPromptPresetId(e.target.value)
+                setPromptStatus('Prompt changes not saved yet.')
+              }}
+            >
+              {promptPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+            </select>
+            <div className="mt-2 text-xs text-slate-500">{preset.guidance}</div>
+          </label>
+          <div className="text-xs text-slate-400">
+            Prompt preview
+            <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
+              {promptPreview}
+            </pre>
+          </div>
         </div>
         <div className="text-xs text-slate-500">{promptStatus}</div>
       </section>

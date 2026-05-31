@@ -24,7 +24,7 @@
 | A. Infra | 25 | 33 |
 | B. Template | 0 | 18 |
 | C. Worker | 0 | 74 |
-| D. GUI | 24 | 47 |
+| D. GUI | 29 | 47 |
 | E. E2E | 0 | 8 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
@@ -280,14 +280,14 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D4-03** raw script/log/folder — §10.4 | Phase 1 | Layer: GUI | Depends: D4-01 (baseline raw artifact links verified; folder, final script, trajectory, stdout, and stderr open from latest run data)
 - [x] **D4-04** LLM provider/API key 입력 + 검증 UI — Spec: PRODUCT_PILLARS, UI_UX_DIRECTION | Phase 1 | Layer: GUI | Depends: A3-03, A3-05 (baseline Generate Raw LLM provider/key panel verified; provider saves to settings, key saves through keytar, and key presence check runs before raw generation)
 - [x] **D4-05** prompt composer(batch shared + per-case override) — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: C2-04 (baseline Generate Raw prompt composer verified; batch prompt and selected-case override persist through settings)
-- [ ] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06
+- [x] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06 (baseline local preset selector and prompt preview verified; preview combines selected TC, preset guidance, batch prompt, and case override)
 
 ### D5. Automation IDE: Mapping & Structure — §10.5 — Workspace: Automation IDE
 
-- [ ] **D5-01** 3-pane layout — §10.5 | Phase 1 | Layer: GUI | Depends: C6-06
-- [ ] **D5-02** raw code/screenshot/logs — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01
-- [ ] **D5-03** mapping 편집 UX — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01
-- [ ] **D5-04** normalized flow editor — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-06
+- [x] **D5-01** 3-pane layout — §10.5 | Phase 1 | Layer: GUI | Depends: C6-06 (baseline Automation IDE 3-pane layout verified; TC context, raw actions, and normalized mapping panes preserve selected TC context)
+- [x] **D5-02** raw code/screenshot/logs — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01 (baseline raw evidence links verified in Mapping & Structure; latest run exposes folder, script, trajectory, stdout, stderr, and screenshot folder access)
+- [x] **D5-03** mapping 편집 UX — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01 (baseline mapping edit UX verified; per-step raw action, normalized step name, and status edits save through the existing mappings API)
+- [x] **D5-04** normalized flow editor — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-06 (baseline flow editor verified; ordered normalized steps are editable from current mapping data and save through existing mappings API)
 - [ ] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08
 - [ ] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09
 - [ ] **D5-07** selector candidate/evidence viewer — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-02

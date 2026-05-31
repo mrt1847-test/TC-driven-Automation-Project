@@ -33,22 +33,22 @@ Goal: keep the next development batch to roughly one PR. Direction lives in [web
 
 ## Current batch
 
-**Section:** D4. Webwright Generate
+**Section:** D5. Automation IDE: Mapping & Structure
 
 **Checklist line (exact line done when this is `[x]`):**
 
-- [ ] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06
+- [ ] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08
 
 ### Scope (only what closes the line above)
 
-- Add or verify a baseline prompt preset selector in Generate Raw.
-- Add or verify a prompt preview surface that combines selected TC context, batch prompt, selected-case override, and preset guidance.
-- Keep preview local/client-side if the server-side prompt preview API is not available yet.
+- Add or verify a baseline Page Object method planning surface in Automation IDE.
+- Use current mapping data to expose/edit the planned POM method name for each normalized step.
+- Keep this as a GUI baseline if durable PageObjectMethod worker models are not available yet.
 
 ### Out of scope for this batch
 
-- Building durable worker prompt preview/storage APIs.
-- Changing Webwright run execution semantics.
+- Building durable PageObject/PageObjectMethod persistence beyond currently available APIs.
+- Generating final Page Object code.
 - Marking multiple already-present checklist lines in the same PR.
 
 ---
@@ -59,8 +59,8 @@ Pick only unchecked lines from below when replacing **Current batch**.
 
 | Suggested order | Section | Checklist line |
 |-----------------|---------|----------------|
-| 1 | D5 | D5-01 3-pane layout — §10.5 |
-| 2 | D5 | D5-02 raw code/screenshot/logs — §10.5 |
+| 1 | D5 | D5-06 structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC |
+| 2 | D6 | D6-01 generated file tree — §10.6 |
 
 ## Review Notes
 
