@@ -13,18 +13,31 @@ export function RunnerPage() {
   const [headed, setHeaded] = useState(false)
   const [target, setTarget] = useState('all')
   const [automationKey, setAutomationKey] = useState('')
+  const [caseIds, setCaseIds] = useState('')
+  const [resultTarget, setResultTarget] = useState('local')
+  const [runStatus, setRunStatus] = useState('No run started.')
 
   const runMut = useMutation({
     mutationFn: async () => {
       clearLogs()
+      setRunStatus('Queueing runner job...')
       const res = await api.executions.run(project!.id, {
         env,
         browser,
         headed,
         target_type: target,
-        automation_key: target === 'case' ? automationKey : undefined
+        automation_key: target === 'case' ? automationKey : undefined,
+        case_ids: target === 'selected' ? parseCaseIds(caseIds) : undefined,
+        result_target: resultTarget
       })
       connectLogStream(res.jobId, appendLog)
+      return res.jobId
+    },
+    onSuccess: (jobId) => {
+      setRunStatus(`Queued ${jobId}`)
+    },
+    onError: (error) => {
+      setRunStatus(error instanceof Error ? error.message : 'Run failed.')
     }
   })
 
@@ -36,14 +49,29 @@ export function RunnerPage() {
       <div className="grid grid-cols-2 gap-4 max-w-xl">
         <label>Environment<select className="w-full p-2 rounded bg-slate-800 mt-1" value={env} onChange={(e) => setEnv(e.target.value)}><option>local</option><option>stg</option><option>prod</option></select></label>
         <label>Browser<select className="w-full p-2 rounded bg-slate-800 mt-1" value={browser} onChange={(e) => setBrowser(e.target.value)}><option>chromium</option><option>firefox</option><option>webkit</option></select></label>
-        <label>Target<select className="w-full p-2 rounded bg-slate-800 mt-1" value={target} onChange={(e) => setTarget(e.target.value)}><option value="all">All</option><option value="case">Selected case</option></select></label>
+        <label>Target<select className="w-full p-2 rounded bg-slate-800 mt-1" value={target} onChange={(e) => setTarget(e.target.value)}><option value="all">All</option><option value="case">Automation key</option><option value="selected">Case IDs</option></select></label>
+        <label>Result Target<select className="w-full p-2 rounded bg-slate-800 mt-1" value={resultTarget} onChange={(e) => setResultTarget(e.target.value)}><option value="local">local only</option><option value="testrail-clone">testrail-clone</option><option value="testrail">TestRail</option><option value="excel">Excel</option><option value="google-sheets">Google Sheets</option></select></label>
         <label className="flex items-center gap-2 mt-6"><input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} /> Headed</label>
       </div>
       {target === 'case' && (
         <input className="w-full max-w-md p-2 rounded bg-slate-800" placeholder="automationKey" value={automationKey} onChange={(e) => setAutomationKey(e.target.value)} />
       )}
-      <button className="px-4 py-2 bg-green-600 rounded" onClick={() => runMut.mutate()}>Run</button>
+      {target === 'selected' && (
+        <textarea className="w-full max-w-md p-2 rounded bg-slate-800" placeholder="case IDs or automation keys, comma/newline separated" rows={3} value={caseIds} onChange={(e) => setCaseIds(e.target.value)} />
+      )}
+      <div className="text-xs text-slate-500">{runStatus}</div>
+      <button
+        className="px-4 py-2 bg-green-600 rounded disabled:opacity-50"
+        disabled={runMut.isPending || (target === 'case' && !automationKey) || (target === 'selected' && parseCaseIds(caseIds).length === 0)}
+        onClick={() => runMut.mutate()}
+      >
+        {runMut.isPending ? 'Running...' : 'Run'}
+      </button>
       <pre className="bg-slate-900 p-3 rounded text-xs max-h-96 overflow-auto">{logs.join('\n') || 'Logs will appear here...'}</pre>
     </div>
   )
+}
+
+function parseCaseIds(value: string) {
+  return value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean)
 }

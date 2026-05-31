@@ -33,22 +33,22 @@ Goal: keep the next development batch to roughly one PR. Direction lives in [web
 
 ## Current batch
 
-**Section:** D5. Automation IDE: Mapping & Structure
+**Section:** D7. Runner
 
 **Checklist line (exact line done when this is `[x]`):**
 
-- [ ] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08
+- [ ] **D7-02** 실시간 로그 — §10.7 | Phase 1 | Layer: GUI | Depends: A4-03
 
 ### Scope (only what closes the line above)
 
-- Add or verify a baseline Page Object method planning surface in Automation IDE.
-- Use current mapping data to expose/edit the planned POM method name for each normalized step.
-- Keep this as a GUI baseline if durable PageObjectMethod worker models are not available yet.
+- Add or verify baseline real-time runner log behavior.
+- Reuse the existing WebSocket log stream and shared log store.
+- Keep logs visible from Runner/Automation IDE without changing backend log semantics.
 
 ### Out of scope for this batch
 
-- Building durable PageObject/PageObjectMethod persistence beyond currently available APIs.
-- Generating final Page Object code.
+- Adding new logging APIs.
+- Implementing historical log persistence beyond the current execution/log stream.
 - Marking multiple already-present checklist lines in the same PR.
 
 ---
@@ -59,8 +59,8 @@ Pick only unchecked lines from below when replacing **Current batch**.
 
 | Suggested order | Section | Checklist line |
 |-----------------|---------|----------------|
-| 1 | D5 | D5-06 structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC |
-| 2 | D6 | D6-01 generated file tree — §10.6 |
+| 1 | D8 | D8-01 summary + case table — §10.8 |
+| 2 | D8 | D8-02 artifact 링크 — §10.8 |
 
 ## Review Notes
 

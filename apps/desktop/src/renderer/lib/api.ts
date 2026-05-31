@@ -88,8 +88,8 @@ export const api = {
   executions: {
     list: (projectId: string) => request<ExecutionRun[]>(`/projects/${projectId}/executions`),
     run: (projectId: string, body: unknown) =>
-      request(`/projects/${projectId}/executions`, { method: 'POST', body: JSON.stringify(body) }),
-    get: (projectId: string, id: string) => request(`/projects/${projectId}/executions/${id}`),
+      request<JobResponse>(`/projects/${projectId}/executions`, { method: 'POST', body: JSON.stringify(body) }),
+    get: (projectId: string, id: string) => request<ExecutionDetail>(`/projects/${projectId}/executions/${id}`),
     rerunFailed: (projectId: string, id: string) =>
       request(`/projects/${projectId}/executions/${id}/rerun-failed`, { method: 'POST' }),
     export: (projectId: string, id: string, target: string, preview = false) =>
@@ -168,6 +168,42 @@ export interface ExecutionRun {
   browser: string
   status: string
   result_path?: string
+  started_at?: string | null
+  ended_at?: string | null
+  created_at?: string
+}
+
+export interface ExecutionResult {
+  id: string
+  execution_run_id: string
+  automation_key: string
+  source_type?: string | null
+  source_case_id?: string | null
+  title?: string | null
+  status: string
+  duration_ms?: number | null
+  error?: string | null
+  screenshot_path?: string | null
+  trace_path?: string | null
+}
+
+export interface ExecutionDetail {
+  run: ExecutionRun
+  results: ExecutionResult[]
+  summary?: {
+    cases?: Array<{
+      automationKey?: string
+      automation_key?: string
+      title?: string
+      status: string
+      error?: string | null
+      artifacts?: {
+        screenshot?: string | null
+        trace?: string | null
+      }
+    }>
+    summary?: Record<string, number>
+  } | null
 }
 
 export function connectLogStream(jobId: string, onMessage: (msg: string) => void): WebSocket {

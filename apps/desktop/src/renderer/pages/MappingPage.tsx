@@ -33,7 +33,14 @@ type MappingDraftRow = {
   tc_step_index: number
   action_id: string
   normalized_step_name: string
+  pom_method_name: string
   status: string
+}
+
+type ValidationIssue = {
+  severity: 'error' | 'warning' | 'info'
+  step?: number
+  message: string
 }
 
 export function MappingPage() {
@@ -94,7 +101,7 @@ export function MappingPage() {
           action_ids: mapping.action_id ? [mapping.action_id] : [],
           normalized_step_id: `flow_${String(mapping.tc_step_index).padStart(3, '0')}`,
           normalized_step_name: mapping.normalized_step_name || `step_${mapping.tc_step_index}`,
-          pom_method_name: mapping.normalized_step_name || `step_${mapping.tc_step_index}`,
+          pom_method_name: mapping.pom_method_name || mapping.normalized_step_name || `step_${mapping.tc_step_index}`,
           status: mapping.status
         })),
         actions: actionRows
@@ -120,6 +127,11 @@ export function MappingPage() {
   if (!project) return <p>Select a project first.</p>
 
   const flowReadyCount = mappingDraft.filter((mapping) => mapping.status === 'mapped' && mapping.action_id).length
+  const pomReadyCount = mappingDraft.filter((mapping) => mapping.pom_method_name.trim()).length
+  const pageObjectName = selectedCase ? `${pascalName(selectedCase.automation_key)}Page` : 'PageObject'
+  const validationIssues = validateStructureDraft(mappingDraft, steps)
+  const errorCount = validationIssues.filter((issue) => issue.severity === 'error').length
+  const warningCount = validationIssues.filter((issue) => issue.severity === 'warning').length
 
   function rerunInGenerateRaw() {
     if (!selectedCase) return
@@ -243,6 +255,59 @@ export function MappingPage() {
                   </div>
                 ))}
                 {!mappingDraft.length && <EmptyPaneText>No flow steps available. Run Auto Map to create a baseline.</EmptyPaneText>}
+              </div>
+            </div>
+            <div className="mb-3 rounded border border-slate-800 bg-slate-950 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-medium text-slate-100">Page Object Plan</h4>
+                  <div className="mt-1 text-xs text-slate-500">{pageObjectName}</div>
+                </div>
+                <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">
+                  {pomReadyCount}/{mappingDraft.length} method(s)
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {mappingDraft.map((mapping) => (
+                  <div key={`pom-${mapping.tc_step_index}`} className="rounded border border-slate-800 bg-slate-900 p-2 text-xs">
+                    <div className="mb-2 text-slate-500">
+                      Step {mapping.tc_step_index}: {mapping.normalized_step_name || `step_${mapping.tc_step_index}`}
+                    </div>
+                    <input
+                      className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-100"
+                      value={mapping.pom_method_name}
+                      onChange={(e) => updateMappingDraft(mapping.tc_step_index, { pom_method_name: e.target.value })}
+                      placeholder={`method_for_step_${mapping.tc_step_index}`}
+                    />
+                  </div>
+                ))}
+                {!mappingDraft.length && <EmptyPaneText>No Page Object methods available. Run Auto Map to create a baseline.</EmptyPaneText>}
+              </div>
+            </div>
+            <div className="mb-3 rounded border border-slate-800 bg-slate-950 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-medium text-slate-100">Structure Validation</h4>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {errorCount} error(s), {warningCount} warning(s)
+                  </div>
+                </div>
+                <span className={`rounded px-2 py-1 text-xs ${errorCount ? 'bg-red-700 text-white' : warningCount ? 'bg-yellow-700 text-white' : 'bg-green-700 text-white'}`}>
+                  {errorCount ? 'blocked' : warningCount ? 'review' : 'ready'}
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {validationIssues.map((issue, index) => (
+                  <div key={`${issue.severity}-${issue.step || 'global'}-${index}`} className={`rounded border p-2 text-xs ${validationIssueClass(issue.severity)}`}>
+                    <div className="font-medium">{issue.step ? `Step ${issue.step}` : 'Flow'}</div>
+                    <div className="mt-1">{issue.message}</div>
+                  </div>
+                ))}
+                {!validationIssues.length && (
+                  <div className="rounded border border-green-800 bg-green-950/30 p-2 text-xs text-green-200">
+                    Flow, raw action links, normalized names, and POM method names are ready at the current GUI baseline.
+                  </div>
+                )}
               </div>
             </div>
             <div className="mb-3 flex items-center justify-between gap-2 rounded border border-slate-800 bg-slate-950 p-3">
@@ -399,6 +464,7 @@ function buildMappingDraft(mappings: MappingRow[], steps: TestStep[]): MappingDr
         tc_step_index: mapping.tc_step_index,
         action_id: mapping.action_ids?.[0] || '',
         normalized_step_name: mapping.normalized_step_name || `step_${mapping.tc_step_index}`,
+        pom_method_name: mapping.pom_method_name || mapping.normalized_step_name || `step_${mapping.tc_step_index}`,
         status: mapping.status || 'mapped'
       }))
   }
@@ -407,6 +473,7 @@ function buildMappingDraft(mappings: MappingRow[], steps: TestStep[]): MappingDr
     tc_step_index: step.index,
     action_id: '',
     normalized_step_name: slugStepName(step.action, step.index),
+    pom_method_name: slugStepName(step.action, step.index),
     status: 'unmapped'
   }))
 }
@@ -425,6 +492,74 @@ function rawActionLabel(actions: RawActionRow[], actionId: string) {
   if (!action) return 'missing raw action'
   const ordinal = action.order_index ? `#${action.order_index}` : action.type
   return `${ordinal} ${action.type} ${action.selector || action.target || ''}`.trim()
+}
+
+function validateStructureDraft(mappings: MappingDraftRow[], steps: TestStep[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+
+  if (!mappings.length) {
+    issues.push({ severity: 'error', message: 'No normalized flow exists. Run Auto Map before structure review.' })
+    return issues
+  }
+
+  if (steps.length && mappings.length !== steps.length) {
+    issues.push({
+      severity: 'warning',
+      message: `TC has ${steps.length} step(s), but the normalized flow has ${mappings.length} step(s).`
+    })
+  }
+
+  for (const mapping of mappings) {
+    if (!mapping.action_id) {
+      issues.push({
+        severity: 'error',
+        step: mapping.tc_step_index,
+        message: 'Missing raw action link.'
+      })
+    }
+    if (!mapping.normalized_step_name.trim()) {
+      issues.push({
+        severity: 'error',
+        step: mapping.tc_step_index,
+        message: 'Normalized step name is empty.'
+      })
+    }
+    if (!mapping.pom_method_name.trim()) {
+      issues.push({
+        severity: 'warning',
+        step: mapping.tc_step_index,
+        message: 'Page Object method name is empty.'
+      })
+    }
+    if (mapping.status === 'needs_review') {
+      issues.push({
+        severity: 'warning',
+        step: mapping.tc_step_index,
+        message: 'Step is marked needs_review.'
+      })
+    }
+    if (mapping.status === 'unmapped') {
+      issues.push({
+        severity: 'error',
+        step: mapping.tc_step_index,
+        message: 'Step is marked unmapped.'
+      })
+    }
+  }
+
+  return issues
+}
+
+function validationIssueClass(severity: ValidationIssue['severity']) {
+  if (severity === 'error') return 'border-red-800 bg-red-950/30 text-red-200'
+  if (severity === 'warning') return 'border-yellow-800 bg-yellow-950/30 text-yellow-200'
+  return 'border-slate-800 bg-slate-900 text-slate-300'
+}
+
+function pascalName(value: string) {
+  const words = value.split(/[^a-zA-Z0-9]+/).filter(Boolean)
+  const name = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join('')
+  return name || 'Generated'
 }
 
 function latestRun(runs: WebwrightRun[], caseId: string | undefined) {

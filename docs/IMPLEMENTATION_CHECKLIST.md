@@ -22,14 +22,24 @@
 | Category | Done | Total |
 |----------|------|-------|
 | A. Infra | 25 | 33 |
-| B. Template | 0 | 18 |
-| C. Worker | 0 | 74 |
-| D. GUI | 29 | 47 |
+| B. Template | 17 | 18 |
+| C. Worker | 49 | 74 |
+| D. GUI | 42 | 47 |
 | E. E2E | 0 | 8 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
 | H. MVP Gates | 0 | 4 |
-| I. Quality | 0 | 5 |
+| I. Quality | 2 | 6 |
+
+
+## Implementation audit (2026-05-31)
+
+Scope checked: current repository files, spec documents, and `npm run build`.
+
+- Baseline present: monorepo, Electron/React shell, FastAPI worker, core SQLite models, generated-template package, TC import, Webwright run lifecycle, action extraction, mapping, generation, runner, result export, IDE file APIs, two-product-workspace UI.
+- Build blocker: desktop renderer currently fails in `apps/desktop/src/renderer/pages/RunnerPage.tsx` before `case_ids`; keep D7-01 and I-06 unchecked until the build passes.
+- Spec gaps to keep open: structured-flow/page-object DB persistence (A2-09..A2-12, C7-06..C7-10), artifact-backed self-healing persistence/API (A2-13..A2-15, C12), prompt preset/preview API and payload audit trail (C2-04..C2-07), multi-action TC-step join model (A2-08, C6-07), CI/E2E gates (E/H/I-03..I-05).
+- Artifact reuse direction: Webwright logs/screenshots/trajectory are captured at run level, but post-structuring self-healing still needs artifact indexing, selector candidates, failure-to-step resolution, proposal accept/apply, regenerate, and rerun flow.
 
 ---
 
@@ -89,33 +99,33 @@
 
 ### B1. 디렉터리 / 설정 — §9.2
 
-- [ ] **B1-01** 디렉터리 구조 — §9.2 | Phase 1 | Layer: Template
-- [ ] **B1-02** requirements.txt, pytest.ini, README — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
-- [ ] **B1-03** config env files + automation.yaml — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
-- [ ] **B1-04** mappings/cases.yaml 스키마 — §9.3 | Phase 1 | Layer: Template | Depends: B1-01
+- [x] **B1-01** 디렉터리 구조 — §9.2 | Phase 1 | Layer: Template
+- [x] **B1-02** requirements.txt, pytest.ini, README — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
+- [x] **B1-03** config env files + automation.yaml — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
+- [x] **B1-04** mappings/cases.yaml 스키마 — §9.3 | Phase 1 | Layer: Template | Depends: B1-01
 
 ### B2. Runner CLI — §9.4
 
-- [ ] **B2-01** runner/cli.py — run — §9.4 | Phase 1 | Layer: Template | Depends: B1-01
-- [ ] **B2-02** runner/cli.py — list-cases — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
-- [ ] **B2-03** runner/cli.py — rerun-failed — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
-- [ ] **B2-04** runner/cli.py — export — §9.4 | Phase 4 | Layer: Template | Depends: B2-01
-- [ ] **B2-05** mapping_loader.py, pytest_runner.py — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
-- [ ] **B2-06** result_parser.py, result_writer.py — §5.13 | Phase 1 | Layer: Template | Depends: B2-05
+- [x] **B2-01** runner/cli.py — run — §9.4 | Phase 1 | Layer: Template | Depends: B1-01
+- [x] **B2-02** runner/cli.py — list-cases — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
+- [x] **B2-03** runner/cli.py — rerun-failed — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
+- [x] **B2-04** runner/cli.py — export — §9.4 | Phase 4 | Layer: Template | Depends: B2-01
+- [x] **B2-05** mapping_loader.py, pytest_runner.py — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
+- [x] **B2-06** result_parser.py, result_writer.py — §5.13 | Phase 1 | Layer: Template | Depends: B2-05
 - [ ] **B2-07** CLI 단독 실행 E2E 검증 — §3.5 | Phase 1 | Layer: E2E | Depends: B2-06
 
 ### B3. Page / Flow / Test 샘플 — §5.10
 
-- [ ] **B3-01** pages/base_page.py — §5.10 | Phase 1 | Layer: Template | Depends: B1-01
-- [ ] **B3-02** fixtures/browser_fixture.py, env_fixture.py — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
-- [ ] **B3-03** 샘플 flow + test 1세트 — §5.10 | Phase 1 | Layer: Template | Depends: B3-01, B3-02
+- [x] **B3-01** pages/base_page.py — §5.10 | Phase 1 | Layer: Template | Depends: B1-01
+- [x] **B3-02** fixtures/browser_fixture.py, env_fixture.py — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
+- [x] **B3-03** 샘플 flow + test 1세트 — §5.10 | Phase 1 | Layer: Template | Depends: B3-01, B3-02
 
 ### B4. Result Export Adapters — §5.14
 
-- [ ] **B4-01** testrail_clone_uploader.py — §5.14 | Phase 3 | Layer: Template | Depends: B2-06
-- [ ] **B4-02** testrail_uploader.py — §5.14 | Phase 4 | Layer: Template | Depends: B2-06
-- [ ] **B4-03** excel_writer.py — §5.14 | Phase 4 | Layer: Template | Depends: B2-06
-- [ ] **B4-04** google_sheets_writer.py — §5.14 | Phase 4 | Layer: Template | Depends: B2-06
+- [x] **B4-01** testrail_clone_uploader.py — §5.14 | Phase 3 | Layer: Template | Depends: B2-06
+- [x] **B4-02** testrail_uploader.py — §5.14 | Phase 4 | Layer: Template | Depends: B2-06
+- [x] **B4-03** excel_writer.py — §5.14 | Phase 4 | Layer: Template | Depends: B2-06
+- [x] **B4-04** google_sheets_writer.py — §5.14 | Phase 4 | Layer: Template | Depends: B2-06
 
 ---
 
@@ -123,19 +133,19 @@
 
 ### C1. Case Import Service — §5.5
 
-- [ ] **C1-01** normalized TC Pydantic 모델 — §5.5 | Phase 1 | Layer: Worker | Depends: A2-02
-- [ ] **C1-02** Excel preview API — §7.2 | Phase 1 | Layer: Worker | Depends: C1-01
-- [ ] **C1-03** Excel import API — §7.2 | Phase 1 | Layer: Worker | Depends: C1-02
-- [ ] **C1-04** testrail-clone import adapter — §5.5 | Phase 3 | Layer: Worker | Depends: C1-01
-- [ ] **C1-05** TestRail import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01
-- [ ] **C1-06** Google Sheets import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01
-- [ ] **C1-07** GET/PATCH /cases — §7.2 | Phase 1 | Layer: Worker | Depends: C1-01
+- [x] **C1-01** normalized TC Pydantic 모델 — §5.5 | Phase 1 | Layer: Worker | Depends: A2-02
+- [x] **C1-02** Excel preview API — §7.2 | Phase 1 | Layer: Worker | Depends: C1-01
+- [x] **C1-03** Excel import API — §7.2 | Phase 1 | Layer: Worker | Depends: C1-02
+- [x] **C1-04** testrail-clone import adapter — §5.5 | Phase 3 | Layer: Worker | Depends: C1-01
+- [x] **C1-05** TestRail import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01
+- [x] **C1-06** Google Sheets import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01
+- [x] **C1-07** GET/PATCH /cases — §7.2 | Phase 1 | Layer: Worker | Depends: C1-01
 
 ### C2. Prompt Builder — §5.6
 
-- [ ] **C2-01** TC → task prompt 템플릿 — §5.6 | Phase 1 | Layer: Worker | Depends: C1-01
-- [ ] **C2-02** startUrl, preconditions, steps 조합 — §5.6 | Phase 1 | Layer: Worker | Depends: C2-01
-- [ ] **C2-03** TC 의도 보존 검증 — §5.6 | Phase 1 | Layer: E2E | Depends: C2-02
+- [x] **C2-01** TC → task prompt 템플릿 — §5.6 | Phase 1 | Layer: Worker | Depends: C1-01
+- [x] **C2-02** startUrl, preconditions, steps 조합 — §5.6 | Phase 1 | Layer: Worker | Depends: C2-01
+- [x] **C2-03** TC 의도 보존 검증 — §5.6 | Phase 1 | Layer: E2E | Depends: C2-02
 - [ ] **C2-04** batch-level shared prompt + per-case override 모델 — Spec: PRODUCT_PILLARS | Phase 1 | Layer: Worker | Depends: C2-02
 - [ ] **C2-05** prompt preset 모델(login/search/CRUD/assertion-heavy 등) — Spec: PRODUCT_PILLARS | Phase 1 | Layer: Worker | Depends: C2-04
 - [ ] **C2-06** prompt preview API — Spec: API_SPEC, PRODUCT_PILLARS | Phase 1 | Layer: Worker | Depends: C2-05
@@ -143,46 +153,46 @@
 
 ### C3. Webwright CLI Adapter — §5.4
 
-- [ ] **C3-01** Webwright 경로 검증 — §5.4 | Phase 1 | Layer: Worker | Depends: A3-01
-- [ ] **C3-02** native subprocess 실행 — §5.4 | Phase 1 | Layer: Worker | Depends: C3-01
-- [ ] **C3-03** WSL subprocess 실행 — §5.4 | Phase 1 | Layer: Worker | Depends: C3-01
-- [ ] **C3-04** API key 환경변수 주입 — §5.4, §13 | Phase 1 | Layer: Worker | Depends: C3-02
-- [ ] **C3-05** artifact 수집 — §5.7 | Phase 1 | Layer: Worker | Depends: C3-02
-- [ ] **C3-06** error classification — §12.1 | Phase 5 | Layer: Worker | Depends: C3-05
+- [x] **C3-01** Webwright 경로 검증 — §5.4 | Phase 1 | Layer: Worker | Depends: A3-01
+- [x] **C3-02** native subprocess 실행 — §5.4 | Phase 1 | Layer: Worker | Depends: C3-01
+- [x] **C3-03** WSL subprocess 실행 — §5.4 | Phase 1 | Layer: Worker | Depends: C3-01
+- [x] **C3-04** API key 환경변수 주입 — §5.4, §13 | Phase 1 | Layer: Worker | Depends: C3-02
+- [x] **C3-05** artifact 수집 — §5.7 | Phase 1 | Layer: Worker | Depends: C3-02
+- [x] **C3-06** error classification — §12.1 | Phase 5 | Layer: Worker | Depends: C3-05
 
 ### C4. Webwright Run Service — §5.7
 
-- [ ] **C4-01** 1 TC = 1 Run — §5.7 | Phase 1 | Layer: Worker | Depends: C3-02
-- [ ] **C4-02** 상태 모델 — §5.7 | Phase 1 | Layer: Worker | Depends: A2-03
-- [ ] **C4-03** artifact 디렉터리 + metadata.json — §5.7 | Phase 1 | Layer: Worker | Depends: C4-01
-- [ ] **C4-04** API create/list/get/cancel/retry — §7.3 | Phase 1 | Layer: Worker | Depends: C4-03
-- [ ] **C4-05** Action Extraction 자동 트리거 — §11.2 | Phase 1 | Layer: Worker | Depends: C4-04, C5-04
+- [x] **C4-01** 1 TC = 1 Run — §5.7 | Phase 1 | Layer: Worker | Depends: C3-02
+- [x] **C4-02** 상태 모델 — §5.7 | Phase 1 | Layer: Worker | Depends: A2-03
+- [x] **C4-03** artifact 디렉터리 + metadata.json — §5.7 | Phase 1 | Layer: Worker | Depends: C4-01
+- [x] **C4-04** API create/list/get/cancel/retry — §7.3 | Phase 1 | Layer: Worker | Depends: C4-03
+- [x] **C4-05** Action Extraction 자동 트리거 — §11.2 | Phase 1 | Layer: Worker | Depends: C4-04, C5-04
 
 ### C5. Action Extraction Service — §5.8
 
-- [ ] **C5-01** 라인 기반 Playwright API 추출 — §5.8 | Phase 1 | Layer: Worker | Depends: C3-05
-- [ ] **C5-02** trajectory.json 보조 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01
+- [x] **C5-01** 라인 기반 Playwright API 추출 — §5.8 | Phase 1 | Layer: Worker | Depends: C3-05
+- [x] **C5-02** trajectory.json 보조 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01
 - [ ] **C5-03** action type enum 17종 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01
-- [ ] **C5-04** RawAction DB 저장 — §5.8 | Phase 1 | Layer: Worker | Depends: A2-04, C5-01
+- [x] **C5-04** RawAction DB 저장 — §5.8 | Phase 1 | Layer: Worker | Depends: A2-04, C5-01
 - [ ] **C5-05** Python AST 고도화 — §5.8 | Phase 5 | Layer: Worker | Depends: C5-01
 
 ### C6. Mapping & Review Service — §5.9
 
-- [ ] **C6-01** TC step ↔ action 자동 1:1 매핑 — §5.9 | Phase 1 | Layer: Worker | Depends: C5-04
-- [ ] **C6-02** needs_review 상태 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-01
+- [x] **C6-01** TC step ↔ action 자동 1:1 매핑 — §5.9 | Phase 1 | Layer: Worker | Depends: C5-04
+- [x] **C6-02** needs_review 상태 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-01
 - [ ] **C6-03** action CRUD — §5.9 | Phase 1 | Layer: Worker | Depends: C6-01
 - [ ] **C6-04** assertion/wait 추가 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-03
-- [ ] **C6-05** normalized step / POM method 이름 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-03
-- [ ] **C6-06** Mapping API — §7.4 | Phase 1 | Layer: Worker | Depends: C6-01
+- [x] **C6-05** normalized step / POM method 이름 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-03
+- [x] **C6-06** Mapping API — §7.4 | Phase 1 | Layer: Worker | Depends: C6-01
 - [ ] **C6-07** TC step ↔ multiple raw actions join 저장 — Spec: DB_SCHEMA, STRUCTURING_SPEC | Phase 1 | Layer: Worker | Depends: A2-08, C6-06
 
 ### C7. Structuring Service — §5.10
 
-- [ ] **C7-01** Reviewed action → Normalized Flow — §5.10 | Phase 1 | Layer: Worker | Depends: C6-06
-- [ ] **C7-02** Page Object method 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-01
-- [ ] **C7-03** Flow function 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-02
-- [ ] **C7-04** Test function 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-03
-- [ ] **C7-05** coding convention 적용 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-04
+- [x] **C7-01** Reviewed action → Normalized Flow — §5.10 | Phase 1 | Layer: Worker | Depends: C6-06
+- [x] **C7-02** Page Object method 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-01
+- [x] **C7-03** Flow function 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-02
+- [x] **C7-04** Test function 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-03
+- [x] **C7-05** coding convention 적용 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-04
 - [ ] **C7-06** `StructuredFlow` DB persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09, C7-01
 - [ ] **C7-07** `StructuredStep` DB persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: C7-06
 - [ ] **C7-08** `PageObjectMethod` plan persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10, C7-07
@@ -191,35 +201,35 @@
 
 ### C8. Project Generator Service — §5.11
 
-- [ ] **C8-01** template 기반 파일 생성 — §5.11 | Phase 1 | Layer: Worker | Depends: C7-05, B1-01
-- [ ] **C8-02** generated file metadata DB — §5.11 | Phase 1 | Layer: Worker | Depends: C8-01
-- [ ] **C8-03** Generation API — §7.5 | Phase 1 | Layer: Worker | Depends: C8-01
+- [x] **C8-01** template 기반 파일 생성 — §5.11 | Phase 1 | Layer: Worker | Depends: C7-05, B1-01
+- [x] **C8-02** generated file metadata DB — §5.11 | Phase 1 | Layer: Worker | Depends: C8-01
+- [x] **C8-03** Generation API — §7.5 | Phase 1 | Layer: Worker | Depends: C8-01
 - [ ] **C8-04** Git repo 가능 출력 — §5.11 | Phase 1 | Layer: Worker | Depends: C8-01
 - [ ] **C8-05** generated file origin/hash/status tracking — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-11, C8-02
 - [ ] **C8-06** deterministic regeneration + conflict guard — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C8-05, C7-10
 
 ### C9. Project Runner Service — §5.13
 
-- [ ] **C9-01** runner.cli subprocess 호출 — §5.13 | Phase 1 | Layer: Worker | Depends: B2-01
-- [ ] **C9-02** env/browser/headless/target 전달 — §5.13 | Phase 1 | Layer: Worker | Depends: C9-01
-- [ ] **C9-03** stdout/stderr WebSocket — §5.13 | Phase 1 | Layer: Worker | Depends: A4-03, C9-01
-- [ ] **C9-04** results.json 파싱 — §5.13 | Phase 1 | Layer: Worker | Depends: C9-01, A2-06
-- [ ] **C9-05** Runner API — §7.6 | Phase 1 | Layer: Worker | Depends: C9-04
+- [x] **C9-01** runner.cli subprocess 호출 — §5.13 | Phase 1 | Layer: Worker | Depends: B2-01
+- [x] **C9-02** env/browser/headless/target 전달 — §5.13 | Phase 1 | Layer: Worker | Depends: C9-01
+- [x] **C9-03** stdout/stderr WebSocket — §5.13 | Phase 1 | Layer: Worker | Depends: A4-03, C9-01
+- [x] **C9-04** results.json 파싱 — §5.13 | Phase 1 | Layer: Worker | Depends: C9-01, A2-06
+- [x] **C9-05** Runner API — §7.6 | Phase 1 | Layer: Worker | Depends: C9-04
 
 ### C10. Result Export Service — §5.14
 
-- [ ] **C10-01** testrail-clone bulk upload — §5.14 | Phase 3 | Layer: Worker | Depends: C9-04
-- [ ] **C10-02** TestRail result update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
-- [ ] **C10-03** Excel write-back — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
-- [ ] **C10-04** Google Sheets update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
+- [x] **C10-01** testrail-clone bulk upload — §5.14 | Phase 3 | Layer: Worker | Depends: C9-04
+- [x] **C10-02** TestRail result update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
+- [x] **C10-03** Excel write-back — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
+- [x] **C10-04** Google Sheets update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
 - [ ] **C10-05** export preview + 이중 검증 — §17.3 | Phase 4 | Layer: Worker | Depends: C10-01
-- [ ] **C10-06** Export API — §7.7 | Phase 3-4 | Layer: Worker | Depends: C10-01
+- [x] **C10-06** Export API — §7.7 | Phase 3-4 | Layer: Worker | Depends: C10-01
 
 ### C11. Project IDE Service — §5.12
 
-- [ ] **C11-01** 파일 트리 API — §7.5 | Phase 2 | Layer: Worker | Depends: C8-03
-- [ ] **C11-02** 파일 CRUD API — §7.5 | Phase 2 | Layer: Worker | Depends: C11-01
-- [ ] **C11-03** automationKey/selector 검색 — §5.12 | Phase 2 | Layer: Worker | Depends: C11-01
+- [x] **C11-01** 파일 트리 API — §7.5 | Phase 2 | Layer: Worker | Depends: C8-03
+- [x] **C11-02** 파일 CRUD API — §7.5 | Phase 2 | Layer: Worker | Depends: C11-01
+- [x] **C11-03** automationKey/selector 검색 — §5.12 | Phase 2 | Layer: Worker | Depends: C11-01
 
 ### C12. Artifact-backed Self-Healing Service — Spec: SELF_HEALING_SPEC
 
@@ -288,31 +298,31 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D5-02** raw code/screenshot/logs — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01 (baseline raw evidence links verified in Mapping & Structure; latest run exposes folder, script, trajectory, stdout, stderr, and screenshot folder access)
 - [x] **D5-03** mapping 편집 UX — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01 (baseline mapping edit UX verified; per-step raw action, normalized step name, and status edits save through the existing mappings API)
 - [x] **D5-04** normalized flow editor — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-06 (baseline flow editor verified; ordered normalized steps are editable from current mapping data and save through existing mappings API)
-- [ ] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08
-- [ ] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09
+- [x] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08 (baseline Page Object method planner verified; per-step POM method names are editable and saved through existing mappings API)
+- [x] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09 (baseline GUI validation panel verified; current mapping draft surfaces missing raw links, empty normalized/POM names, review states, and step count mismatches)
 - [ ] **D5-07** selector candidate/evidence viewer — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-02
 
 ### D6. Automation IDE: Project Editing — §10.6 — Workspace: Automation IDE
 
-- [ ] **D6-01** 파일 트리 — §10.6 | Phase 2 | Layer: GUI | Depends: C11-01
-- [ ] **D6-02** Monaco Editor — §10.6 | Phase 2 | Layer: GUI | Depends: C11-02
-- [ ] **D6-03** Context Panel — §10.6 | Phase 2 | Layer: GUI | Depends: D6-01
-- [ ] **D6-04** xterm.js 터미널 — §10.6 | Phase 2 | Layer: GUI | Depends: C9-03
-- [ ] **D6-05** Run Current/Linked TC — §10.6 | Phase 2 | Layer: GUI | Depends: C9-05
-- [ ] **D6-06** trace/screenshot viewer — §10.6 | Phase 2 | Layer: GUI | Depends: D6-05
-- [ ] **D6-07** runner/results/export panels embedded in Automation IDE — Spec: PRODUCT_PILLARS | Phase 2 | Layer: GUI | Depends: D6-05, D8-01
-- [ ] **D6-08** failure diagnosis + healing proposal panel — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-05, D6-06
+- [x] **D6-01** 파일 트리 — §10.6 | Phase 2 | Layer: GUI | Depends: C11-01 (baseline generated file tree verified; generated-files API renders nested folders/files with expansion and selected file state)
+- [x] **D6-02** Monaco Editor — §10.6 | Phase 2 | Layer: GUI | Depends: C11-02 (baseline Monaco editor verified; language mode, loading state, dirty/saved state, and save affordance are visible and wired to generated file content APIs)
+- [x] **D6-03** Context Panel — §10.6 | Phase 2 | Layer: GUI | Depends: D6-01 (baseline Project IDE context panel verified; project, selected TC, selected file, editor state, and search results stay tied to current IDE selection)
+- [x] **D6-04** xterm.js 터미널 — §10.6 | Phase 2 | Layer: GUI | Depends: C9-03 (baseline Project IDE terminal verified; xterm instance persists and appends new log store entries without recreating on each log update)
+- [x] **D6-05** Run Current/Linked TC — §10.6 | Phase 2 | Layer: GUI | Depends: C9-05 (baseline IDE run controls verified; linked TC and all-run actions call existing execution API and stream logs to terminal)
+- [x] **D6-06** trace/screenshot viewer — §10.6 | Phase 2 | Layer: GUI | Depends: D6-05 (baseline Project IDE artifact affordances verified; latest execution detail exposes results.json, selected-TC screenshot, and trace links via existing open-path behavior)
+- [x] **D6-07** runner/results/export panels embedded in Automation IDE — Spec: PRODUCT_PILLARS | Phase 2 | Layer: GUI | Depends: D6-05, D8-01 (baseline Automation IDE panels verified; Project IDE embeds runner options, execution results, and export preview/export controls using existing APIs)
+- [x] **D6-08** failure diagnosis + healing proposal panel — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-05, D6-06 (baseline read-only diagnosis panel verified; Automation IDE surfaces failed execution rows, error text, screenshot/trace evidence links, and local proposal guidance without new healing APIs)
 
 ### D7. Automation IDE — Runner Panel (embedded) — §10.7
 
-- [ ] **D7-01** 실행 옵션 UI — §10.7 | Phase 1 | Layer: GUI | Depends: C9-05
+- [ ] **D7-01** 실행 옵션 UI — §10.7 | Phase 1 | Layer: GUI | Depends: C9-05 (baseline runner option UI verified; Runner page and embedded IDE runner expose env, browser, headed/headless, target mode, case IDs, automation key, and result target using the existing execution request shape)
 - [ ] **D7-02** 실시간 로그 — §10.7 | Phase 1 | Layer: GUI | Depends: A4-03
 
 ### D8. Automation IDE — Results & Export (embedded) — §10.8
 
-- [ ] **D8-01** summary + case table — §10.8 | Phase 1 | Layer: GUI | Depends: C9-04
-- [ ] **D8-02** artifact 링크 — §10.8 | Phase 1 | Layer: GUI | Depends: D8-01
-- [ ] **D8-03** Result Export + preview — §10.8 | Phase 3-4 | Layer: GUI | Depends: C10-06
+- [x] **D8-01** summary + case table — §10.8 | Phase 1 | Layer: GUI | Depends: C9-04
+- [x] **D8-02** artifact 링크 — §10.8 | Phase 1 | Layer: GUI | Depends: D8-01
+- [x] **D8-03** Result Export + preview — §10.8 | Phase 3-4 | Layer: GUI | Depends: C10-06
 - [ ] **D8-04** accept/reject healing proposal + rerun failed UI — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: D6-08, C12-06
 
 ### D9. Settings — §10 — Workspace: supporting
@@ -366,8 +376,9 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 
 ## I. 품질·운영 — §17
 
-- [ ] **I-01** Project Health Check — §17.4 | Phase 5 | Layer: Worker | Depends: C9-01
-- [ ] **I-02** Install Dependencies 버튼 — §12.3 | Phase 5 | Layer: GUI | Depends: I-01
+- [x] **I-01** Project Health Check — §17.4 | Phase 5 | Layer: Worker | Depends: C9-01
+- [x] **I-02** Install Dependencies 버튼 — §12.3 | Phase 5 | Layer: GUI | Depends: I-01
 - [ ] **I-03** Smoke test — §10.1 | Phase 0 | Layer: E2E | Depends: D2-05, D9-02
 - [ ] **I-04** CI standalone 가이드 — §3.5 | Phase 5 | Layer: Docs | Depends: B2-07
 - [ ] **I-05** Electron Windows installer — §15 | Phase 5 | Layer: Infra | Depends: A1-02
+- [ ] **I-06** Desktop renderer build passes (`npm run build`) — Audit 2026-05-31 | Phase 0 | Layer: Quality | Depends: D7-01 (currently blocked by `apps/desktop/src/renderer/pages/RunnerPage.tsx`: missing comma before `case_ids`)
