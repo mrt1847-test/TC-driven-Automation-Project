@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type TestCase } from '@/lib/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, type NormalizedTestCase, type TestCase } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 type ImportSourceType = 'excel' | 'testrail-clone' | 'testrail' | 'google-sheets'
@@ -37,6 +37,12 @@ type ImportSummary = {
   sampleTitles: string[]
 }
 
+type IntegrationSettings = {
+  testrailClone?: { baseUrl?: string; enabled?: boolean }
+  testrail?: { baseUrl?: string; enabled?: boolean }
+  googleSheets?: { enabled?: boolean }
+}
+
 const SOURCE_OPTIONS: { value: ImportSourceType; label: string }[] = [
   { value: 'excel', label: 'Excel' },
   { value: 'testrail-clone', label: 'testrail-clone' },
@@ -67,11 +73,46 @@ export function ImportPage() {
   const [preview, setPreview] = useState<ExcelPreviewResponse | null>(null)
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const [cloneProjectId, setCloneProjectId] = useState('')
+  const [cloneSuiteId, setCloneSuiteId] = useState('')
+  const [clonePreview, setClonePreview] = useState<NormalizedTestCase[] | null>(null)
+  const [testrailProjectId, setTestrailProjectId] = useState('')
+  const [testrailSuiteId, setTestrailSuiteId] = useState('')
+  const [testrailPreview, setTestrailPreview] = useState<NormalizedTestCase[] | null>(null)
+  const [spreadsheetId, setSpreadsheetId] = useState('')
+  const [sheetsPreview, setSheetsPreview] = useState<NormalizedTestCase[] | null>(null)
+
+  const settingsQuery = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api.settings.get() as Promise<{ integrations?: IntegrationSettings }>
+  })
+  const integrations = settingsQuery.data?.integrations || {}
 
   function buildExcelRequest() {
     return {
       file_path: filePath,
       sheet_name: sheetName.trim() || undefined,
+      column_mapping: columnMapping
+    }
+  }
+
+  function buildCloneRequest() {
+    return {
+      project_id: cloneProjectId.trim(),
+      suite_id: cloneSuiteId.trim() || undefined
+    }
+  }
+
+  function buildTestrailRequest() {
+    return {
+      project_id: Number(testrailProjectId),
+      suite_id: testrailSuiteId.trim() ? Number(testrailSuiteId) : undefined
+    }
+  }
+
+  function buildGoogleSheetsRequest() {
+    return {
+      spreadsheet_id: spreadsheetId.trim(),
+      sheet_name: sheetName.trim() || 'Cases',
       column_mapping: columnMapping
     }
   }
@@ -88,12 +129,16 @@ export function ImportPage() {
     setSource(next)
     setPreview(null)
     setImportSummary(null)
+    setClonePreview(null)
+    setTestrailPreview(null)
+    setSheetsPreview(null)
   }
 
   function updateColumnMapping(key: keyof ExcelColumnMapping, value: string) {
     setColumnMapping((current) => ({ ...current, [key]: value }))
     setPreview(null)
     setImportSummary(null)
+    setSheetsPreview(null)
   }
 
   const previewMut = useMutation({
@@ -116,9 +161,31 @@ export function ImportPage() {
     }
   })
 
+  const clonePreviewMut = useMutation({
+    mutationFn: () => api.cases.previewTestrailClone(project!.id, buildCloneRequest()),
+    onSuccess: (data) => setClonePreview(data)
+  })
+
   const cloneMut = useMutation({
-    mutationFn: () => api.cases.importTestrailClone(project!.id, { project_id: cloneProjectId }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+    mutationFn: () => api.cases.importTestrailClone(project!.id, buildCloneRequest()),
+    onSuccess: (cases) => {
+      setImportSummary({
+        imported: cases.length,
+        sampleTitles: cases.slice(0, 5).map((item) => item.title)
+      })
+      setClonePreview(null)
+      qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+    }
+  })
+
+  const testrailPreviewMut = useMutation({
+    mutationFn: () => api.cases.previewTestrail(project!.id, buildTestrailRequest()),
+    onSuccess: (data) => setTestrailPreview(data)
+  })
+
+  const sheetsPreviewMut = useMutation({
+    mutationFn: () => api.cases.previewGoogleSheets(project!.id, buildGoogleSheetsRequest()),
+    onSuccess: (data) => setSheetsPreview(data)
   })
 
   if (!project) return <p>Select a project on Dashboard first.</p>
@@ -141,8 +208,8 @@ export function ImportPage() {
         <p className="text-xs text-slate-500">
           {source === 'excel' && 'Import manual test cases from an Excel workbook.'}
           {source === 'testrail-clone' && 'Import cases from a local testrail-clone project.'}
-          {source === 'testrail' && 'TestRail import is planned for a later phase.'}
-          {source === 'google-sheets' && 'Google Sheets import is planned for a later phase.'}
+          {source === 'testrail' && 'Connect to TestRail with project and suite identifiers.'}
+          {source === 'google-sheets' && 'Import cases from a shared Google Sheet with column mapping.'}
         </p>
       </section>
 
@@ -176,21 +243,7 @@ export function ImportPage() {
             />
           </label>
 
-          <div className="space-y-2">
-            <h4 className="text-xs font-medium text-slate-400">Column mapping</h4>
-            <div className="grid grid-cols-2 gap-3">
-              {(Object.keys(DEFAULT_COLUMN_MAPPING) as Array<keyof ExcelColumnMapping>).map((key) => (
-                <label key={key} className="block text-xs text-slate-400">
-                  {key.replace(/_/g, ' ')}
-                  <input
-                    className={`${inputClass} mt-1`}
-                    value={columnMapping[key]}
-                    onChange={(e) => updateColumnMapping(key, e.target.value)}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
+          <ColumnMappingFields mapping={columnMapping} onChange={updateColumnMapping} />
 
           <div className="flex flex-wrap gap-2">
             <button
@@ -254,54 +307,184 @@ export function ImportPage() {
             </div>
           )}
 
-          {importSummary && (
-            <div className="rounded border border-green-800 bg-green-950/20 p-3 text-sm">
-              <div className="font-medium text-green-300">Import complete</div>
-              <p className="mt-1 text-slate-300">Imported {importSummary.imported} test case(s). TC List will refresh on next view.</p>
-              {importSummary.sampleTitles.length > 0 && (
-                <ul className="mt-2 list-disc pl-5 text-xs text-slate-400">
-                  {importSummary.sampleTitles.map((title) => (
-                    <li key={title}>{title}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
+          {importSummary && <ImportSummaryBanner summary={importSummary} />}
         </section>
       )}
 
       {source === 'testrail-clone' && (
-        <section className="rounded border border-slate-800 bg-slate-900 p-4 space-y-2">
+        <section className="rounded border border-slate-800 bg-slate-900 p-4 space-y-4">
           <h3 className="text-sm font-medium">testrail-clone import</h3>
-          <input
-            className={inputClass}
-            placeholder="testrail-clone projectId"
-            value={cloneProjectId}
-            onChange={(e) => setCloneProjectId(e.target.value)}
+          <ConnectorIntegrationBanner
+            enabled={integrations.testrailClone?.enabled === true}
+            label="testrail-clone"
+            baseUrl={integrations.testrailClone?.baseUrl}
           />
-          <button
-            className="px-4 py-2 bg-green-600 rounded disabled:opacity-50"
-            disabled={!cloneProjectId || cloneMut.isPending}
-            type="button"
-            onClick={() => cloneMut.mutate()}
-          >
-            {cloneMut.isPending ? 'Importing...' : 'Import from testrail-clone'}
-          </button>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-xs text-slate-400">
+              Project ID
+              <input
+                className={`${inputClass} mt-1`}
+                placeholder="testrail-clone projectId"
+                value={cloneProjectId}
+                onChange={(e) => {
+                  setCloneProjectId(e.target.value)
+                  setClonePreview(null)
+                  setImportSummary(null)
+                }}
+              />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Suite ID (optional)
+              <input
+                className={`${inputClass} mt-1`}
+                placeholder="Filter by suite"
+                value={cloneSuiteId}
+                onChange={(e) => {
+                  setCloneSuiteId(e.target.value)
+                  setClonePreview(null)
+                }}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
+              disabled={!cloneProjectId || clonePreviewMut.isPending}
+              type="button"
+              onClick={() => clonePreviewMut.mutate()}
+            >
+              {clonePreviewMut.isPending ? 'Previewing...' : 'Preview'}
+            </button>
+            <button
+              className="px-4 py-2 bg-green-600 rounded disabled:opacity-50"
+              disabled={!cloneProjectId || cloneMut.isPending}
+              type="button"
+              onClick={() => cloneMut.mutate()}
+            >
+              {cloneMut.isPending ? 'Importing...' : 'Import from testrail-clone'}
+            </button>
+          </div>
+          {clonePreviewMut.isError && (
+            <p className="text-sm text-red-400">Preview failed. Check project ID, suite ID, and Settings → Integrations base URL.</p>
+          )}
+          {cloneMut.isError && (
+            <p className="text-sm text-red-400">Import failed. Preview first to confirm connector access.</p>
+          )}
+          {clonePreview && <ConnectorCasePreviewTable cases={clonePreview} />}
+          {importSummary && <ImportSummaryBanner summary={importSummary} />}
         </section>
       )}
 
       {source === 'testrail' && (
-        <PlannedSourcePanel
-          title="TestRail"
-          description="Connect to TestRail with project, suite, and API credentials. Baseline connector UI ships in a later checklist batch."
-        />
+        <section className="rounded border border-slate-800 bg-slate-900 p-4 space-y-4">
+          <h3 className="text-sm font-medium">TestRail import</h3>
+          <ConnectorIntegrationBanner
+            enabled={integrations.testrail?.enabled === true}
+            label="TestRail"
+            baseUrl={integrations.testrail?.baseUrl}
+          />
+          <p className="text-xs text-slate-500">
+            API credentials and durable import are configured in Settings. Preview uses the partial Worker connector response.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-xs text-slate-400">
+              Project ID
+              <input
+                className={`${inputClass} mt-1`}
+                placeholder="e.g. 12"
+                value={testrailProjectId}
+                onChange={(e) => {
+                  setTestrailProjectId(e.target.value)
+                  setTestrailPreview(null)
+                }}
+              />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Suite ID (optional)
+              <input
+                className={`${inputClass} mt-1`}
+                placeholder="e.g. 3"
+                value={testrailSuiteId}
+                onChange={(e) => {
+                  setTestrailSuiteId(e.target.value)
+                  setTestrailPreview(null)
+                }}
+              />
+            </label>
+          </div>
+          <button
+            className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
+            disabled={!testrailProjectId || testrailPreviewMut.isPending}
+            type="button"
+            onClick={() => testrailPreviewMut.mutate()}
+          >
+            {testrailPreviewMut.isPending ? 'Previewing...' : 'Preview'}
+          </button>
+          {testrailPreviewMut.isError && (
+            <p className="text-sm text-red-400">Preview failed. Check project/suite IDs and TestRail integration settings.</p>
+          )}
+          {testrailPreview && (
+            <>
+              <ConnectorCasePreviewTable cases={testrailPreview} />
+              <p className="text-xs text-slate-500">Import persistence lands with C1-05 durable connector work.</p>
+            </>
+          )}
+        </section>
       )}
 
       {source === 'google-sheets' && (
-        <PlannedSourcePanel
-          title="Google Sheets"
-          description="Import cases from a shared Google Sheet after OAuth or service account setup. Baseline connector UI ships in a later checklist batch."
-        />
+        <section className="rounded border border-slate-800 bg-slate-900 p-4 space-y-4">
+          <h3 className="text-sm font-medium">Google Sheets import</h3>
+          <ConnectorIntegrationBanner
+            enabled={integrations.googleSheets?.enabled === true}
+            label="Google Sheets"
+          />
+          <p className="text-xs text-slate-500">
+            OAuth or service account setup is managed in Settings. Preview uses the partial Worker connector response.
+          </p>
+          <label className="block text-xs text-slate-400">
+            Spreadsheet ID
+            <input
+              className={`${inputClass} mt-1`}
+              placeholder="Spreadsheet ID from the sheet URL"
+              value={spreadsheetId}
+              onChange={(e) => {
+                setSpreadsheetId(e.target.value)
+                setSheetsPreview(null)
+              }}
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            Sheet name
+            <input
+              className={`${inputClass} mt-1`}
+              value={sheetName}
+              onChange={(e) => {
+                setSheetName(e.target.value)
+                setSheetsPreview(null)
+              }}
+              placeholder="Cases"
+            />
+          </label>
+          <ColumnMappingFields mapping={columnMapping} onChange={updateColumnMapping} />
+          <button
+            className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
+            disabled={!spreadsheetId || sheetsPreviewMut.isPending}
+            type="button"
+            onClick={() => sheetsPreviewMut.mutate()}
+          >
+            {sheetsPreviewMut.isPending ? 'Previewing...' : 'Preview'}
+          </button>
+          {sheetsPreviewMut.isError && (
+            <p className="text-sm text-red-400">Preview failed. Check spreadsheet ID, sheet name, and column mapping.</p>
+          )}
+          {sheetsPreview && (
+            <>
+              <ConnectorCasePreviewTable cases={sheetsPreview} />
+              <p className="text-xs text-slate-500">Import persistence lands with C1-06 durable connector work.</p>
+            </>
+          )}
+        </section>
       )}
     </div>
   )
@@ -312,12 +495,104 @@ function formatCell(value: unknown) {
   return String(value)
 }
 
-function PlannedSourcePanel({ title, description }: { title: string; description: string }) {
+function ColumnMappingFields({
+  mapping,
+  onChange
+}: {
+  mapping: ExcelColumnMapping
+  onChange: (key: keyof ExcelColumnMapping, value: string) => void
+}) {
   return (
-    <section className="rounded border border-dashed border-slate-700 bg-slate-900/50 p-4 space-y-2">
-      <h3 className="text-sm font-medium text-slate-300">{title}</h3>
-      <p className="text-sm text-slate-400">{description}</p>
-      <p className="text-xs text-slate-500">This source type is listed for workflow planning; import actions are disabled until the connector baseline lands.</p>
-    </section>
+    <div className="space-y-2">
+      <h4 className="text-xs font-medium text-slate-400">Column mapping</h4>
+      <div className="grid grid-cols-2 gap-3">
+        {(Object.keys(DEFAULT_COLUMN_MAPPING) as Array<keyof ExcelColumnMapping>).map((key) => (
+          <label key={key} className="block text-xs text-slate-400">
+            {key.replace(/_/g, ' ')}
+            <input
+              className={`${inputClass} mt-1`}
+              value={mapping[key]}
+              onChange={(e) => onChange(key, e.target.value)}
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ConnectorIntegrationBanner({
+  label,
+  enabled,
+  baseUrl
+}: {
+  label: string
+  enabled: boolean
+  baseUrl?: string
+}) {
+  return (
+    <div className="rounded border border-slate-800 bg-slate-950/60 p-3 text-xs space-y-1">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-slate-300">{label}</span>
+        <span className={`px-2 py-0.5 rounded ${enabled ? 'bg-green-900/40 text-green-300' : 'bg-slate-800 text-slate-400'}`}>
+          {enabled ? 'Enabled in Settings' : 'Disabled in Settings'}
+        </span>
+      </div>
+      {baseUrl ? (
+        <p className="text-slate-500">Base URL: {baseUrl}</p>
+      ) : (
+        <p className="text-slate-500">Configure integration credentials in Settings → Integrations.</p>
+      )}
+    </div>
+  )
+}
+
+function ConnectorCasePreviewTable({ cases }: { cases: NormalizedTestCase[] }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-slate-400">Previewing {cases.length} case(s)</p>
+      <div className="overflow-auto rounded border border-slate-800">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-slate-950 text-left text-slate-400">
+              <th className="p-2">Source ID</th>
+              <th className="p-2">Title</th>
+              <th className="p-2">Automation Key</th>
+              <th className="p-2">Steps</th>
+              <th className="p-2">Expected</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cases.map((item) => (
+              <tr key={`${item.source_id}-${item.automation_key}`} className="border-t border-slate-800">
+                <td className="p-2">{formatCell(item.source_id)}</td>
+                <td className="p-2">{formatCell(item.title)}</td>
+                <td className="p-2">{formatCell(item.automation_key)}</td>
+                <td className="p-2">{item.steps?.length ?? 0}</td>
+                <td className="p-2 max-w-xs truncate" title={formatCell(item.expected_result)}>
+                  {formatCell(item.expected_result ?? item.steps?.[0]?.expected)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ImportSummaryBanner({ summary }: { summary: ImportSummary }) {
+  return (
+    <div className="rounded border border-green-800 bg-green-950/20 p-3 text-sm">
+      <div className="font-medium text-green-300">Import complete</div>
+      <p className="mt-1 text-slate-300">Imported {summary.imported} test case(s). TC List will refresh on next view.</p>
+      {summary.sampleTitles.length > 0 && (
+        <ul className="mt-2 list-disc pl-5 text-xs text-slate-400">
+          {summary.sampleTitles.map((title) => (
+            <li key={title}>{title}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

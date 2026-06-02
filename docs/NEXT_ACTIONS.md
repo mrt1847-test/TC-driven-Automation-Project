@@ -1,6 +1,6 @@
 # Next Actions
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-02
 
 Goal: keep the next development batch to roughly one PR. Direction lives in [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md). **Product workspace IA** lives in [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md). Progress should be tracked by flipping exactly one line in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md) from `[ ]` to `[x]`.
 
@@ -19,6 +19,8 @@ Goal: keep the next development batch to roughly one PR. Direction lives in [web
 - [Self-Healing Spec](./SELF_HEALING_SPEC.md): artifact-backed selector healing and failure diagnosis contract.
 - [DB Schema](./DB_SCHEMA.md): relational schema needed for durable structuring and regeneration.
 - [Generated Project Spec](./GENERATED_PROJECT_SPEC.md): generated Playwright/pytest project contract.
+- [CI Standalone Guide](./CI_STANDALONE_GUIDE.md): generated project standalone CI command order, artifacts, and environment notes.
+- [Windows Installer Guide](./WINDOWS_INSTALLER.md): Electron Windows packaging path, prerequisites, output, and signing limitations.
 - [Workflow Spec](./WORKFLOW_SPEC.md): E2E workflow sequence and acceptance criteria.
 - [Implementation Checklist](./IMPLEMENTATION_CHECKLIST.md): execution order, phase, layer, and dependency tracking.
 
@@ -33,22 +35,26 @@ Goal: keep the next development batch to roughly one PR. Direction lives in [web
 
 ## Current batch
 
-**Section:** D7. Runner
+**Section:** C. Worker Service / Artifact-backed Self-Healing
 
 **Checklist line (exact line done when this is `[x]`):**
 
-- [ ] **D7-02** 실시간 로그 — §10.7 | Phase 1 | Layer: GUI | Depends: A4-03
+- [ ] **C12-04** failure → structured step/POM method link resolver — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-08, C12-03
 
 ### Scope (only what closes the line above)
 
-- Add or verify baseline real-time runner log behavior.
-- Reuse the existing WebSocket log stream and shared log store.
-- Keep logs visible from Runner/Automation IDE without changing backend log semantics.
+- Add a lightweight resolver that links failed execution result context to likely `StructuredStep` / `PageObjectMethod` rows.
+- Use automation key plus persisted mappings/structured/page object metadata where available.
+- Persist or return resolver metadata enough for later healing proposal generation.
+- Keep existing execution artifact indexing and result detail behavior working.
+- When it ships, close the checklist line with a short note such as `(baseline failure-to-structure resolver verified)`.
 
 ### Out of scope for this batch
 
-- Adding new logging APIs.
-- Implementing historical log persistence beyond the current execution/log stream.
+- Healing proposal generation APIs.
+- Accept/apply/regenerate/rerun behavior.
+- GUI evidence viewer changes.
+- Automatic selector scoring/patching.
 - Marking multiple already-present checklist lines in the same PR.
 
 ---
@@ -59,8 +65,8 @@ Pick only unchecked lines from below when replacing **Current batch**.
 
 | Suggested order | Section | Checklist line |
 |-----------------|---------|----------------|
-| 1 | D8 | D8-01 summary + case table — §10.8 |
-| 2 | D8 | D8-02 artifact 링크 — §10.8 |
+| 1 | C | C12-05 healing proposal generation API — Spec: SELF_HEALING_SPEC, API_SPEC |
+| 2 | C | C12-06 accepted proposal apply/regenerate/rerun flow — Spec: SELF_HEALING_SPEC |
 
 ## Review Notes
 

@@ -1,12 +1,43 @@
 {
   "appId": "com.tcautomation.studio",
   "productName": "TC Automation Studio",
-  "directories": { "output": "release" },
-  "files": ["out"],
+  "asar": true,
+  "directories": {
+    "output": "release"
+  },
+  "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+  "files": [
+    "out/**/*",
+    "package.json"
+  ],
   "win": {
-    "target": ["nsis"]
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "publisherName": "TC Automation Studio"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
   },
   "extraResources": [
-    { "from": "../worker", "to": "worker", "filter": ["**/*"] }
+    {
+      "from": "../worker",
+      "to": "worker",
+      "filter": [
+        "worker/**/*",
+        "requirements.txt",
+        "pyproject.toml",
+        "!**/__pycache__/**",
+        "!**/.pytest_cache/**",
+        "!**/*.pyc",
+        "!tests/**"
+      ]
+    }
   ]
 }

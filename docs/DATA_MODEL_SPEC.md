@@ -1,6 +1,6 @@
 # Data Model Spec
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-02
 
 이 문서는 Local Worker의 SQLite/SQLModel 데이터 모델 계약을 정리한다. 모델은 `automation_key`를 중심으로 TC, raw run, mapping, structured flow, generated file, execution result를 연결한다.
 
@@ -15,7 +15,7 @@ Artifact-backed self-healing is specified in [SELF_HEALING_SPEC.md](./SELF_HEALI
 |-----------|------------------|----------------|
 | **Generate Raw** | `TestCase`, `WebwrightRun`, `RawAction`, prompt payload (C2), import metadata | `TestCase` + latest `WebwrightRun` + `RawAction[]` |
 | **Automation IDE** | `CaseActionMapping`, `StructuredFlow`, `StructuredStep`, `PageObject`, `PageObjectMethod`, `GeneratedFile`, `ExecutionRun`, `ExecutionResult`, `ExportLog`, `HealingProposal` | reviewed mappings, generated files, execution results |
-| **Shared** | `Project`, settings (file), credentials (OS store) | `project_id`, app config |
+| **Shared** | `SchemaVersion`, `Project`, settings (file), credentials (OS store) | schema baseline, `project_id`, app config |
 
 Reverse handoff (Automation IDE → Generate Raw rerun) reuses `TestCase` and `WebwrightRun`; no separate handoff table at baseline.
 
@@ -48,6 +48,18 @@ Project
       │   └─ HealingProposal
       └─ ExportLog
 ```
+
+## SchemaVersion
+
+Checklist: A2-12
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `id` | string | yes | Baseline marker key, currently `tc_studio` |
+| `version` | int | yes | Current local schema baseline version |
+| `description` | string | no | Human-readable baseline description |
+| `applied_at` | datetime | yes | UTC timestamp first recorded |
+| `updated_at` | datetime | yes | UTC timestamp last updated |
 
 ## Project
 
@@ -263,7 +275,7 @@ Checklist: C7-02, C7-05
 
 ## ArtifactAsset
 
-Checklist: self-healing support
+Checklist: A2-13
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
@@ -280,7 +292,7 @@ Checklist: self-healing support
 
 ## SelectorCandidate
 
-Checklist: self-healing support
+Checklist: A2-14
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
@@ -296,7 +308,7 @@ Checklist: self-healing support
 
 ## HealingProposal
 
-Checklist: self-healing support
+Checklist: A2-15
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
@@ -394,5 +406,5 @@ Checklist: C10, D8-03
 ## Migration Rule
 
 - During early Phase 0/1, `SQLModel.metadata.create_all` is acceptable for baseline local development.
-- Before broader use, add explicit migrations or a lightweight schema version table.
+- The A2-12 baseline records the current schema in `schema_versions`; broader production use still needs explicit migrations.
 - Any field rename must include a data migration note in the PR.

@@ -13,6 +13,7 @@ from worker.core.log_stream import log_streams
 from worker.services.prompt_builder import build_webwright_prompt
 from worker.services.case_import import case_to_normalized
 from worker.models.db import TestCase, WebwrightRun, WebwrightRunStatus
+from worker.services.artifact_indexing import index_webwright_run_artifacts
 from sqlmodel import Session
 
 
@@ -153,6 +154,7 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
     session.add(case)
     session.commit()
     session.refresh(run)
+    index_webwright_run_artifacts(session, run)
     return run
 
 
@@ -193,10 +195,28 @@ if __name__ == "__main__":
         started_at=datetime.utcnow(),
         ended_at=datetime.utcnow(),
     )
+    metadata = {
+        "runId": output_root.name,
+        "automationKey": case.automation_key,
+        "caseId": case.source_case_id,
+        "sourceType": case.source_type,
+        "startUrl": case.start_url or "https://example.com",
+        "status": run.status,
+        "startedAt": run.started_at.isoformat() if run.started_at else None,
+        "endedAt": run.ended_at.isoformat() if run.ended_at else None,
+        "artifacts": {
+            "finalScript": "final_script.py",
+            "trajectory": "trajectory.json",
+            "stdout": "stdout.log",
+            "stderr": "stderr.log",
+        },
+    }
+    (output_root / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     case.status = "webwright_completed"
     session.add(run)
     session.add(case)
     session.commit()
     session.refresh(run)
+    index_webwright_run_artifacts(session, run)
     await log_streams.publish(job_id, f"[mock] Created sample Webwright run for {case.automation_key}")
     return run

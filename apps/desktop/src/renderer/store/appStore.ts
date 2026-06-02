@@ -65,7 +65,13 @@ export const useAppStore = create<AppState>((set) => ({
     } else {
       localStorage.removeItem(CURRENT_PROJECT_KEY)
     }
-    set({ currentProject: p })
+    set((state) => {
+      const selectedCase = p && state.selectedCase?.project_id === p.id ? state.selectedCase : null
+      if (!selectedCase) {
+        localStorage.removeItem(SELECTED_CASE_KEY)
+      }
+      return { currentProject: p, selectedCase }
+    })
   },
   setSelectedCase: (c) => {
     if (c) {

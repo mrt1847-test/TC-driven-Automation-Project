@@ -22,6 +22,8 @@ Setup Wizard와 Settings는 supporting surface이며 product workspace가 아니
 - [Self-Healing Spec](docs/SELF_HEALING_SPEC.md)
 - [DB Schema](docs/DB_SCHEMA.md)
 - [Generated Project Spec](docs/GENERATED_PROJECT_SPEC.md)
+- [CI Standalone Guide](docs/CI_STANDALONE_GUIDE.md)
+- [Windows Installer Guide](docs/WINDOWS_INSTALLER.md)
 - [Workflow Spec](docs/WORKFLOW_SPEC.md)
 - [Implementation Checklist](docs/IMPLEMENTATION_CHECKLIST.md)
 - [Next Actions](docs/NEXT_ACTIONS.md)
@@ -66,6 +68,18 @@ cd packages/generated-template
 pip install -r requirements.txt
 python -m runner.cli list-cases
 ```
+
+## Windows installer
+
+```powershell
+npm run build
+npm run pack:win
+npm run dist:win
+```
+
+Installer artifacts are written to `apps/desktop/release/`. See
+[Windows Installer Guide](docs/WINDOWS_INSTALLER.md) for prerequisites, output
+paths, and current signing limitations.
 
 ## 환경
 

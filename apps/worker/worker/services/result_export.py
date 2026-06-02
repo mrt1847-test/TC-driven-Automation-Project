@@ -7,30 +7,87 @@ from pathlib import Path
 
 import httpx
 from openpyxl import load_workbook
+from typing import Any
+
 from sqlmodel import Session
 
 from worker.core.config import load_settings, new_id
 from worker.models.db import ExportLog, ExecutionRun
 
 
+def _load_results(execution: ExecutionRun) -> dict[str, Any]:
+    if not execution.result_path or not Path(execution.result_path).exists():
+        raise FileNotFoundError("results.json not found")
+    return json.loads(Path(execution.result_path).read_text(encoding="utf-8"))
+
+
+def _result_updates(execution: ExecutionRun) -> list[dict[str, Any]]:
+    results = _load_results(execution)
+    return [
+        {
+            "automationKey": case.get("automationKey"),
+            "sourceType": case.get("sourceType"),
+            "sourceCaseId": case.get("sourceCaseId"),
+            "title": case.get("title"),
+            "status": case.get("status"),
+            "durationMs": case.get("durationMs"),
+            "runId": execution.run_id,
+            "comment": case.get("error") or "Automation passed",
+            "artifacts": case.get("artifacts") or {},
+        }
+        for case in results.get("cases", [])
+    ]
+
+
+def _log_export(
+    session: Session,
+    execution: ExecutionRun,
+    target: str,
+    status: str,
+    updates: list[dict[str, Any]],
+    extra: dict[str, Any] | None = None,
+) -> None:
+    log_payload = {
+        "runId": execution.run_id,
+        "updates": [
+            {
+                "automationKey": item.get("automationKey"),
+                "sourceCaseId": item.get("sourceCaseId"),
+                "status": item.get("status"),
+            }
+            for item in updates
+        ],
+    }
+    if extra:
+        log_payload.update(extra)
+    session.add(ExportLog(
+        id=new_id("exp"),
+        execution_run_id=execution.id,
+        target=target,
+        status=status,
+        message=json.dumps(log_payload, ensure_ascii=False),
+    ))
+    session.commit()
+
+
 async def export_testrail_clone(session: Session, execution: ExecutionRun, preview: bool = False) -> dict:
     settings = load_settings()
     base_url = settings.integrations.get("testrailClone", {}).get("baseUrl", "http://localhost:3000")
-    if not execution.result_path or not Path(execution.result_path).exists():
-        raise FileNotFoundError("results.json not found")
-
-    results = json.loads(Path(execution.result_path).read_text(encoding="utf-8"))
+    updates = _result_updates(execution)
     payload = {
         "runId": execution.run_id,
         "results": [
             {
-                "automationKey": c.get("automationKey"),
-                "status": c.get("status"),
-                "durationMs": c.get("durationMs"),
-                "comment": c.get("error") or "Automation passed",
-                "artifacts": [],
+                "automationKey": item.get("automationKey"),
+                "sourceType": item.get("sourceType"),
+                "sourceCaseId": item.get("sourceCaseId"),
+                "title": item.get("title"),
+                "status": item.get("status"),
+                "durationMs": item.get("durationMs"),
+                "comment": item.get("comment"),
+                "artifacts": item.get("artifacts"),
             }
-            for c in results.get("cases", [])
+            for item in updates
         ],
     }
     if preview:
@@ -39,22 +96,20 @@ async def export_testrail_clone(session: Session, execution: ExecutionRun, previ
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(f"{base_url.rstrip('/')}/api/automation/results/bulk", json=payload)
         ok = resp.status_code < 400
-        session.add(ExportLog(
-            id=new_id("exp"),
-            execution_run_id=execution.id,
-            target="testrail-clone",
-            status="success" if ok else "failed",
-            message=resp.text[:500],
-        ))
-        session.commit()
+        _log_export(
+            session,
+            execution,
+            "testrail-clone",
+            "success" if ok else "failed",
+            updates,
+            {"response": resp.text[:300]},
+        )
         resp.raise_for_status()
         return resp.json()
 
 
 def export_excel(session: Session, execution: ExecutionRun, preview: bool = False) -> dict:
-    if not execution.result_path:
-        raise FileNotFoundError("results.json not found")
-    results = json.loads(Path(execution.result_path).read_text(encoding="utf-8"))
+    results = _load_results(execution)
     mapping_path = Path(execution.result_path).parents[3] / "mappings" / "cases.yaml"
     import yaml
     cases_map = yaml.safe_load(mapping_path.read_text(encoding="utf-8")) if mapping_path.exists() else {"cases": []}
@@ -74,14 +129,17 @@ def export_excel(session: Session, execution: ExecutionRun, preview: bool = Fals
             "row": excel_meta.get("row"),
             "status": case.get("status"),
             "runId": execution.run_id,
+            "comment": case.get("error") or "Automation passed",
         })
 
     if preview:
         return {"preview": True, "updates": updates}
 
+    failed = []
     for item in updates:
         src = Path(item["file"])
         if not src.exists():
+            failed.append({**item, "error": "source file not found"})
             continue
         backup = src.with_suffix(src.suffix + f".backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}")
         shutil.copy2(src, backup)
@@ -93,21 +151,41 @@ def export_excel(session: Session, execution: ExecutionRun, preview: bool = Fals
             "Automation Result": item["status"],
             "Automation Run ID": execution.run_id,
             "Automation Executed At": datetime.utcnow().isoformat(),
-            "Automation Comment": item.get("error") or "",
+            "Automation Comment": item.get("comment") or "",
         }
         for col_name, value in col_map.items():
             if col_name in headers:
-                ws.cell(row=row, column=headers.index(col_name) + 1, value=value)
+                column = headers.index(col_name) + 1
+            else:
+                column = len(headers) + 1
+                ws.cell(row=1, column=column, value=col_name)
+                headers.append(col_name)
+            ws.cell(row=row, column=column, value=value)
         wb.save(src)
 
-    session.add(ExportLog(id=new_id("exp"), execution_run_id=execution.id, target="excel", status="success"))
-    session.commit()
-    return {"updated": len(updates)}
+    updated = len(updates) - len(failed)
+    _log_export(
+        session,
+        execution,
+        "excel",
+        "failed" if failed else "success",
+        updates,
+        {"failed": failed},
+    )
+    return {"updated": updated, "failed": failed}
 
 
 async def export_testrail(session: Session, execution: ExecutionRun, preview: bool = False) -> dict:
-    return {"preview": preview, "message": "TestRail export stub"}
+    updates = _result_updates(execution)
+    if preview:
+        return {"preview": True, "updates": updates}
+    _log_export(session, execution, "testrail", "success", updates, {"mode": "local-mock"})
+    return {"updated": len(updates), "target": "testrail", "updates": updates}
 
 
 async def export_google_sheets(session: Session, execution: ExecutionRun, preview: bool = False) -> dict:
-    return {"preview": preview, "message": "Google Sheets export stub"}
+    updates = _result_updates(execution)
+    if preview:
+        return {"preview": True, "updates": updates}
+    _log_export(session, execution, "google-sheets", "success", updates, {"mode": "local-mock"})
+    return {"updated": len(updates), "target": "google-sheets", "updates": updates}

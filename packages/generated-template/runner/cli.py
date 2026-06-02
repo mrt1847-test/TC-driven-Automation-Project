@@ -39,7 +39,7 @@ def cmd_rerun_failed(args: argparse.Namespace) -> int:
     if not failed_keys:
         print("No failed cases")
         return 0
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = run_pytest(failed_keys, data.get("env", "stg"), data.get("browser", "chromium"), False, run_id)
     print(f"Rerun results: {path}")
     return 0
@@ -87,6 +87,7 @@ def main() -> int:
 
     rerun_p = sub.add_parser("rerun-failed")
     rerun_p.add_argument("--from-run-id", required=True)
+    rerun_p.add_argument("--run-id")
     rerun_p.set_defaults(func=cmd_rerun_failed)
 
     export_p = sub.add_parser("export")

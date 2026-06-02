@@ -43,6 +43,12 @@ type ValidationIssue = {
   message: string
 }
 
+type SelectorCandidate = {
+  type: string
+  value: string
+  confidence: number
+}
+
 export function MappingPage() {
   const navigate = useNavigate()
   const project = useAppStore((s) => s.currentProject)
@@ -57,6 +63,14 @@ export function MappingPage() {
     queryFn: () => api.cases.list(project!.id),
     enabled: !!project
   })
+
+  useEffect(() => {
+    if (!project || cases.length === 0) return
+    const storedInProject = storeSelectedCase?.project_id === project.id
+      && cases.some((item) => item.id === storeSelectedCase.id)
+    if (storedInProject) return
+    setSelectedCase(cases[0])
+  }, [cases, project?.id, setSelectedCase, storeSelectedCase?.id, storeSelectedCase?.project_id])
 
   const selectedCase = cases.find((c) => c.id === selectedCaseId) || cases[0]
 
@@ -202,6 +216,7 @@ export function MappingPage() {
           <PaneHeader title="Raw Actions" meta={`${actions.length} action(s)`} />
           <div className="overflow-auto p-3">
             <RawEvidence run={run} />
+            <SelectorCandidateViewer actions={actions as RawActionRow[]} run={run} />
             {(actions as RawActionRow[]).map((action, index) => (
               <div key={action.id} className="mb-3 rounded border border-slate-800 bg-slate-950 p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
@@ -404,7 +419,7 @@ function RawEvidence({ run }: { run?: WebwrightRun }) {
   if (!run) {
     return (
       <div className="mb-3 rounded border border-slate-800 bg-slate-950 p-3 text-sm">
-        <div className="font-medium text-slate-200">Raw Evidence</div>
+        <div className="font-medium text-slate-200">Artifact Evidence</div>
         <div className="mt-1 text-xs text-slate-500">No Webwright run found for this TC yet.</div>
       </div>
     )
@@ -413,7 +428,7 @@ function RawEvidence({ run }: { run?: WebwrightRun }) {
   return (
     <div className="mb-3 rounded border border-slate-800 bg-slate-950 p-3 text-sm">
       <div className="flex items-center justify-between gap-2">
-        <div className="font-medium text-slate-200">Raw Evidence</div>
+        <div className="font-medium text-slate-200">Artifact Evidence</div>
         <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">{run.status}</span>
       </div>
       <div className="mt-1 text-xs text-slate-500">{runTime(run)}</div>
@@ -433,6 +448,63 @@ function RawEvidence({ run }: { run?: WebwrightRun }) {
   )
 }
 
+function SelectorCandidateViewer({ actions, run }: { actions: RawActionRow[]; run?: WebwrightRun }) {
+  const actionable = actions.filter((action) => action.selector || action.target)
+
+  return (
+    <div className="mb-3 rounded border border-slate-800 bg-slate-950 p-3 text-sm">
+      <div className="font-medium text-slate-200">Selector Candidates</div>
+      <div className="mt-1 text-xs text-slate-500">
+        Derived from raw Webwright actions for healing review. Worker C12-02 will enrich candidates later.
+      </div>
+      {!actionable.length && (
+        <div className="mt-2 text-xs text-slate-500">No selector-bearing raw actions yet.</div>
+      )}
+      <div className="mt-3 space-y-3">
+        {actionable.map((action, index) => {
+          const bundle = buildSelectorCandidates(action)
+          return (
+            <div key={action.id} className="rounded border border-slate-800 bg-slate-900 p-2">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="font-medium text-blue-300">
+                  #{action.order_index ?? index + 1} {action.type}
+                </span>
+                <span className="text-slate-500">{action.id}</span>
+              </div>
+              <div className="mt-2 overflow-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-500">
+                      <th className="pb-1 pr-2">Type</th>
+                      <th className="pb-1 pr-2">Value</th>
+                      <th className="pb-1">Confidence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bundle.candidates.map((candidate) => (
+                      <tr key={`${action.id}-${candidate.type}-${candidate.value}`} className="border-t border-slate-800">
+                        <td className="py-1 pr-2 text-slate-400">{candidate.type}</td>
+                        <td className="py-1 pr-2 break-all text-slate-200">{candidate.value}</td>
+                        <td className="py-1 text-slate-400">{Math.round(candidate.confidence * 100)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {run?.output_path && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <ArtifactButton label="Trace" path={run.trajectory_path || run.output_path} />
+                  <ArtifactButton label="Screenshots" path={run.output_path} />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ArtifactButton({ label, path }: { label: string; path: string }) {
   return (
     <button
@@ -443,6 +515,40 @@ function ArtifactButton({ label, path }: { label: string; path: string }) {
       {label}
     </button>
   )
+}
+
+function buildSelectorCandidates(action: RawActionRow) {
+  const primary = (action.selector || action.target || '').trim()
+  const candidates: SelectorCandidate[] = []
+  const seen = new Set<string>()
+
+  function add(type: string, value: string, confidence: number) {
+    const normalized = value.trim()
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    candidates.push({ type, value: normalized, confidence })
+  }
+
+  if (primary) {
+    add('primary', primary, 1)
+    if (primary.includes('get_by_role')) add('role', primary, 0.92)
+    if (primary.includes('get_by_text') || primary.includes('text=')) add('text', primary, 0.72)
+    if (primary.includes('locator(') || primary.includes('#') || primary.includes('.')) add('css', primary, 0.64)
+    if (primary.includes('get_by_test_id')) add('test_id', primary, 0.9)
+  }
+
+  if (action.target && action.target !== primary) {
+    add('target', action.target, 0.85)
+    if (!primary.includes('text=') && !action.target.includes('page.')) {
+      add('text', `text=${action.target}`, 0.68)
+    }
+  }
+
+  if (action.value && action.type.toLowerCase().includes('fill')) {
+    add('input_value', action.value, 0.55)
+  }
+
+  return { primary, candidates }
 }
 
 function parseSteps(testCase: TestCase | undefined): TestStep[] {

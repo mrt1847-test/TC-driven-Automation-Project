@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { LogStreamPanel } from '@/components/LogStreamPanel'
 import { useAppStore } from '@/store/appStore'
 
 type WorkspaceId = 'generate-raw' | 'automation-ide'
@@ -57,6 +58,7 @@ export function Layout() {
   const activeRoute = workspace.links.find(([to]) => (to === '/' ? location.pathname === '/' : location.pathname.startsWith(to)))?.[1]
     || (location.pathname === '/settings' ? 'Settings' : 'Workspace')
   const latestLogs = logs.slice(-6)
+  const showFullLogs = ['/ide', '/webwright'].some((path) => location.pathname.startsWith(path))
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100">
@@ -178,20 +180,32 @@ export function Layout() {
           </aside>
         </div>
 
-        <section className="h-32 border-t border-slate-800 bg-slate-950">
-          <div className="h-9 px-4 flex items-center justify-between border-b border-slate-800">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Logs</h2>
-            <button
-              type="button"
-              onClick={clearLogs}
-              className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-            >
-              Clear
-            </button>
-          </div>
-          <pre className="h-[calc(100%-2.25rem)] overflow-auto px-4 py-2 text-xs text-slate-300">
-            {latestLogs.length ? latestLogs.join('\n') : 'No logs yet.'}
-          </pre>
+        <section className={showFullLogs ? 'h-48 border-t border-slate-800 bg-slate-950' : 'h-32 border-t border-slate-800 bg-slate-950'}>
+          {showFullLogs ? (
+            <LogStreamPanel
+              className="h-full rounded-none border-0 bg-slate-950"
+              logs={logs}
+              maxHeightClass="h-[calc(100%-2.25rem)]"
+              onClear={clearLogs}
+              title="Logs"
+            />
+          ) : (
+            <>
+              <div className="h-9 px-4 flex items-center justify-between border-b border-slate-800">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Logs</h2>
+                <button
+                  type="button"
+                  onClick={clearLogs}
+                  className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                >
+                  Clear
+                </button>
+              </div>
+              <pre className="h-[calc(100%-2.25rem)] overflow-auto px-4 py-2 text-xs text-slate-300">
+                {latestLogs.length ? latestLogs.join('\n') : 'No logs yet.'}
+              </pre>
+            </>
+          )}
         </section>
       </div>
     </div>

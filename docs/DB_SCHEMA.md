@@ -1,6 +1,6 @@
 # DB Schema
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-02
 
 This document defines the relational schema needed to support TC import, Webwright raw action extraction, mapping review, structuring, project generation, execution, and result export.
 
@@ -10,7 +10,7 @@ The current code already has a baseline subset. The schema below is the intended
 
 | Layer | Tables | Workspace |
 |-------|--------|-----------|
-| Project shell | `projects` | Shared |
+| Project shell | `schema_versions`, `projects` | Shared |
 | Generate Raw | `test_cases`, `webwright_runs`, `raw_actions`, artifact metadata | Generate Raw |
 | Automation IDE | `case_action_mappings`, `structured_flows`, `structured_steps`, `page_objects`, `page_object_methods`, `generated_files`, `execution_runs`, `execution_results`, `export_logs`, healing tables | Automation IDE |
 
@@ -26,6 +26,14 @@ The current code already has a baseline subset. The schema below is the intended
 ## Core Tables
 
 ```sql
+CREATE TABLE schema_versions (
+  id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  description TEXT,
+  applied_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -408,12 +416,13 @@ CREATE TABLE export_logs (
 
 The current baseline can migrate incrementally:
 
-1. Keep `projects`, `test_cases`, `webwright_runs`, `raw_actions`, `execution_runs`, `execution_results`, `generated_files`, `export_logs`.
-2. Split multi-action mapping into `case_action_mapping_actions`.
-3. Add `structured_flows` and `structured_steps`.
-4. Add `page_objects` and `page_object_methods`.
-5. Add `generated_file_origins`, `content_hash`, and `status` to generated file tracking.
-6. Add `artifact_assets`, `selector_candidates`, and `healing_proposals` for artifact-backed self-healing.
+1. Record the current local-development baseline in `schema_versions`.
+2. Keep `projects`, `test_cases`, `webwright_runs`, `raw_actions`, `execution_runs`, `execution_results`, `generated_files`, `export_logs`.
+3. Split multi-action mapping into `case_action_mapping_actions`.
+4. Add `structured_flows` and `structured_steps`.
+5. Add `page_objects` and `page_object_methods`.
+6. Add `generated_file_origins`, `content_hash`, and `status` to generated file tracking.
+7. Add `artifact_assets`, `selector_candidates`, and `healing_proposals` for artifact-backed self-healing.
 
 ## Minimum Schema For Next Structuring PR
 

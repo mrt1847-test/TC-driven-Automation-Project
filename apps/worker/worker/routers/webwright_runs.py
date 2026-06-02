@@ -11,6 +11,7 @@ from worker.models.db import Project, TestCase, WebwrightRun
 from worker.models.schemas import WebwrightRunRequest
 from worker.services.action_extraction import enrich_from_trajectory, extract_actions_from_script
 from worker.services.mapping import auto_map_case
+from worker.services.selector_candidates import extract_selector_candidates_for_run
 from worker.services.webwright_adapter import create_mock_run, run_webwright_for_case
 
 router = APIRouter(prefix="/projects/{project_id}/webwright-runs", tags=["webwright"])
@@ -34,6 +35,7 @@ async def _process_runs(project_id: str, request: WebwrightRunRequest, job_id: s
             if run.final_script_path:
                 actions = extract_actions_from_script(run.final_script_path, case.automation_key, run.id, session)
                 enrich_from_trajectory(actions, run.trajectory_path)
+                extract_selector_candidates_for_run(session, run.id)
                 auto_map_case(session, case, run.id)
 
 

@@ -70,6 +70,12 @@ def excel_import(project_id: str, request: ExcelImportRequest, session: Session 
     return import_excel(session, project_id, request)
 
 
+@router.post("/import/testrail-clone/preview")
+async def testrail_clone_preview(project_id: str, request: TestRailCloneImportRequest, session: Session = Depends(get_session)):
+    _get_project(session, project_id)
+    return await import_from_testrail_clone(request.project_id, request.suite_id, set())
+
+
 @router.post("/import/testrail-clone")
 async def testrail_clone_import(project_id: str, request: TestRailCloneImportRequest, session: Session = Depends(get_session)):
     _get_project(session, project_id)

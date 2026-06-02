@@ -49,8 +49,26 @@ export const api = {
       request(`/projects/${projectId}/cases/import/excel/preview`, { method: 'POST', body: JSON.stringify(body) }),
     importExcel: (projectId: string, body: unknown) =>
       request(`/projects/${projectId}/cases/import/excel`, { method: 'POST', body: JSON.stringify(body) }),
+    previewTestrailClone: (projectId: string, body: unknown) =>
+      request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/testrail-clone/preview`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
     importTestrailClone: (projectId: string, body: unknown) =>
-      request(`/projects/${projectId}/cases/import/testrail-clone`, { method: 'POST', body: JSON.stringify(body) })
+      request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/testrail-clone`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    previewTestrail: (projectId: string, body: unknown) =>
+      request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/testrail`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    previewGoogleSheets: (projectId: string, body: unknown) =>
+      request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/google-sheets`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      })
   },
   webwright: {
     list: (projectId: string) => request<WebwrightRun[]>(`/projects/${projectId}/webwright-runs`),
@@ -91,7 +109,7 @@ export const api = {
       request<JobResponse>(`/projects/${projectId}/executions`, { method: 'POST', body: JSON.stringify(body) }),
     get: (projectId: string, id: string) => request<ExecutionDetail>(`/projects/${projectId}/executions/${id}`),
     rerunFailed: (projectId: string, id: string) =>
-      request(`/projects/${projectId}/executions/${id}/rerun-failed`, { method: 'POST' }),
+      request<JobResponse>(`/projects/${projectId}/executions/${id}/rerun-failed`, { method: 'POST' }),
     export: (projectId: string, id: string, target: string, preview = false) =>
       request(`/projects/${projectId}/executions/${id}/export/${target}`, {
         method: 'POST',
@@ -206,8 +224,18 @@ export interface ExecutionDetail {
   } | null
 }
 
-export function connectLogStream(jobId: string, onMessage: (msg: string) => void): WebSocket {
+export type LogStreamStatus = 'connecting' | 'open' | 'closed' | 'error'
+
+export function connectLogStream(
+  jobId: string,
+  onMessage: (msg: string) => void,
+  onStatus?: (status: LogStreamStatus) => void
+): WebSocket {
+  onStatus?.('connecting')
   const ws = new WebSocket(`${baseUrl.replace('http', 'ws')}/ws/logs/${jobId}`)
+  ws.onopen = () => onStatus?.('open')
   ws.onmessage = (e) => onMessage(String(e.data))
+  ws.onerror = () => onStatus?.('error')
+  ws.onclose = () => onStatus?.('closed')
   return ws
 }

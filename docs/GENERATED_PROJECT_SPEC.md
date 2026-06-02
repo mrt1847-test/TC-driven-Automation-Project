@@ -1,6 +1,6 @@
 # Generated Project Spec
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-02
 
 Generated automation project는 실제 Playwright/pytest 실행 단위다. GUI 없이도 독립 실행 가능해야 하고, CI에서도 같은 CLI로 실행되어야 한다.
 
@@ -96,8 +96,8 @@ Supported target modes:
 
 ```bash
 python -m runner.cli run --env stg --browser chromium --all
-python -m runner.cli run --env stg --browser chromium --automation-key user_login_001
-python -m runner.cli run --env stg --browser chromium --case-id CASE-001
+python -m runner.cli run --env stg --browser chromium --case-key user_login_001
+python -m runner.cli run --env stg --browser chromium --all --run-id 20260530_001
 ```
 
 Expected behavior:
@@ -111,7 +111,8 @@ Expected behavior:
 ### rerun-failed
 
 ```bash
-python -m runner.cli rerun-failed --from results/results.json
+python -m runner.cli rerun-failed --from-run-id 20260530_001
+python -m runner.cli rerun-failed --from-run-id 20260530_001 --run-id 20260530_001_rerun
 ```
 
 Expected behavior:
@@ -124,7 +125,7 @@ Expected behavior:
 ### export
 
 ```bash
-python -m runner.cli export --target testrail-clone --results results/results.json --preview
+python -m runner.cli export --run-id 20260530_001 --target testrail-clone
 ```
 
 Expected behavior:
@@ -137,28 +138,32 @@ Expected behavior:
 
 ```json
 {
-  "run_id": "run_20260530_001",
+  "runId": "20260530_001",
+  "projectName": "generated-automation-project",
   "env": "stg",
   "browser": "chromium",
-  "started_at": "2026-05-30T14:00:00Z",
-  "ended_at": "2026-05-30T14:01:20Z",
+  "startedAt": "2026-05-30T14:00:00Z",
+  "endedAt": "2026-05-30T14:01:20Z",
   "summary": {
     "total": 1,
     "passed": 1,
     "failed": 0,
     "skipped": 0
   },
-  "results": [
+  "cases": [
     {
-      "automation_key": "user_login_001",
-      "source_type": "excel",
-      "source_case_id": "CASE-001",
+      "automationKey": "user_login_001",
+      "sourceType": "excel",
+      "sourceCaseId": "CASE-001",
       "title": "User can login",
       "status": "passed",
-      "duration_ms": 8042,
+      "durationMs": 8042,
       "error": null,
-      "screenshot_path": null,
-      "trace_path": null
+      "artifacts": {
+        "screenshot": null,
+        "trace": null,
+        "video": null
+      }
     }
   ]
 }
@@ -194,6 +199,8 @@ The generated project baseline is acceptable when:
 
 - `python -m runner.cli list-cases` works.
 - `python -m runner.cli run --env stg --browser chromium --all` can run at least a sample case.
-- `results.json` is produced with `automation_key`.
+- `results.json` is produced with `automationKey`.
 - The project can be run outside Electron.
 
+See [CI_STANDALONE_GUIDE.md](./CI_STANDALONE_GUIDE.md) for CI command order,
+artifact paths, environment variables, and the `B2-07` standalone CLI E2E gate.

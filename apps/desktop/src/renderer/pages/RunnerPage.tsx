@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { api, connectLogStream } from '@/lib/api'
+import { api, connectLogStream, type LogStreamStatus } from '@/lib/api'
+import { LogStreamPanel } from '@/components/LogStreamPanel'
 import { useAppStore } from '@/store/appStore'
 
 export function RunnerPage() {
   const project = useAppStore((s) => s.currentProject)
+  const selectedCase = useAppStore((s) => s.selectedCase)
   const appendLog = useAppStore((s) => s.appendLog)
   const clearLogs = useAppStore((s) => s.clearLogs)
   const logs = useAppStore((s) => s.logs)
@@ -16,10 +18,34 @@ export function RunnerPage() {
   const [caseIds, setCaseIds] = useState('')
   const [resultTarget, setResultTarget] = useState('local')
   const [runStatus, setRunStatus] = useState('No run started.')
+  const [streaming, setStreaming] = useState(false)
+
+  useEffect(() => {
+    if (project?.default_env) setEnv(project.default_env)
+  }, [project?.default_env, project?.id])
+
+  useEffect(() => {
+    if (selectedCase?.project_id !== project?.id || !selectedCase.automation_key) return
+    setTarget('case')
+    setAutomationKey(selectedCase.automation_key)
+  }, [project?.id, selectedCase?.automation_key, selectedCase?.project_id])
+
+  function handleStreamStatus(status: LogStreamStatus) {
+    if (status === 'open') {
+      setStreaming(true)
+      setRunStatus('Streaming runner logs...')
+      return
+    }
+    if (status === 'closed' || status === 'error') {
+      setStreaming(false)
+      setRunStatus(status === 'error' ? 'Log stream error.' : 'Run log stream closed.')
+    }
+  }
 
   const runMut = useMutation({
     mutationFn: async () => {
       clearLogs()
+      setStreaming(false)
       setRunStatus('Queueing runner job...')
       const res = await api.executions.run(project!.id, {
         env,
@@ -30,13 +56,14 @@ export function RunnerPage() {
         case_ids: target === 'selected' ? parseCaseIds(caseIds) : undefined,
         result_target: resultTarget
       })
-      connectLogStream(res.jobId, appendLog)
+      connectLogStream(res.jobId, appendLog, handleStreamStatus)
       return res.jobId
     },
     onSuccess: (jobId) => {
       setRunStatus(`Queued ${jobId}`)
     },
     onError: (error) => {
+      setStreaming(false)
       setRunStatus(error instanceof Error ? error.message : 'Run failed.')
     }
   })
@@ -67,7 +94,12 @@ export function RunnerPage() {
       >
         {runMut.isPending ? 'Running...' : 'Run'}
       </button>
-      <pre className="bg-slate-900 p-3 rounded text-xs max-h-96 overflow-auto">{logs.join('\n') || 'Logs will appear here...'}</pre>
+      <LogStreamPanel
+        logs={logs}
+        streaming={streaming}
+        onClear={clearLogs}
+        emptyMessage="Run a job to stream stdout/stderr here via /ws/logs/{job_id}."
+      />
     </div>
   )
 }

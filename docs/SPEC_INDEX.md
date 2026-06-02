@@ -29,6 +29,8 @@ Handoff contract: [PRODUCT_PILLARS.md — Handoff Contract](./PRODUCT_PILLARS.md
 | [SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md) | artifact-backed selector healing | C12, D5-D8 | Automation IDE |
 | [DB_SCHEMA.md](./DB_SCHEMA.md) | 관계형 DB DDL | A2, C6-C8, C11 | W1 + W2 |
 | [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md) | 독립 실행 Playwright/pytest 프로젝트 | B1-B4, C8-C10 | Automation IDE output |
+| [CI_STANDALONE_GUIDE.md](./CI_STANDALONE_GUIDE.md) | generated project standalone CI 실행 가이드 | B2, I-04 | Automation IDE output |
+| [WINDOWS_INSTALLER.md](./WINDOWS_INSTALLER.md) | Electron Windows installer baseline build path | I-05 | Supporting |
 | [WORKFLOW_SPEC.md](./WORKFLOW_SPEC.md) | workspace별 E2E 흐름과 완료 조건 | E1-E8, H1-H4 | W1 + W2 |
 
 ## Source Of Truth Rule

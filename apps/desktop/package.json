@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "pack:win": "npm run build && npx electron-builder@26.0.12 --win dir --config electron-builder.json",
+    "dist:win": "npm run build && npx electron-builder@26.0.12 --win nsis --config electron-builder.json"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

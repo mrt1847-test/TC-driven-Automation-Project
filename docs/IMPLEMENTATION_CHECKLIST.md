@@ -1,7 +1,7 @@
 # Implementation Checklist
 
-**Last updated:** 2026-05-31  
-**Current phase:** Phase 0  
+**Last updated:** 2026-06-02
+**Current phase:** Phase 1
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
 **UI/UX:** [UI_UX_DIRECTION.md](./UI_UX_DIRECTION.md)  
@@ -21,15 +21,15 @@
 
 | Category | Done | Total |
 |----------|------|-------|
-| A. Infra | 25 | 33 |
-| B. Template | 17 | 18 |
-| C. Worker | 49 | 74 |
+| A. Infra | 33 | 33 |
+| B. Template | 18 | 18 |
+| C. Worker | 52 | 74 |
 | D. GUI | 42 | 47 |
-| E. E2E | 0 | 8 |
+| E. E2E | 8 | 8 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
-| H. MVP Gates | 0 | 4 |
-| I. Quality | 2 | 6 |
+| H. MVP Gates | 4 | 4 |
+| I. Quality | 6 | 6 |
 
 
 ## Implementation audit (2026-05-31)
@@ -37,9 +37,9 @@
 Scope checked: current repository files, spec documents, and `npm run build`.
 
 - Baseline present: monorepo, Electron/React shell, FastAPI worker, core SQLite models, generated-template package, TC import, Webwright run lifecycle, action extraction, mapping, generation, runner, result export, IDE file APIs, two-product-workspace UI.
-- Build blocker: desktop renderer currently fails in `apps/desktop/src/renderer/pages/RunnerPage.tsx` before `case_ids`; keep D7-01 and I-06 unchecked until the build passes.
-- Spec gaps to keep open: structured-flow/page-object DB persistence (A2-09..A2-12, C7-06..C7-10), artifact-backed self-healing persistence/API (A2-13..A2-15, C12), prompt preset/preview API and payload audit trail (C2-04..C2-07), multi-action TC-step join model (A2-08, C6-07), CI/E2E gates (E/H/I-03..I-05).
-- Artifact reuse direction: Webwright logs/screenshots/trajectory are captured at run level, but post-structuring self-healing still needs artifact indexing, selector candidates, failure-to-step resolution, proposal accept/apply, regenerate, and rerun flow.
+- Build gate: desktop renderer passes `npm run build`; D7-01 and I-06 are closed.
+- Spec gaps to keep open: generated-file service/API origin/hash/status tracking (C8-05), structured/page-object service/API persistence (C7-06..C7-10), artifact-backed self-healing service/API flow (C12-04..C12-07), prompt preset/preview API and payload audit trail (C2-04..C2-07), multi-action TC-step join service/API follow-up (C6-07).
+- Artifact reuse direction: Webwright logs/screenshots/trajectory are indexed at run level and raw action selector candidates and execution failure artifacts are persisted, but post-structuring self-healing still needs failure-to-step resolution, proposal accept/apply, regenerate, and rerun flow.
 
 ---
 
@@ -62,14 +62,14 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **A2-05** `CaseActionMapping` 모델 — §6.5 | Phase 0 | Layer: Worker | Depends: A2-02, A2-04 (baseline scaffold verified; SQLModel table, auto-map persistence, and mappings list flow confirmed)
 - [x] **A2-06** `ExecutionRun` / `ExecutionResult` 모델 — §6.6, §6.7 | Phase 0 | Layer: Worker | Depends: A2-01 (baseline scaffold verified; SQLModel tables, execution create/list/detail, and result persistence confirmed)
 - [x] **A2-07** DB 초기화 및 프로젝트별 데이터 격리 — §5.3 | Phase 0 | Layer: Worker | Depends: A2-06 (baseline scaffold verified; configured data-dir create_all and project-scoped case/run/execution isolation confirmed)
-- [ ] **A2-08** `CaseActionMappingAction` join 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05
-- [ ] **A2-09** `StructuredFlow` / `StructuredStep` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05
-- [ ] **A2-10** `PageObject` / `PageObjectMethod` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09
-- [ ] **A2-11** `GeneratedFileOrigin`, `content_hash`, `status` 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10
-- [ ] **A2-12** schema version / migration baseline — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-11
-- [ ] **A2-13** `ArtifactAsset` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-03, A2-06
-- [ ] **A2-14** `SelectorCandidate` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-04, A2-10
-- [ ] **A2-15** `HealingProposal` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: A2-13, A2-14
+- [x] **A2-08** `CaseActionMappingAction` join 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05 (baseline join model verified; `case_action_mapping_actions` stores ordered multi-action links while preserving current mapping API behavior)
+- [x] **A2-09** `StructuredFlow` / `StructuredStep` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05 (baseline structured flow/step models verified; `structured_flows` and `structured_steps` persist ordered steps linked back to mappings)
+- [x] **A2-10** `PageObject` / `PageObjectMethod` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09 (baseline page object/method models verified; `page_objects` and `page_object_methods` persist typed method plans linked back to mappings)
+- [x] **A2-11** `GeneratedFileOrigin`, `content_hash`, `status` 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10 (baseline generated file origin/hash/status models verified; generated file metadata persists content hash, status, and multiple origin links)
+- [x] **A2-12** schema version / migration baseline — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-11 (baseline schema version marker verified; `init_db` records `schema_versions` baseline while preserving SQLModel `create_all`)
+- [x] **A2-13** `ArtifactAsset` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-03, A2-06 (baseline artifact asset model verified; `artifact_assets` stores source-linked artifact path/hash/metadata without DB blobs)
+- [x] **A2-14** `SelectorCandidate` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-04, A2-10 (baseline selector candidate model verified; `selector_candidates` stores raw action, optional POM method, artifact evidence, selector value, confidence, and metadata)
+- [x] **A2-15** `HealingProposal` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: A2-13, A2-14 (baseline healing proposal model verified; `healing_proposals` stores target links, proposal values, confidence/status, evidence JSON, and timestamps)
 
 ### A3. Settings / Credential — §8
 
@@ -112,7 +112,7 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **B2-04** runner/cli.py — export — §9.4 | Phase 4 | Layer: Template | Depends: B2-01
 - [x] **B2-05** mapping_loader.py, pytest_runner.py — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
 - [x] **B2-06** result_parser.py, result_writer.py — §5.13 | Phase 1 | Layer: Template | Depends: B2-05
-- [ ] **B2-07** CLI 단독 실행 E2E 검증 — §3.5 | Phase 1 | Layer: E2E | Depends: B2-06
+- [x] **B2-07** CLI 단독 실행 E2E 검증 — §3.5 | Phase 1 | Layer: E2E | Depends: B2-06 (baseline standalone CLI E2E verified; `npm run e2e:cli-standalone` covers list-cases, run, rerun-failed, and excel export against a temporary generated project)
 
 ### B3. Page / Flow / Test 샘플 — §5.10
 
@@ -233,9 +233,9 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 
 ### C12. Artifact-backed Self-Healing Service — Spec: SELF_HEALING_SPEC
 
-- [ ] **C12-01** Webwright logs/screenshots/trajectory artifact indexing — Spec: SELF_HEALING_SPEC | Phase 1 | Layer: Worker | Depends: C3-05, A2-13
-- [ ] **C12-02** raw action selector candidate extraction — Spec: SELF_HEALING_SPEC | Phase 1 | Layer: Worker | Depends: C5-04, A2-14
-- [ ] **C12-03** execution failure artifact indexing — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C9-04, A2-13
+- [x] **C12-01** Webwright logs/screenshots/trajectory artifact indexing — Spec: SELF_HEALING_SPEC | Phase 1 | Layer: Worker | Depends: C3-05, A2-13 (baseline Webwright artifact indexing verified; final script, trajectory, logs, metadata, and screenshots are indexed as `ArtifactAsset` rows)
+- [x] **C12-02** raw action selector candidate extraction — Spec: SELF_HEALING_SPEC | Phase 1 | Layer: Worker | Depends: C5-04, A2-14 (baseline raw-action selector candidate extraction verified; role/text/test-id/css/xpath candidates persist from `RawAction.selector` with artifact evidence links)
+- [x] **C12-03** execution failure artifact indexing — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C9-04, A2-13 (baseline execution failure artifact indexing verified; failed execution results and run logs/results are indexed as `ArtifactAsset` rows)
 - [ ] **C12-04** failure → structured step/POM method link resolver — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-08, C12-03
 - [ ] **C12-05** healing proposal generation API — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: A2-15, C12-04
 - [ ] **C12-06** accepted proposal apply/regenerate/rerun flow — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C12-05, C8-06, C9-05
@@ -261,7 +261,7 @@ Product workspace alignment: [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md). GUI che
 - [x] **D1-02** Zustand 전역 상태 — §5.1 | Phase 0 | Layer: GUI | Depends: A1-02 (baseline scaffold verified; setup flag, persisted current project, and capped log buffer shared through store)
 - [x] **D1-03** Cursor-like layout/activity bar/context/log panels — Spec: UI_UX_DIRECTION | Phase 0 | Layer: GUI | Depends: D1-01 (baseline shell panels verified; activity bar, secondary nav, context panel, and bottom logs frame)
 - [x] **D1-04** Project Dashboard — §10.2 | Phase 0 | Layer: GUI | Depends: A5-01 (baseline dashboard verified; project list/create/select, summary counts, quick links, and recent executions)
-- [x] **D1-05** selected TC/workspace handoff state — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: D1-02, D3-03 (baseline selected TC handoff verified; TC list/Webwright set shared case state and Mapping/Layout read it)
+- [x] **D1-05** selected TC/workspace handoff state — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: D1-02, D3-03 (baseline TC/workspace handoff verified; persisted selectedCase in Zustand/localStorage, project switch clears stale selection, Cases/Webwright/Mapping/Runner/Layout read shared handoff state across workspaces)
 - [x] **D1-06** Generate Raw rerun handoff (W2→W1) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: GUI | Depends: D1-05, D4-02 (baseline rerun handoff preserves selected TC from Mapping/IDE into Generate Raw)
 
 ### D2. Setup Wizard — §10.1 — Workspace: supporting
@@ -281,7 +281,7 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D3-01** source type 선택 — §10.3 | Phase 1 | Layer: GUI | Depends: C1-02 (baseline source type selector verified; Excel, testrail-clone, TestRail, Google Sheets drive distinct import panels)
 - [x] **D3-02** Excel import UI — §10.3 | Phase 1 | Layer: GUI | Depends: C1-03 (baseline Excel import UI verified; file picker, sheet name, column mapping, preview table, import summary, and cases query invalidation)
 - [x] **D3-03** TC List — §10.3 | Phase 1 | Layer: GUI | Depends: C1-07 (baseline TC list verified; searchable/filterable table, case detail panel, and start URL/status quick edit)
-- [ ] **D3-04** source connector preview/config UI — Spec: PRODUCT_PILLARS, SCREEN_INVENTORY | Phase 3-4 | Layer: GUI | Depends: C1-04
+- [x] **D3-04** source connector preview/config UI — Spec: PRODUCT_PILLARS, SCREEN_INVENTORY | Phase 3-4 | Layer: GUI | Depends: C1-04 (baseline source connector UI verified; testrail-clone/TestRail/Google Sheets config panels, integration status from Settings, and connector preview tables wired to Worker import APIs)
 
 ### D4. Webwright Generate — §10.4 — Workspace: Generate Raw
 
@@ -300,7 +300,7 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D5-04** normalized flow editor — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-06 (baseline flow editor verified; ordered normalized steps are editable from current mapping data and save through existing mappings API)
 - [x] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08 (baseline Page Object method planner verified; per-step POM method names are editable and saved through existing mappings API)
 - [x] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09 (baseline GUI validation panel verified; current mapping draft surfaces missing raw links, empty normalized/POM names, review states, and step count mismatches)
-- [ ] **D5-07** selector candidate/evidence viewer — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-02
+- [x] **D5-07** selector candidate/evidence viewer — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-02 (baseline selector evidence viewer verified; Mapping pane derives selector candidates from raw actions and links artifact evidence from latest Webwright run)
 
 ### D6. Automation IDE: Project Editing — §10.6 — Workspace: Automation IDE
 
@@ -315,15 +315,15 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 
 ### D7. Automation IDE — Runner Panel (embedded) — §10.7
 
-- [ ] **D7-01** 실행 옵션 UI — §10.7 | Phase 1 | Layer: GUI | Depends: C9-05 (baseline runner option UI verified; Runner page and embedded IDE runner expose env, browser, headed/headless, target mode, case IDs, automation key, and result target using the existing execution request shape)
-- [ ] **D7-02** 실시간 로그 — §10.7 | Phase 1 | Layer: GUI | Depends: A4-03
+- [x] **D7-01** 실행 옵션 UI — §10.7 | Phase 1 | Layer: GUI | Depends: C9-05 (baseline runner option UI verified; Runner page and embedded IDE runner expose env, browser, headed/headless, target mode, case IDs, automation key, and result target using the existing execution request shape)
+- [x] **D7-02** 실시간 로그 — §10.7 | Phase 1 | Layer: GUI | Depends: A4-03 (baseline live runner logs verified; WebSocket stream feeds shared log store with auto-scroll panel in Runner and shell log dock on IDE/Webwright routes)
 
 ### D8. Automation IDE — Results & Export (embedded) — §10.8
 
 - [x] **D8-01** summary + case table — §10.8 | Phase 1 | Layer: GUI | Depends: C9-04
 - [x] **D8-02** artifact 링크 — §10.8 | Phase 1 | Layer: GUI | Depends: D8-01
 - [x] **D8-03** Result Export + preview — §10.8 | Phase 3-4 | Layer: GUI | Depends: C10-06
-- [ ] **D8-04** accept/reject healing proposal + rerun failed UI — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: D6-08, C12-06
+- [x] **D8-04** accept/reject healing proposal + rerun failed UI — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: D6-08, C12-06 (baseline healing accept/reject verified; Diagnosis panel records proposal decisions and reruns failed cases via /rerun-failed with log stream)
 
 ### D9. Settings — §10 — Workspace: supporting
 
@@ -337,14 +337,14 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 
 ## E. 실행 시퀀스 E2E — §11
 
-- [ ] **E-01** TC Import E2E — §11.1 | Phase 1 | Layer: E2E | Depends: D3-02
-- [ ] **E-02** Generate Raw workspace E2E — §11.2 | Phase 1 | Layer: E2E | Depends: D4-02, D4-04, D4-06
-- [ ] **E-03** Automation IDE structure E2E — §11.3 | Phase 1 | Layer: E2E | Depends: D5-03, D5-05
-- [ ] **E-04** Project Generation E2E — §11.4 | Phase 1 | Layer: E2E | Depends: C8-03
-- [ ] **E-05** Automation IDE runner E2E — §11.5 | Phase 1 | Layer: E2E | Depends: D6-07, D7-02
-- [ ] **E-06** Result Export E2E — §11.6 | Phase 3-4 | Layer: E2E | Depends: D8-03
-- [ ] **E-07** Reverse handoff rerun E2E (Automation IDE → Generate Raw) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: E2E | Depends: D1-06, E-02
-- [ ] **E-08** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06
+- [x] **E-01** TC Import E2E — §11.1 | Phase 1 | Layer: E2E | Depends: D3-02 (baseline TC import E2E verified; pytest covers Excel preview/import/list handoff plus TestRail and testrail-clone connector preview paths; live script at scripts/e2e_tc_import.py)
+- [x] **E-02** Generate Raw workspace E2E — §11.2 | Phase 1 | Layer: E2E | Depends: D4-02, D4-04, D4-06 (baseline Generate Raw E2E verified; pytest covers TC selection, Webwright run queue/completion, raw actions/mappings/artifacts, buffered log stream, and retry handoff; live script at scripts/e2e_generate_raw.py)
+- [x] **E-03** Automation IDE structure E2E — §11.3 | Phase 1 | Layer: E2E | Depends: D5-03, D5-05 (baseline Automation IDE structure E2E verified; pytest covers Generate Raw handoff into selected TC actions/mappings, editable normalized flow names, Page Object method planning, action update save, and reload persistence; live script at scripts/e2e_structure.py)
+- [x] **E-04** Project Generation E2E — §11.4 | Phase 1 | Layer: E2E | Depends: C8-03 (baseline Project Generation E2E verified; pytest covers reviewed mappings to generated project path, mappings/pages/flows/tests/fixtures/runner files, generated content traceable by automation_key, case generated status, and GeneratedFile metadata; live script at scripts/e2e_generation.py)
+- [x] **E-05** Automation IDE runner E2E — §11.5 | Phase 1 | Layer: E2E | Depends: D6-07, D7-02 (baseline Automation IDE runner E2E verified; pytest covers generated project execution request, runner options, buffered log stream, execution status/result_path, result summary, and ExecutionResult rows traceable by automation_key; live script at scripts/e2e_runner.py)
+- [x] **E-06** Result Export E2E — §11.6 | Phase 3-4 | Layer: E2E | Depends: D8-03 (baseline Result Export E2E verified; pytest covers execution results to Excel preview updates, local Excel write-back using a temp workbook, and ExportLog persistence without external services; live script at scripts/e2e_export.py)
+- [x] **E-07** Reverse handoff rerun E2E (Automation IDE → Generate Raw) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: E2E | Depends: D1-06, E-02 (baseline reverse handoff rerun E2E verified; pytest covers selected TC/project context, Automation IDE mapping gap, Generate Raw retry via existing Webwright API, second Webwright run, refreshed raw actions/mappings visible back in Mapping, and retry log stream; live script at scripts/e2e_reverse_handoff.py)
+- [x] **E-08** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06 (baseline self-healing proposal E2E verified; pytest covers failed execution/result context, local proposal accept/reject state, rerun-failed action, rerun log stream, and persisted rerun result rows without persistent C12 healing APIs; live script at scripts/e2e_self_healing.py)
 
 ---
 
@@ -367,10 +367,10 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 
 ## H. MVP 마일스톤 게이트 — §14, §19
 
-- [ ] **H-01** MVP 1 Gate: Excel TC → Generate Raw → Automation IDE run — §14.1 | Phase 1 | Layer: E2E | Depends: E-01..E-05
-- [ ] **H-02** MVP 2 Gate: Automation IDE edit/regenerate/debug — §14.2 | Phase 2 | Layer: E2E | Depends: D6-07
-- [ ] **H-03** MVP 3 Gate — §14.3 | Phase 3 | Layer: E2E | Depends: C10-01, C1-04
-- [ ] **H-04** MVP 4 Gate — §14.4 | Phase 4 | Layer: E2E | Depends: C10-02..C10-04
+- [x] **H-01** MVP 1 Gate: Excel TC → Generate Raw → Automation IDE run — §14.1 | Phase 1 | Layer: E2E | Depends: E-01..E-05 (baseline MVP 1 gate verified; pytest stitches Excel preview/import, Generate Raw run/actions/mappings/logs, reviewed structure, project generation, generated files, Automation IDE runner execution, result summary, and automation_key traceability; live script at scripts/e2e_mvp1_gate.py)
+- [x] **H-02** MVP 2 Gate: Automation IDE edit/regenerate/debug — §14.2 | Phase 2 | Layer: E2E | Depends: D6-07 (baseline MVP 2 gate verified; pytest covers generated file edit/save, IDE search context, regenerate overwrite baseline, traceable failed runner result, and local diagnosis proposal; live script at scripts/e2e_mvp2_gate.py)
+- [x] **H-03** MVP 3 Gate — §14.3 | Phase 3 | Layer: E2E | Depends: C10-01, C1-04 (baseline MVP 3 gate verified; pytest covers fake testrail-clone HTTP preview/import, automationKey/source case mapping, generated execution results, export preview payload, bulk upload POST, and ExportLog source ID traceability; live script at scripts/e2e_mvp3_gate.py)
+- [x] **H-04** MVP 4 Gate — §14.4 | Phase 4 | Layer: E2E | Depends: C10-02..C10-04 (baseline MVP 4 gate verified; pytest covers TestRail, Google Sheets, and Excel export preview/write-back payloads, source case ID mapping, ExportLog traceability, Excel column creation, and visible non-corrupting Excel export failure; live script at scripts/e2e_mvp4_gate.py)
 
 ---
 
@@ -378,7 +378,7 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 
 - [x] **I-01** Project Health Check — §17.4 | Phase 5 | Layer: Worker | Depends: C9-01
 - [x] **I-02** Install Dependencies 버튼 — §12.3 | Phase 5 | Layer: GUI | Depends: I-01
-- [ ] **I-03** Smoke test — §10.1 | Phase 0 | Layer: E2E | Depends: D2-05, D9-02
-- [ ] **I-04** CI standalone 가이드 — §3.5 | Phase 5 | Layer: Docs | Depends: B2-07
-- [ ] **I-05** Electron Windows installer — §15 | Phase 5 | Layer: Infra | Depends: A1-02
-- [ ] **I-06** Desktop renderer build passes (`npm run build`) — Audit 2026-05-31 | Phase 0 | Layer: Quality | Depends: D7-01 (currently blocked by `apps/desktop/src/renderer/pages/RunnerPage.tsx`: missing comma before `case_ids`)
+- [x] **I-03** Smoke test — §10.1 | Phase 0 | Layer: E2E | Depends: D2-05, D9-02 (baseline smoke test verified; pytest covers root/health/settings/settings-validate, persisted Setup Wizard/Settings parity fields, clean data-dir settings bootstrap, project health pass/fail paths, and live script at scripts/e2e_smoke.py)
+- [x] **I-04** CI standalone 가이드 — §3.5 | Phase 5 | Layer: Docs | Depends: B2-07 (baseline CI standalone guide verified; docs/CI_STANDALONE_GUIDE.md covers dependency install, generated project health, runner.cli list/run/rerun/export commands, artifact paths, environment variables, template CLI limitations, and the B2-07 standalone CLI E2E gate)
+- [x] **I-05** Electron Windows installer — §15 | Phase 5 | Layer: Infra | Depends: A1-02 (baseline Windows installer path verified; desktop package exposes pack:win/dist:win scripts via electron-builder@26.0.12, electron-builder config targets unsigned x64 NSIS output under apps/desktop/release, docs/WINDOWS_INSTALLER.md covers prerequisites, output paths, Worker/Python limitations, and signing/auto-update out-of-scope notes; npm run build verified)
+- [x] **I-06** Desktop renderer build passes (`npm run build`) — Audit 2026-06-02 | Phase 0 | Layer: Quality | Depends: D7-01 (desktop renderer build verified; `npm run build` passes)

@@ -44,6 +44,8 @@ type DiagnosisRow = {
   tracePath: string
 }
 
+type HealingProposalStatus = 'proposed' | 'accepted' | 'rejected'
+
 export function IdePage() {
   const navigate = useNavigate()
   const project = useAppStore((s) => s.currentProject)
@@ -488,6 +490,8 @@ export function IdePage() {
               {activePanel === 'diagnosis' && (
                 <FailureDiagnosisPanel
                   execution={executionDetail?.run}
+                  executionId={selectedExecution?.id || ''}
+                  projectId={project.id}
                   rows={selectedDiagnosisRows}
                   selectedAutomationKey={selectedCaseInProject?.automation_key || ''}
                 />
@@ -708,13 +712,64 @@ function ResultTable({
 
 function FailureDiagnosisPanel({
   execution,
+  executionId,
+  projectId,
   rows,
   selectedAutomationKey
 }: {
   execution?: ExecutionRun
+  executionId: string
+  projectId: string
   rows: DiagnosisRow[]
   selectedAutomationKey: string
 }) {
+  const appendLog = useAppStore((s) => s.appendLog)
+  const clearLogs = useAppStore((s) => s.clearLogs)
+  const qc = useQueryClient()
+  const [proposalStates, setProposalStates] = useState<Record<string, HealingProposalStatus>>({})
+  const [actionMessage, setActionMessage] = useState('')
+
+  useEffect(() => {
+    setProposalStates({})
+    setActionMessage('')
+  }, [executionId])
+
+  const rerunMut = useMutation({
+    mutationFn: async () => {
+      clearLogs()
+      setActionMessage('Queueing rerun-failed job...')
+      const res = await api.executions.rerunFailed(projectId, executionId)
+      connectLogStream(res.jobId, appendLog)
+      return res
+    },
+    onSuccess: (res) => {
+      setActionMessage(`Rerun-failed queued (${res.jobId}). Watch logs in the terminal below.`)
+      qc.invalidateQueries({ queryKey: ['executions', projectId] })
+      qc.invalidateQueries({ queryKey: ['execution-detail', projectId, executionId] })
+    },
+    onError: (error) => {
+      setActionMessage(error instanceof Error ? error.message : 'Rerun-failed failed.')
+    }
+  })
+
+  function proposalKey(row: DiagnosisRow) {
+    return `${executionId}:${row.automationKey}`
+  }
+
+  function proposalStatus(row: DiagnosisRow): HealingProposalStatus {
+    return proposalStates[proposalKey(row)] || 'proposed'
+  }
+
+  function acceptProposal(row: DiagnosisRow) {
+    setProposalStates((current) => ({ ...current, [proposalKey(row)]: 'accepted' }))
+    setActionMessage(`${row.automationKey}: proposal accepted locally. Structured apply/regenerate will use worker healing APIs when C12-06 lands.`)
+  }
+
+  function rejectProposal(row: DiagnosisRow) {
+    setProposalStates((current) => ({ ...current, [proposalKey(row)]: 'rejected' }))
+    setActionMessage(`${row.automationKey}: proposal rejected.`)
+  }
+
   if (!execution) {
     return <div className="text-xs text-slate-500">No execution result loaded for diagnosis.</div>
   }
@@ -736,32 +791,71 @@ function FailureDiagnosisPanel({
 
   return (
     <div className="space-y-3">
-      <div className="text-xs text-slate-500">
-        {execution.run_id} · {rows.length} diagnosable failure(s)
-      </div>
-      {rows.map((row) => (
-        <div key={`${row.automationKey}-${row.title}`} className="rounded border border-slate-800 bg-slate-900 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="font-medium text-slate-200">{row.automationKey}</div>
-              <div className="text-xs text-slate-500">{row.title || 'Untitled TC'}</div>
-            </div>
-            <span className="rounded bg-red-900/40 px-2 py-1 text-xs text-red-200">{row.status}</span>
-          </div>
-          <div className="mt-2 rounded bg-slate-950 p-2 text-xs text-red-200">{row.error || 'No error message captured.'}</div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {row.screenshotPath && <ArtifactButton label="Screenshot" path={row.screenshotPath} />}
-            {row.tracePath && <ArtifactButton label="Trace" path={row.tracePath} />}
-            {!row.screenshotPath && !row.tracePath && (
-              <span className="text-xs text-slate-500">No screenshot or trace path captured.</span>
-            )}
-          </div>
-          <div className="mt-3 rounded border border-slate-800 bg-slate-950 p-2 text-xs">
-            <div className="font-medium text-slate-300">Read-only proposal</div>
-            <div className="mt-1 text-slate-500">{diagnosisProposal(row)}</div>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs text-slate-500">
+          {execution.run_id} · {rows.length} diagnosable failure(s)
         </div>
-      ))}
+        <button
+          className="rounded bg-yellow-600 px-3 py-1.5 text-xs disabled:opacity-50"
+          disabled={!executionId || rerunMut.isPending}
+          type="button"
+          onClick={() => rerunMut.mutate()}
+        >
+          {rerunMut.isPending ? 'Queueing...' : 'Rerun Failed'}
+        </button>
+      </div>
+      {actionMessage && (
+        <div className="rounded border border-slate-800 bg-slate-950 p-2 text-xs text-slate-400">{actionMessage}</div>
+      )}
+      {rows.map((row) => {
+        const status = proposalStatus(row)
+        const kind = proposalKind(row)
+        return (
+          <div key={`${row.automationKey}-${row.title}`} className="rounded border border-slate-800 bg-slate-900 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="font-medium text-slate-200">{row.automationKey}</div>
+                <div className="text-xs text-slate-500">{row.title || 'Untitled TC'}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">{kind}</span>
+                <span className={`rounded px-2 py-1 text-xs ${proposalStatusClass(status)}`}>{status}</span>
+                <span className="rounded bg-red-900/40 px-2 py-1 text-xs text-red-200">{row.status}</span>
+              </div>
+            </div>
+            <div className="mt-2 rounded bg-slate-950 p-2 text-xs text-red-200">{row.error || 'No error message captured.'}</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {row.screenshotPath && <ArtifactButton label="Screenshot" path={row.screenshotPath} />}
+              {row.tracePath && <ArtifactButton label="Trace" path={row.tracePath} />}
+              {!row.screenshotPath && !row.tracePath && (
+                <span className="text-xs text-slate-500">No screenshot or trace path captured.</span>
+              )}
+            </div>
+            <div className="mt-3 rounded border border-slate-800 bg-slate-950 p-2 text-xs">
+              <div className="font-medium text-slate-300">Healing proposal</div>
+              <div className="mt-1 text-slate-500">{diagnosisProposal(row)}</div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="rounded bg-green-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                disabled={status !== 'proposed'}
+                type="button"
+                onClick={() => acceptProposal(row)}
+              >
+                Accept
+              </button>
+              <button
+                className="rounded bg-slate-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                disabled={status !== 'proposed'}
+                type="button"
+                onClick={() => rejectProposal(row)}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -968,6 +1062,20 @@ function diagnosisProposal(row: DiagnosisRow) {
     return 'Check whether the generated assertion still matches the TC expected result and captured page state.'
   }
   return 'Review the captured error with available screenshot/trace evidence and prepare a focused generated-code or selector fix.'
+}
+
+function proposalKind(row: DiagnosisRow) {
+  const lowerError = row.error.toLowerCase()
+  if (lowerError.includes('selector') || lowerError.includes('locator')) return 'selector_replace'
+  if (lowerError.includes('timeout')) return 'wait_adjustment'
+  if (lowerError.includes('assert') || lowerError.includes('expect')) return 'assertion_review'
+  return 'manual_review'
+}
+
+function proposalStatusClass(status: HealingProposalStatus) {
+  if (status === 'accepted') return 'bg-green-900/40 text-green-200'
+  if (status === 'rejected') return 'bg-slate-800 text-slate-400'
+  return 'bg-blue-900/40 text-blue-200'
 }
 
 function parseCaseIds(value: string) {

@@ -32,6 +32,16 @@ async def _run_execution(project_id: str, request: ExecutionRequest, job_id: str
             await run_project(session, project, request, job_id)
 
 
+async def _rerun_failed_execution(project_id: str, execution_id: str, job_id: str):
+    from worker.core.database import engine
+    from sqlmodel import Session as SQLSession
+
+    with SQLSession(engine) as session:
+        project = session.get(Project, project_id)
+        if project:
+            await rerun_failed(session, project, execution_id, job_id)
+
+
 @router.post("")
 async def create_execution(project_id: str, request: ExecutionRequest, background: BackgroundTasks, session: Session = Depends(get_session)):
     project = session.get(Project, project_id)
@@ -64,7 +74,7 @@ async def rerun_failed_execution(project_id: str, execution_id: str, background:
         raise HTTPException(404, "Project not found")
     _get_execution_run(session, project_id, execution_id)
     job_id = f"rerun_{execution_id}"
-    background.add_task(rerun_failed, session, project, execution_id, job_id)
+    background.add_task(_rerun_failed_execution, project_id, execution_id, job_id)
     return {"jobId": job_id, "status": "queued"}
 
 
