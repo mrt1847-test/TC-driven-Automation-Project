@@ -27,15 +27,15 @@ def get_settings_path() -> Path:
 
 
 def load_settings() -> AppSettings:
+    from worker.core.runtime import apply_runtime_defaults
+
     path = get_settings_path()
     if not path.exists():
-        settings = AppSettings()
-        template_path = Path(__file__).resolve().parents[4] / "packages" / "generated-template"
-        if template_path.exists():
-            settings.generator["templatePath"] = str(template_path)
+        settings = apply_runtime_defaults(AppSettings())
         save_settings(settings)
         return settings
-    return AppSettings.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    settings = AppSettings.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    return apply_runtime_defaults(settings)
 
 
 def save_settings(settings: AppSettings) -> None:

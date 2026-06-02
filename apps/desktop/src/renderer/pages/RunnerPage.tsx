@@ -19,6 +19,7 @@ export function RunnerPage() {
   const [resultTarget, setResultTarget] = useState('local')
   const [runStatus, setRunStatus] = useState('No run started.')
   const [streaming, setStreaming] = useState(false)
+  const [runtimeStatus, setRuntimeStatus] = useState('')
 
   useEffect(() => {
     if (project?.default_env) setEnv(project.default_env)
@@ -68,6 +69,20 @@ export function RunnerPage() {
     }
   })
 
+  async function installRuntime() {
+    if (!project?.generated_project_path) {
+      setRuntimeStatus('Generate a project first.')
+      return
+    }
+    setRuntimeStatus('Installing Python deps and Chromium...')
+    try {
+      const res = await api.installDeps(project.id, project.generated_project_path)
+      setRuntimeStatus(res.ok ? 'Runtime ready.' : `Install failed: ${res.pipError || res.message || 'unknown'}`)
+    } catch (error) {
+      setRuntimeStatus(error instanceof Error ? error.message : 'Install failed.')
+    }
+  }
+
   if (!project) return <p>Select a project first.</p>
 
   return (
@@ -87,6 +102,16 @@ export function RunnerPage() {
         <textarea className="w-full max-w-md p-2 rounded bg-slate-800" placeholder="case IDs or automation keys, comma/newline separated" rows={3} value={caseIds} onChange={(e) => setCaseIds(e.target.value)} />
       )}
       <div className="text-xs text-slate-500">{runStatus}</div>
+      {runtimeStatus && <div className="text-xs text-slate-400">{runtimeStatus}</div>}
+      <div className="flex gap-2">
+      <button
+        type="button"
+        className="px-4 py-2 bg-slate-700 rounded disabled:opacity-50"
+        disabled={!project.generated_project_path}
+        onClick={installRuntime}
+      >
+        Install Runtime
+      </button>
       <button
         className="px-4 py-2 bg-green-600 rounded disabled:opacity-50"
         disabled={runMut.isPending || (target === 'case' && !automationKey) || (target === 'selected' && parseCaseIds(caseIds).length === 0)}
@@ -94,6 +119,7 @@ export function RunnerPage() {
       >
         {runMut.isPending ? 'Running...' : 'Run'}
       </button>
+      </div>
       <LogStreamPanel
         logs={logs}
         streaming={streaming}

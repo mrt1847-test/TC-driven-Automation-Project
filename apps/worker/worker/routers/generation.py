@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 from worker.core.database import get_session
 from worker.models.db import GeneratedFile, Project
 from worker.models.schemas import FileContentUpdate, FileCreateRequest, FileRenameRequest
+from worker.services.generated_runtime import ensure_generated_runtime
 from worker.services.project_generator import generate_project
 from worker.services.project_ide import (
     create_file,
@@ -32,7 +33,8 @@ def generate(project_id: str, payload: dict | None = None, session: Session = De
     project.generated_project_path = str(output)
     session.add(project)
     session.commit()
-    return {"generatedProjectPath": str(output)}
+    runtime_bootstrap = ensure_generated_runtime(output, install=True)
+    return {"generatedProjectPath": str(output), "runtimeBootstrap": runtime_bootstrap}
 
 
 @router.get("/generated-files")

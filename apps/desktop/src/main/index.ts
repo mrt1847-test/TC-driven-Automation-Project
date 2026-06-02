@@ -16,15 +16,55 @@ function getWorkerDir(): string {
   return join(process.resourcesPath, 'worker')
 }
 
+function getBundledRuntimeRoot(): string | null {
+  const packaged = join(process.resourcesPath, 'runtime')
+  if (existsSync(packaged)) return packaged
+  const devStaging = join(__dirname, '../../../runtime-staging')
+  if (existsSync(devStaging)) return devStaging
+  return null
+}
+
+function resolvePythonExecutable(): string {
+  const runtimeRoot = getBundledRuntimeRoot()
+  if (runtimeRoot) {
+    const winPython = join(runtimeRoot, 'python', 'python.exe')
+    if (existsSync(winPython)) return winPython
+    const unixPython = join(runtimeRoot, 'python', 'bin', 'python3')
+    if (existsSync(unixPython)) return unixPython
+  }
+  return process.env.PYTHON || 'python'
+}
+
+function buildWorkerEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    TC_STUDIO_DATA_DIR: join(app.getPath('userData'), 'data'),
+    TC_STUDIO_PYTHON: resolvePythonExecutable()
+  }
+  const runtimeRoot = getBundledRuntimeRoot()
+  if (runtimeRoot) {
+    env.TC_STUDIO_RESOURCES = runtimeRoot
+    env.TC_STUDIO_RUNTIME_MODE = 'bundled'
+    const browsers = join(runtimeRoot, 'ms-playwright')
+    if (existsSync(browsers)) {
+      env.TC_STUDIO_PLAYWRIGHT_BROWSERS_PATH = browsers
+      env.PLAYWRIGHT_BROWSERS_PATH = browsers
+    }
+  } else {
+    env.TC_STUDIO_RUNTIME_MODE = 'custom'
+  }
+  return env
+}
+
 function startWorker(): void {
   if (workerProcess) return
 
   const workerDir = getWorkerDir()
-  const python = process.env.PYTHON || 'python'
+  const python = resolvePythonExecutable()
   workerProcess = spawn(
     python,
     ['-m', 'uvicorn', 'worker.main:app', '--host', '127.0.0.1', '--port', String(WORKER_PORT)],
-    { cwd: workerDir, env: { ...process.env, TC_STUDIO_DATA_DIR: join(app.getPath('userData'), 'data') } }
+    { cwd: workerDir, env: buildWorkerEnv() }
   )
   workerProcess.stdout.on('data', (d) => console.log('[worker]', d.toString()))
   workerProcess.stderr.on('data', (d) => console.error('[worker]', d.toString()))

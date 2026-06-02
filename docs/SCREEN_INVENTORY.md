@@ -1,6 +1,6 @@
 # Screen Inventory
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-02
 
 이 문서는 Electron + React GUI 화면의 책임, 주요 상태, 연결 API, 체크리스트 항목을 정리한다. GUI는 자동화 로직을 소유하지 않고 Local Worker와 generated automation project를 오케스트레이션한다.
 
@@ -119,12 +119,21 @@ Prepare the local environment before the main app opens. **One-time onboarding g
 
 After `setupComplete`, the same configuration must remain editable in [Settings](#settings) (D9-02). Optional full wizard re-run: D9-03.
 
+### Runtime mode (bundled vs custom)
+
+| Mode | Setup behavior | Spec |
+|------|----------------|------|
+| `bundled` | Paths seeded from `resources/runtime`; fields read-only in wizard | [RUNTIME_SPEC.md](./RUNTIME_SPEC.md) |
+| `custom` | User picks Webwright root, Python, optional browser cache | [RUNTIME_SPEC.md](./RUNTIME_SPEC.md) |
+
+Electron sets `TC_STUDIO_RUNTIME_MODE`, `TC_STUDIO_RESOURCES`, `TC_STUDIO_PYTHON`, `TC_STUDIO_PLAYWRIGHT_BROWSERS_PATH` on worker spawn when packaged.
+
 ### Required Steps
 
 | Step | User Input | Worker/Electron dependency | Done when |
 |------|------------|----------------------------|-----------|
-| Webwright Root | directory path | Electron `selectDirectory` | path is stored in settings |
-| Python venv | interpreter or venv path | Electron `selectDirectory` or text input | health can locate Python |
+| Webwright Root | directory path (custom only) | Electron `selectDirectory` | path is stored in settings or bundled seed |
+| Python venv | interpreter or venv path (custom only) | Electron `selectDirectory` or text input | health can locate Python |
 | API Provider | provider option | settings | provider is persisted |
 | API Key | secret value | Electron keytar | secret is stored outside settings |
 | Playwright Browser Check | action button | `/health` or `/settings/validate` | browser readiness shown |
@@ -341,10 +350,12 @@ Run the generated automation project from inside the Automation IDE workspace us
 - Headed/headless option.
 - Target selector: all, case IDs, automation key, failed.
 - Run, cancel, rerun failed.
+- **Install Runtime** — calls `POST /projects/{project_id}/install-dependencies` (pip + chromium) before first run when health reports missing deps.
 - Live stdout/stderr log.
 
 ### APIs
 
+- `POST /projects/{project_id}/install-dependencies`
 - `POST /projects/{project_id}/executions`
 - `POST /projects/{project_id}/executions/{execution_id}/cancel`
 - `POST /projects/{project_id}/executions/{execution_id}/rerun-failed`

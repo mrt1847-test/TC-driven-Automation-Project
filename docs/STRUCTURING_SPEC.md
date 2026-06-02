@@ -1,258 +1,355 @@
 # Structuring Spec
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-03
 
-이 문서는 Webwright가 만든 raw output을 유지보수 가능한 Playwright/pytest 프로젝트로 바꾸는 구조화 계약을 정의한다.
+This document defines how Webwright raw output becomes a maintainable
+Playwright pytest project.
 
-**Product workspace:** Automation IDE ([PRODUCT_PILLARS.md — Workspace 2](./PRODUCT_PILLARS.md#workspace-2-automation-ide---structure--edit--run)). Generate Raw는 raw input(`RawAction`, artifacts)만 제공한다.
+Generate Raw produces raw artifacts. Automation IDE owns review, structure,
+generation, execution, and feedback.
 
-## Conclusion
+Related specs:
 
-현재 구현처럼 `RawAction`과 `CaseActionMapping`만 DB에 저장한 뒤 바로 파일을 생성하는 방식은 MVP smoke에는 가능하다. 하지만 다음 기능을 지원하려면 구조화 결과도 관계형 DB에 저장해야 한다.
+- [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md)
+- [RUNTIME_SPEC.md](./RUNTIME_SPEC.md)
+- [DB_SCHEMA.md](./DB_SCHEMA.md)
+- [SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md)
 
-- mapping review 이후 구조화 결과를 다시 열어 검토
-- POM method 이름, selector, assertion, wait를 GUI에서 안정적으로 편집
-- regenerated file diff 최소화
-- `automation_key` 기준 검색과 영향 범위 분석
-- 한 TC의 flow가 여러 page object method를 참조하는 관계 추적
-- 생성된 코드가 어떤 raw action과 TC step에서 왔는지 역추적
-- Webwright/runner artifact를 구조화 이후 selector healing에 재사용
-
-따라서 권장 구조는 다음과 같다.
+## Pipeline
 
 ```text
-Webwright final_script.py / trajectory.json
+Imported TC
+  -> Webwright final_script.py / trajectory.json
   -> ArtifactAsset / SelectorCandidate
   -> RawAction
-  -> CaseActionMapping
+  -> CaseActionMapping / CaseActionMappingAction
   -> StructuredFlow / StructuredStep
   -> PageObject / PageObjectMethod
-  -> HealingProposal when execution fails
-  -> GeneratedFile
-  -> tests, flows, pages, fixtures
+  -> GeneratedFile / GeneratedFileOrigin
+  -> generated tests, flows, pages, fixtures, mappings
 ```
+
+Raw files are evidence. Structured DB entities are the source of truth for code
+generation.
+
+For an already structured/generated project, rerunning Webwright for selected
+TCs is a raw refresh operation. It must not discard the existing structured
+model and start from zero unless the user explicitly chooses a reset.
 
 ## Raw Inputs
 
 | Input | Role | Stored in DB |
 |-------|------|--------------|
-| `final_script.py` | primary raw code source | path only |
-| `trajectory.json` | optional browser-event enrichment | path only |
-| screenshots/logs | review artifacts | path only |
-| imported TC steps | human intent | normalized fields and JSON |
+| `final_script.py` | primary raw code source | path and extracted facts |
+| `trajectory.json` | browser-event enrichment | path and extracted facts |
+| screenshots/logs | review evidence | artifact path/hash/metadata |
+| imported TC steps | user intent | normalized fields and JSON |
 
-Raw files stay on disk. DB stores paths, extracted facts, selector candidates, mapping, structured metadata, and healing proposals.
+Do not store full generated source as primary DB data. Store facts, relations,
+and traceability links.
 
 ## Step 1: Action Extraction
 
-Source: `final_script.py`, optionally `trajectory.json`
+`final_script.py` and `trajectory.json` should produce ordered `RawAction`
+records.
 
-Output: `RawAction`
+Extraction must preserve:
 
-Extraction should preserve:
+- action order;
+- Playwright action type;
+- locator/selector expression;
+- target/value/text/input data;
+- source line;
+- originating Webwright run;
+- artifact evidence when available;
+- selector candidates and confidence when available;
+- parse warnings for unsupported code.
 
-- action order
-- Playwright action type
-- locator/selector expression
-- value/text/input data
-- source line
-- artifact reference when available
-- selector candidates when available
-- confidence and parse warnings when extraction is uncertain
+Minimum action coverage:
 
-Example:
-
-```json
-{
-  "type": "click",
-  "selector": "page.get_by_role(\"button\", name=\"Login\")",
-  "target": "Login button",
-  "value": null,
-  "source_line": 18,
-  "order_index": 3
-}
-```
+- navigation: `goto`;
+- interaction: `click`, `fill`, `press`, `check`, `uncheck`, `select_option`,
+  `set_input_files`, `hover`, `drag_to`;
+- assertion: `expect(...).to_*`;
+- waiting: `wait_for_*`, locator wait, network/load state wait;
+- custom/unsupported: preserve raw text and require review.
 
 ## Step 2: TC Mapping
 
-Source: imported TC steps + `RawAction`
-
-Output: `CaseActionMapping`
-
-Mapping is a reviewable relation, not a one-time guess. One TC step can map to zero, one, or many raw actions.
-
-Mapping statuses:
+Reviewed mapping connects TC steps to one or more raw actions.
 
 | Status | Meaning |
 |--------|---------|
-| `mapped` | user or auto-mapper accepts relation |
-| `needs_review` | relation is uncertain |
+| `mapped` | accepted relation |
+| `needs_review` | uncertain relation |
 | `unmapped` | TC step has no raw action |
 | `ignored` | raw action should not generate code |
 
-## Step 3: Normalized Flow
+One TC step may map to multiple raw actions. `CaseActionMappingAction` should
+preserve ordered joins.
 
-Source: reviewed `CaseActionMapping`
+## Step 3: Structured Flow
 
-Output: `StructuredFlow`, `StructuredStep`
+`StructuredFlow` is a versioned automation intent model for a TC.
 
-The normalized flow is the automation-level intent for one TC. It is still data, not Python code.
+Each `StructuredStep` should contain:
 
-Example:
+- order index;
+- reviewed human-readable step name;
+- kind: navigation, interaction, assertion, wait, helper, custom_code;
+- mapping ID;
+- related raw action IDs through the mapping join;
+- page object method link;
+- metadata for env/test data placeholders where needed.
 
-```json
-{
-  "automation_key": "user_login_001",
-  "flow_name": "UserLogin001Flow",
-  "steps": [
-    {
-      "order_index": 1,
-      "name": "open_login_page",
-      "kind": "navigation",
-      "raw_action_ids": ["act_001"]
-    },
-    {
-      "order_index": 2,
-      "name": "submit_login",
-      "kind": "interaction",
-      "raw_action_ids": ["act_002", "act_003", "act_004"]
-    }
-  ]
-}
-```
+The flow is still data, not Python.
 
 ## Step 4: Page Object Method Planning
 
-Source: `StructuredStep` + selectors/actions
+`PageObjectMethod` must describe executable behavior before Python generation.
 
-Output: `PageObject`, `PageObjectMethod`
-
-Page object methods are reusable units. They should be deterministic and editable.
-
-Method generation rules:
-
-- navigation actions can become page-level methods such as `open()`.
-- click/fill/check sequences become verb-based methods such as `submit_login`.
-- assertions become `expect_*` methods or inline test assertions depending on reuse.
-- hard waits should be flagged as review risks.
-- selectors are stored as data before code generation.
-
-Example method plan:
+`body_plan_json` should be a deterministic ordered list:
 
 ```json
-{
-  "page_name": "LoginPage",
-  "method_name": "submit_login",
-  "return_type": "None",
-  "steps": [
-    { "action": "fill", "selector": "page.get_by_label(\"Email\")", "value": "${email}" },
-    { "action": "fill", "selector": "page.get_by_label(\"Password\")", "value": "${password}" },
-    { "action": "click", "selector": "page.get_by_role(\"button\", name=\"Login\")" }
-  ]
-}
+[
+  {
+    "action": "fill",
+    "selector": "page.get_by_label(\"Email\")",
+    "value": "${env.user.email}",
+    "sourceRawActionId": "act_001",
+    "sourceMappingId": "map_001"
+  },
+  {
+    "action": "click",
+    "selector": "page.get_by_role(\"button\", name=\"Login\")",
+    "sourceRawActionId": "act_002",
+    "sourceMappingId": "map_001"
+  },
+  {
+    "action": "expect_visible",
+    "selector": "page.get_by_text(\"Dashboard\")",
+    "sourceRawActionId": "act_003",
+    "sourceMappingId": "map_002"
+  }
+]
 ```
+
+Planner requirements:
+
+- compile multi-action mapped steps into one method when the TC step represents
+  one business action;
+- preserve individual methods when reuse or clarity is better;
+- represent assertions and waits explicitly;
+- convert hard waits into review warnings unless they are intentionally accepted;
+- support value placeholders from env config or test data;
+- mark unsupported actions as `custom` and require review before generation;
+- keep method names deterministic.
 
 ## Step 5: Code Generation
 
-Source: structured DB entities
+The generator reads structured DB entities:
 
-Output: generated files
+| Generated output | Source |
+|------------------|--------|
+| `flows/{automation_key}_flow.py` | `StructuredFlow` + ordered `StructuredStep` |
+| `pages/generated_page.py` or page-specific files | `PageObject` + `PageObjectMethod.body_plan_json` |
+| `tests/test_{automation_key}.py` | TestCase + flow |
+| `mappings/cases.yaml` | TestCase + generation metadata |
+| runtime manifest | template + runtime/generation metadata |
 
-Generated files are not source of truth for mapping. They are reproducible output from reviewed structure plus templates.
+Generated code should not inspect raw scripts directly. If raw evidence changes,
+the pipeline should update RawAction/mapping/structured data first, then
+regenerate.
 
-```text
-StructuredFlow
-  -> flows/{automation_key}_flow.py
+## Generated File Traceability
 
-PageObject / PageObjectMethod
-  -> pages/{page_name}.py
+Each generated file needs:
 
-TestCase + StructuredFlow
-  -> tests/test_{automation_key}.py
+- relative path;
+- content hash;
+- status: generated, edited, stale, conflict;
+- primary source type/source ID for simple lookup;
+- `GeneratedFileOrigin` rows for every relevant origin.
 
-TestCase + GeneratedFile
-  -> mappings/cases.yaml
-```
+Recommended origins:
 
-## Step 6: Artifact-Backed Self-Healing
+- TestCase;
+- StructuredFlow;
+- StructuredStep;
+- PageObject;
+- PageObjectMethod;
+- CaseActionMapping;
+- RawAction;
+- WebwrightRun.
 
-Source: Webwright artifacts + generated project run artifacts + structured metadata
+This is required for:
 
-Output: healing proposal, structured metadata patch, regenerated file patch
-
-Self-healing uses the same traceability chain as generation:
-
-```text
-ExecutionResult failure
-  -> automation_key
-  -> generated test / flow / page method
-  -> PageObjectMethod selector plan
-  -> StructuredStep
-  -> CaseActionMapping
-  -> RawAction
-  -> Webwright screenshots/logs/trajectory
-  -> SelectorCandidate
-  -> HealingProposal
-```
-
-The generated Python file is not the first place to patch. The safer order is:
-
-1. create healing proposal
-2. update `PageObjectMethod` or `StructuredStep` metadata if accepted
-3. regenerate or patch generated file
-4. rerun selected/failed case
-
-See [SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md).
+- impact analysis when raw actions or mappings change;
+- safe regeneration;
+- self-healing proposals;
+- explaining why a line of generated code exists.
 
 ## Regeneration Rule
 
-Regeneration should be deterministic:
+Regeneration must be deterministic:
 
-- same mapping + same structured entities = same file output
-- manual code edits in IDE should either be preserved through protected regions or marked as diverged
-- generated file metadata should store content hash to detect drift
+- same structured data + same template version = same generated files;
+- edited generated files must be detected by comparing stored hash with current
+  file hash;
+- if the source changed and the file was edited, mark conflict instead of
+  silently overwriting;
+- if the source changed and the file was untouched, regenerate and update hash;
+- protected regions may be introduced later, but conflict detection comes first.
 
-Recommended generated file statuses:
+## Selected Raw Refresh Merge
 
-| Status | Meaning |
-|--------|---------|
-| `generated` | file matches generated metadata |
-| `edited` | user edited file after generation |
-| `stale` | source structure changed after file generation |
-| `conflict` | regeneration cannot safely overwrite |
+Selected raw refresh is the maintenance path where the user picks one or more
+already-structured TCs and reruns Webwright to get fresh raw scripts/actions.
+This is not limited to flow/order failures. It may be user-initiated because the
+target application changed, the original raw script was weak, or the user wants
+to refresh only a few cases in a larger generated project.
 
-## What Goes In DB
+The merge target is the existing structured state:
 
-Store:
+```text
+new WebwrightRun / RawAction
+  -> compare with previous RawAction and CaseActionMapping
+  -> update mapping candidates for selected TC
+  -> preserve reviewed StructuredStep names/order where intent still matches
+  -> update PageObjectMethod.body_plan_json where actions/selectors changed
+  -> mark ambiguous changes as needs_review or conflict
+  -> selected incremental generation
+```
 
-- extracted actions
-- mapping decisions
-- normalized flow and step metadata
-- page object and method metadata
-- artifact paths and selector candidate metadata
-- healing proposals and decisions
-- generated file paths, hashes, and origin links
+Merge requirements:
 
-Do not store:
+- preserve `automation_key`, TC identity, reviewed step names, and human-edited
+  intent wherever possible;
+- compare old and new raw action sequences by action type, selector candidates,
+  target URL, text/value, and surrounding artifact evidence;
+- carry forward existing mappings when a new action is equivalent or clearly
+  replaces an old action;
+- create new mapping candidates when new raw actions appear;
+- mark removed or unmatched structured steps as `needs_review` instead of
+  silently deleting them;
+- update `PageObjectMethod.body_plan_json` from the new raw actions only after
+  the mapping/intent match is safe;
+- keep old raw artifacts linked for diff/review;
+- never regenerate unrelated cases as part of the merge.
 
-- full raw `final_script.py`
-- full generated source code as primary data
-- screenshots/traces as blobs
-- API keys/secrets
+If the merge cannot prove intent continuity, it should stop at reviewed mapping
+state and require Automation IDE review before code generation.
 
-## MVP Cut
+## Selected TC Incremental Regeneration
 
-For the first end-to-end MVP, it is acceptable to implement:
+When generation is requested for selected `caseIds`, the generator must treat it
+as an incremental maintenance operation unless the request explicitly says
+`mode=full`.
 
-- `RawAction`
-- `CaseActionMapping`
-- `StructuredFlow`
-- `StructuredStep`
-- `PageObject`
-- `PageObjectMethod`
-- `ArtifactAsset`
-- `SelectorCandidate`
-- `HealingProposal`
-- `GeneratedFile` with hash/status
+Selected regeneration must:
 
-This keeps the database small while making structure review and deterministic regeneration possible.
+- preserve unrelated generated tests, flows, page files, runner files, fixtures,
+  and artifact folders;
+- consume the merged structured state from Selected Raw Refresh Merge when a
+  selected TC was rerun through Webwright;
+- update only files whose `GeneratedFileOrigin` links reference the selected
+  TestCase, StructuredFlow, StructuredStep, PageObjectMethod, mapping, raw
+  action, or Webwright run;
+- merge `mappings/cases.yaml` entries instead of rewriting it from only the
+  selected case subset;
+- use the stored `content_hash` to detect user-edited files;
+- mark a file `conflict` when a selected source changed but the file was edited;
+- mark a file `stale` when impacted source data changed but regeneration was
+  deferred;
+- return an affected-file summary so Automation IDE can show the user what
+  changed and what remained untouched.
+
+The current product goal is to support a project with many generated TCs where
+one failed TC can be rerun through Webwright, restructured, and regenerated
+without deleting the other generated tests.
+
+Full regeneration is allowed only when the user explicitly requests it. Full
+regeneration still must respect stale/conflict guards for edited files.
+
+## TC Retire / Delete Cleanup
+
+When failure disposition concludes that a product area was removed, the system
+may recommend retiring or deleting the TC. The user must confirm the action.
+
+Retire/delete cleanup must:
+
+- preserve execution history and artifact records for audit;
+- set the TC to a project-defined retired/deleted state before generated cleanup;
+- remove or mark obsolete the generated test file for that TC;
+- remove or update the `mappings/cases.yaml` entry;
+- remove flow code only when no active TC references the same flow;
+- remove page object methods only when no active TC references the same method;
+- update `GeneratedFile` and `GeneratedFileOrigin` rows after cleanup;
+- return a cleanup summary including preserved shared files.
+
+Shared page objects and helper methods must be reference-counted through origin
+links before deletion. If the impact cannot be proven, mark the generated file
+for manual review instead of deleting it.
+
+## Structure Validation
+
+`/projects/{project_id}/cases/{case_id}/structure/validate` should report:
+
+- missing structured flow;
+- missing mappings;
+- mappings in `needs_review`;
+- unmapped required TC steps;
+- missing step names;
+- missing or unsupported PageObjectMethod plans;
+- step count mismatch;
+- unsupported actions requiring manual review;
+- stale/conflict status for generated files when known.
+
+## Self-Healing Relationship
+
+Execution failures should trace back through:
+
+```text
+ExecutionResult
+  -> automationKey
+  -> GeneratedFile / GeneratedFileOrigin
+  -> PageObjectMethod / StructuredStep
+  -> CaseActionMapping
+  -> RawAction
+  -> Webwright artifacts / SelectorCandidate
+```
+
+The generated Python file should not be patched first. Preferred order:
+
+1. create healing proposal;
+2. update `PageObjectMethod` or structured metadata if accepted;
+3. regenerate or apply a guarded patch;
+4. rerun selected/failed case.
+
+## Implementation Status
+
+Done:
+
+- StructuredFlow and StructuredStep models exist.
+- PageObject and PageObjectMethod models exist.
+- structure sync and validate APIs exist.
+- project generator reads structured entities.
+- GeneratedFile stores hash/status and simple source fields.
+
+Open:
+
+- C5-03: expanded action type coverage.
+- C6-07: ordered multi-action mapping API follow-up.
+- C7-10: stale/conflict detection.
+- C7-11: structured method body planner coverage.
+- C7-12: selected raw refresh merge into existing structure.
+- C8-06: deterministic regeneration guard.
+- C8-07: `GeneratedFileOrigin` link persistence.
+- C8-09: selected TC incremental regeneration.
+- C8-10: TC retire/delete generated artifact cleanup.
+- C12-08: failure disposition classifier.
+- C12-09: selected TC Webwright refresh regeneration flow.
+- C12-10: TC retire recommendation and cleanup flow.
+- E-11: selected TC Webwright refresh incremental regeneration E2E.
+- E-12: feature-removed TC retire cleanup E2E.
+- E-10: generated pytest/browser contract E2E.

@@ -38,6 +38,11 @@
         "!**/*.pyc",
         "!tests/**"
       ]
+    },
+    {
+      "from": "../../runtime-staging",
+      "to": "runtime",
+      "filter": ["**/*"]
     }
   ]
 }

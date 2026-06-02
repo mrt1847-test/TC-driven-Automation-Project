@@ -1,8 +1,13 @@
 # Workflow Spec
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-03
 
-이 문서는 architecture의 실행 시퀀스를 PR 단위 검증이 가능한 워크플로우로 정리한다. 모든 workflow는 [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)의 2-workspace 모델과 handoff contract를 따른다.
+This document turns the architecture into workflow-sized acceptance contracts.
+All workflows follow the two-workspace model in
+[PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md):
+
+- Workspace 1: Generate Raw
+- Workspace 2: Automation IDE
 
 ## Workspace Overview
 
@@ -10,10 +15,11 @@ Last aligned: 2026-05-31
 |---|----------|-----------|-------------|
 | 1 | TC Import | Generate Raw | `TestCase` rows |
 | 2 | Webwright Generate | Generate Raw | `WebwrightRun`, `RawAction`, artifacts |
-| 7 | Generate Raw rerun (reverse handoff) | Generate Raw ← Automation IDE | refreshed raw actions |
+| 7 | Selected Webwright Raw Refresh | Generate Raw <- Automation IDE | refreshed raw actions for selected already-structured TC |
 | 3 | Mapping Review | Automation IDE | reviewed `CaseActionMapping` |
 | 4 | Project Generation | Automation IDE | generated project files |
 | 5 | Project Execution | Automation IDE | `ExecutionRun`, `ExecutionResult` |
+| 8 | Failure Disposition And Maintenance | Automation IDE, optional Generate Raw handoff | healed selector, selected regeneration, or retired TC |
 | 6 | Result Export | Automation IDE | external TC write-back |
 
 ## Workflow 1: TC Import
@@ -23,14 +29,14 @@ Last aligned: 2026-05-31
 
 ```text
 User
-  -> GUI (Generate Raw): choose source and file/config
+  -> GUI: choose source and file/config
   -> Worker: preview/import request
   -> Case Import Service: parse and normalize
   -> SQLite: save TestCase
   -> GUI: show imported TC list
 ```
 
-Done when (PRODUCT_PILLARS W1):
+Done when:
 
 - Excel preview returns normalized rows.
 - Import writes TestCase rows with `automation_key`.
@@ -43,7 +49,7 @@ Done when (PRODUCT_PILLARS W1):
 
 ```text
 User
-  -> GUI (Generate Raw): configure LLM/prompt, select TC, run Webwright
+  -> GUI: configure LLM/prompt, select TC, run Webwright
   -> Worker: queue run and return jobId
   -> Webwright Adapter: execute native or WSL command
   -> Worker: collect final_script.py and trajectory.json
@@ -52,14 +58,12 @@ User
   -> GUI: show run status and artifacts
 ```
 
-Done when (PRODUCT_PILLARS W1 completion signal):
+Done when:
 
-- TC has stable `automation_key`.
-- One selected TC creates one WebwrightRun (or mock for review).
-- Run status transitions are visible.
-- Raw actions are stored; artifact paths are available.
+- One selected TC creates one WebwrightRun, or explicit mock mode for review.
+- Raw actions and artifact paths are stored.
 - Logs stream through `/ws/logs/{job_id}`.
-- TC is ready to hand off to Automation IDE (Mapping).
+- TC is ready to hand off to Automation IDE.
 
 ## Workflow 3: Mapping Review
 
@@ -68,19 +72,19 @@ Done when (PRODUCT_PILLARS W1 completion signal):
 
 ```text
 User
-  -> GUI (Automation IDE): open TC in Mapping & Review
+  -> GUI: open TC in Mapping & Review
   -> Worker: load TC, raw actions, mappings
   -> GUI: user edits mapping
   -> Worker: save mapping and action updates
   -> SQLite: update CaseActionMapping
 ```
 
-Done when (PRODUCT_PILLARS W2):
+Done when:
 
 - TC steps and raw actions can be reviewed side by side.
 - User can save mapping changes.
 - `needs_review` and `mapped` statuses are represented.
-- Mapping is reviewable and editable.
+- One TC step can map to multiple raw actions when needed.
 
 ## Workflow 4: Project Generation
 
@@ -89,30 +93,33 @@ Done when (PRODUCT_PILLARS W2):
 
 ```text
 User
-  -> GUI (Automation IDE): click Generate Project
-  -> Worker: transform reviewed mappings into structured flow
-  -> Project Generator: write generated project files
-  -> SQLite: save GeneratedFile metadata
+  -> GUI: click Generate Project
+  -> Worker: structure/sync persists StructuredFlow, StructuredStep, PageObjectMethod
+  -> Worker: generate code from DB entities
+  -> Worker: ensure_generated_runtime
+  -> SQLite: save GeneratedFile and GeneratedFileOrigin metadata
   -> GUI: open Project IDE file tree
 ```
 
 Done when:
 
 - Generated project directory is created.
-- `mappings/cases.yaml`, pages, flows, tests, fixtures, runner files exist.
+- `mappings/cases.yaml`, pages, flows, tests, fixtures, and runner files exist.
 - IDE file tree can browse and open files.
 - Generated code preserves `automation_key`.
-- Structured flow and POM plan are visible where implemented.
+- Structured flow and POM plans are persisted in DB and reflected in generated files.
+- `runtimeBootstrap.ok` is true or user can recover via Install Runtime.
 
 ## Workflow 5: Project Execution
 
-**Workspace:** Automation IDE (Runner panel)  
+**Workspace:** Automation IDE  
 **Checklist:** E-05, C9, D6-07, D7, D8
 
 ```text
 User
-  -> GUI (Automation IDE): choose env/browser/target and click Run
-  -> Worker: queue execution and return jobId
+  -> GUI: optional Install Runtime if health/deps missing
+  -> GUI: choose env/browser/target and click Run
+  -> Worker: ensure_generated_runtime then queue execution
   -> Project Runner Service: call generated runner CLI
   -> Generated Project: run pytest/playwright
   -> Generated Project: write results.json and artifacts
@@ -120,23 +127,23 @@ User
   -> GUI: show result summary and case table
 ```
 
-Done when (PRODUCT_PILLARS W2):
+Done when:
 
 - GUI run creates ExecutionRun.
 - Logs stream while running.
 - `results.json` is parsed.
-- Results panel shows summary, per-case status, artifact links.
+- Results panel shows summary, per-case status, and artifact links.
 - Results link back to `automation_key`.
 - Generated project can run without the GUI.
 
 ## Workflow 6: Result Export
 
-**Workspace:** Automation IDE (Export panel)  
+**Workspace:** Automation IDE  
 **Checklist:** E-06, C10, B4, D8-03
 
 ```text
 User
-  -> GUI (Automation IDE): choose export target
+  -> GUI: choose export target
   -> Worker: preview export
   -> User: confirm write-back
   -> Result Export Service: load results and mapping
@@ -151,36 +158,78 @@ Done when:
 - Export maps results by `automation_key` and source case ID.
 - Export failure is visible and does not corrupt local results.
 
-## Workflow 7: Generate Raw Rerun (Reverse Handoff)
+## Workflow 7: Selected Webwright Raw Refresh
 
-**Workspace:** Automation IDE → Generate Raw  
-**Checklist:** D1-06, D4-02, E-02
+**Workspace:** Automation IDE -> Generate Raw  
+**Checklist:** D1-06, D4-02, E-02, C12-09
 
-Triggered when Automation IDE detects missing/invalid raw action, prompt issue, or user requests Webwright rerun.
+Triggered when Automation IDE detects missing/invalid raw action, prompt issue,
+fresh raw evidence is needed, or the user intentionally reruns Webwright for
+selected TCs that are already structured/generated.
 
 ```text
-User (in Automation IDE)
-  -> GUI: failure/mapping gap → "Rerun Webwright" or "Fix in Generate Raw"
-  -> GUI: switch to Generate Raw workspace with same TC selected
+User in Automation IDE
+  -> GUI: choose "Refresh Webwright raw for selected TC"
+  -> GUI: switch to Generate Raw with same TC selected
   -> GUI: open Webwright Runs with TC context and prior prompt
   -> User: adjust prompt/config if needed, retry run
-  -> Workflow 2 continues
-  -> GUI: return to Automation IDE Mapping with refreshed RawAction
+  -> Worker: refresh RawAction and mapping candidates for that TC
+  -> Worker: merge refreshed raw actions into existing structured entities where safe
+  -> GUI: return to Automation IDE with merged structure or review-required changes
 ```
 
-Done when (PRODUCT_PILLARS handoff W2 → W1):
+Done when:
 
 - Selected TC and `automation_key` carry across workspace switch.
 - User can retry Webwright without re-importing TC.
-- Refreshed raw actions are visible in Mapping after rerun.
+- Old and new raw artifacts remain available for comparison.
+- Refreshed raw actions merge into existing structured state when intent is clear.
+- Ambiguous raw changes are marked for Mapping/Structure review instead of
+  silently rebuilding the TC.
+
+## Workflow 8: Failure Disposition And Maintenance
+
+**Workspace:** Automation IDE, optional Generate Raw handoff  
+**Checklist:** C12-08, C12-09, C12-10, C8-09, C8-10, D6-09, D6-10, E-11, E-12
+
+Triggered when a generated project run fails.
+
+```text
+Execution failure
+  -> Worker: link failure to automation_key, generated files, structured step, POM method, raw action
+  -> Worker: classify disposition
+  -> GUI: show evidence, confidence, and recommended action
+  -> User: choose repair path
+  -> Worker/GUI: apply selected path
+  -> User: rerun selected or failed cases
+```
+
+Maintenance paths:
+
+| Disposition | User action | Worker action |
+|-------------|-------------|---------------|
+| `selector_changed` | accept/reject selector healing | update structured selector/POM metadata, regenerate guarded files, rerun |
+| `raw_refresh_required` | refresh Webwright raw for selected TC | merge raw actions into existing structure, incrementally regenerate affected files only |
+| `feature_removed_retire_tc` | confirm retire/delete TC | retire/delete TC and cleanup generated artifacts only when not shared |
+| `unknown` | inspect evidence manually | preserve evidence and avoid automatic code changes |
+
+Done when:
+
+- Failure reason is visible and tied to artifacts.
+- The recommended action is specific to the failed TC.
+- Already structured TCs can refresh Webwright raw for only the selected TC.
+- New raw actions merge into existing structured entities before generation.
+- Selected regeneration preserves unrelated generated cases in the same project.
+- Feature removal requires human confirmation before retiring/deleting a TC.
+- Generated artifact cleanup respects shared origins and edited-file conflicts.
 
 ## MVP Gates
 
 | Gate | Scope | Required workflows |
 |------|-------|--------------------|
-| MVP 1 | Excel based end-to-end | Workflows 1–5 |
-| MVP 2 | Automation IDE edit/regenerate/debug | Workflow 4 plus IDE edit/run loop, D6-07 |
-| MVP 3 | testrail-clone integration | Workflows 1 and 6 for testrail-clone |
+| MVP 1 | Excel based end-to-end | Workflows 1-5 |
+| MVP 2 | Automation IDE edit/regenerate/debug | Workflows 4, 5, 7, 8 |
+| MVP 3 | testrail-clone integration | Workflows 1 and 6 |
 | MVP 4 | TestRail, Google Sheets, Excel write-back | Workflow 6 for all targets |
 
 ## Cross-Cutting Acceptance

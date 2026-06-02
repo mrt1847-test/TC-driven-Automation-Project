@@ -23,9 +23,13 @@ def _assert_health_shape(payload: dict) -> None:
         "settings",
         "python",
         "webwrightRoot",
+        "webwrightPython",
+        "webwrightCli",
+        "webwrightConfig",
         "templatePath",
         "playwright",
         "playwrightBrowser",
+        "mockMode",
         "allOk",
     ]:
         assert key in payload
@@ -57,8 +61,10 @@ def test_setup_settings_smoke_validation_baseline(
     project_root = tmp_path / "automation-projects"
     for path in [webwright_root, output_root, project_root]:
         path.mkdir(parents=True, exist_ok=True)
+    (webwright_root / "base.yaml").write_text("{}\n", encoding="utf-8")
 
     updated = body.copy()
+    updated["runtime"] = {**updated.get("runtime", {}), "mode": "custom", "python": sys.executable}
     updated["webwright"] = {
         **updated["webwright"],
         "executionMode": "native",
@@ -107,6 +113,8 @@ def test_setup_settings_smoke_validation_baseline(
     _assert_health_shape(validation_body)
     assert validation_body["webwrightRoot"]["ok"] is True
     assert validation_body["webwrightRoot"]["path"] == str(webwright_root)
+    assert validation_body["webwrightCli"]["ok"] is False
+    assert validation_body["mockMode"]["enabled"] is True
     assert validation_body["python"]["ok"] is True
     assert validation_body["settings"]["path"].endswith("settings.json")
 

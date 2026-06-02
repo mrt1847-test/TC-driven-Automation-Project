@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
@@ -34,6 +34,7 @@ export function SetupWizard({ mode = 'first-run' }: SetupWizardProps) {
   const [apiKey, setApiKey] = useState('')
   const [projectRoot, setProjectRoot] = useState('')
   const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [runtimeMode, setRuntimeMode] = useState<'custom' | 'bundled'>('custom')
   const setSetupComplete = useAppStore((s) => s.setSetupComplete)
   const closeSetupWizardRerun = useAppStore((s) => s.closeSetupWizardRerun)
 
@@ -49,6 +50,12 @@ export function SetupWizard({ mode = 'first-run' }: SetupWizardProps) {
       if (webwright?.python) setPythonPath(webwright.python)
       if (webwright?.apiProvider) setApiProvider(webwright.apiProvider)
       if (generator?.projectRoot) setProjectRoot(generator.projectRoot)
+      const runtime = current.runtime as Record<string, string> | undefined
+      if (runtime?.mode === 'bundled') {
+        setRuntimeMode('bundled')
+        if (runtime.python) setPythonPath(runtime.python)
+        if (runtime.webwrightRoot) setWebwrightRoot(runtime.webwrightRoot)
+      }
     })
   }, [])
 
@@ -88,6 +95,12 @@ export function SetupWizard({ mode = 'first-run' }: SetupWizardProps) {
     const webwright = current.webwright as Record<string, unknown> | undefined
     const updated = {
       ...current,
+      runtime: {
+        ...(current.runtime as object),
+        mode: runtimeMode,
+        python: pythonPath,
+        webwrightRoot: webwrightRoot
+      },
       webwright: {
         ...(current.webwright as object),
         root: webwrightRoot,
@@ -125,14 +138,19 @@ export function SetupWizard({ mode = 'first-run' }: SetupWizardProps) {
 
       {step === 0 && (
         <div className="space-y-2">
-          <input className="w-full p-2 rounded bg-slate-800" value={webwrightRoot} onChange={(e) => setWebwrightRoot(e.target.value)} placeholder="Webwright root path" />
-          <button className="px-4 py-2 bg-slate-700 rounded" onClick={() => pickDir(setWebwrightRoot)}>Browse</button>
+          {runtimeMode === 'bundled' ? (
+            <p className="text-xs text-slate-400">Bundled runtime mode: Webwright root is managed by installer resources.</p>
+          ) : null}
+        <div className="space-y-2">
+          <input disabled={runtimeMode === 'bundled'} className="w-full p-2 rounded bg-slate-800 disabled:opacity-60" value={webwrightRoot} onChange={(e) => setWebwrightRoot(e.target.value)} placeholder="Webwright root path" />
+          <button disabled={runtimeMode === 'bundled'} className="px-4 py-2 bg-slate-700 rounded disabled:opacity-60" onClick={() => pickDir(setWebwrightRoot)}>Browse</button>
+        </div>
         </div>
       )}
       {step === 1 && (
         <div className="space-y-2">
-          <input className="w-full p-2 rounded bg-slate-800" value={pythonPath} onChange={(e) => setPythonPath(e.target.value)} placeholder="Python path or venv interpreter" />
-          <button className="px-4 py-2 bg-slate-700 rounded" onClick={() => pickDir(setPythonPath)}>Browse venv</button>
+          <input disabled={runtimeMode === 'bundled'} className="w-full p-2 rounded bg-slate-800 disabled:opacity-60" value={pythonPath} onChange={(e) => setPythonPath(e.target.value)} placeholder="Python path or venv interpreter" />
+          <button disabled={runtimeMode === 'bundled'} className="px-4 py-2 bg-slate-700 rounded disabled:opacity-60" onClick={() => pickDir(setPythonPath)}>Browse venv</button>
         </div>
       )}
       {step === 2 && (
@@ -211,3 +229,5 @@ export function SetupWizard({ mode = 'first-run' }: SetupWizardProps) {
     </div>
   )
 }
+
+

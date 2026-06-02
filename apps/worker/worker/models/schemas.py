@@ -140,6 +140,14 @@ class FileRenameRequest(BaseModel):
 
 
 class AppSettings(BaseModel):
+    runtime: dict[str, Any] = Field(default_factory=lambda: {
+        "mode": "custom",
+        "python": "",
+        "webwrightRoot": "",
+        "webwrightPython": "",
+        "playwrightBrowsersPath": "",
+        "templatePath": "",
+    })
     webwright: dict[str, Any] = Field(default_factory=lambda: {
         "executionMode": "native",
         "root": "",

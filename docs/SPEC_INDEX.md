@@ -1,42 +1,63 @@
 # Spec Index
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-03
 
-이 폴더의 스펙 문서는 [Architecture](../webwright_automation_generator_architecture.md)를 구현 가능한 단위로 쪼갠 보조 문서다. **제품 정보구조의 기준은 [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)** 이다. 구현 진행은 [Implementation Checklist](./IMPLEMENTATION_CHECKLIST.md)와 [Next Actions](./NEXT_ACTIONS.md)를 기준으로 추적한다.
+This index maps product workspaces, implementation areas, and supporting specs.
+Implementation progress is tracked in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).
 
 ## Product Workspace Map
 
-모든 GUI·워크플로·화면 문서는 아래 2-workspace 모델을 따른다. flat tab 목록이 아니라 workspace 단위로 읽는다.
-
 | Workspace | Purpose | Primary spec docs | Checklist |
 |-----------|---------|-------------------|-----------|
-| **Generate Raw** | TC import → LLM/prompt → Webwright raw code/action/artifact | SCREEN_INVENTORY (W1), UI_UX_DIRECTION, WORKFLOW 1–2, API (Cases, Webwright, Prompt) | D3, D4, C1–C5 |
-| **Automation IDE** | Mapping → structure → edit → run → results → export | SCREEN_INVENTORY (W2), STRUCTURING_SPEC, GENERATED_PROJECT_SPEC, WORKFLOW 3–6 | D5–D8, C6–C12 |
-| **Supporting** | Setup, Settings, global shell | SCREEN_INVENTORY (Setup/Settings), UI_UX_DIRECTION | D1–D2, D9, A3 |
+| Generate Raw | TC import -> prompt/LLM -> Webwright raw script/actions/artifacts | [RUNTIME_SPEC.md](./RUNTIME_SPEC.md), [API_SPEC.md](./API_SPEC.md) | D3, D4, C1-C5 |
+| Automation IDE | Mapping -> structure -> edit -> run -> results -> export | [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md), [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md), [API_SPEC.md](./API_SPEC.md) | D5-D8, C6-C12 |
+| Supporting | Setup, Settings, runtime, installer, app shell | [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md), [RUNTIME_SPEC.md](./RUNTIME_SPEC.md) | D1, D2, D9, A3, I |
 
-Handoff contract: [PRODUCT_PILLARS.md — Handoff Contract](./PRODUCT_PILLARS.md#handoff-contract)
-
-## Documents
+## Source Of Truth Documents
 
 | Document | Purpose | Main checklist area | Workspace |
 |----------|---------|---------------------|-----------|
-| [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md) | 2-workspace 최상위 정보구조, handoff, completion signal | All | All |
-| [API_SPEC.md](./API_SPEC.md) | Local Worker HTTP/WebSocket API 계약 | A5, C1, C4, C6, C8, C9, C10, C11 | W1 + W2 + shared |
-| [SCREEN_INVENTORY.md](./SCREEN_INVENTORY.md) | GUI 화면, workspace별 surface, 연결 API | D1-D9 | W1 + W2 + supporting |
-| [UI_UX_DIRECTION.md](./UI_UX_DIRECTION.md) | Cursor-inspired 2-workspace IDE UX | D1-D9 | W1 + W2 |
-| [DATA_MODEL_SPEC.md](./DATA_MODEL_SPEC.md) | SQLite/SQLModel 엔티티와 상태 모델 | A2, C 계열 | W1 outputs → W2 inputs |
-| [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md) | raw → flow/POM/test 구조화 | C5-C8 | Automation IDE |
-| [SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md) | artifact-backed selector healing | C12, D5-D8 | Automation IDE |
-| [DB_SCHEMA.md](./DB_SCHEMA.md) | 관계형 DB DDL | A2, C6-C8, C11 | W1 + W2 |
-| [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md) | 독립 실행 Playwright/pytest 프로젝트 | B1-B4, C8-C10 | Automation IDE output |
-| [CI_STANDALONE_GUIDE.md](./CI_STANDALONE_GUIDE.md) | generated project standalone CI 실행 가이드 | B2, I-04 | Automation IDE output |
-| [WINDOWS_INSTALLER.md](./WINDOWS_INSTALLER.md) | Electron Windows installer baseline build path | I-05 | Supporting |
-| [WORKFLOW_SPEC.md](./WORKFLOW_SPEC.md) | workspace별 E2E 흐름과 완료 조건 | E1-E8, H1-H4 | W1 + W2 |
+| [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md) | product pillars, workspace model, handoff contract | All | All |
+| [RUNTIME_SPEC.md](./RUNTIME_SPEC.md) | RuntimeProfile, Python/Webwright/Playwright readiness, bundled/custom runtime, bootstrap fail-fast | C3-07, C3-08, C9-06, C9-07, E-09, I-08 | Generate Raw + Automation IDE + Supporting |
+| [API_SPEC.md](./API_SPEC.md) | Local Worker HTTP/WebSocket contract | A5, C1, C4, C6-C12 | W1 + W2 + shared |
+| [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md) | raw script/actions -> structured flow/POM/test generation | C5-C8, C7-11, C8-07 | Automation IDE |
+| [DB_SCHEMA.md](./DB_SCHEMA.md) | relational DB schema | A2, C6-C8, C11 | W1 + W2 |
+| [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md) | standalone Playwright pytest project, fixture policy, runner contract | B1-B4, B2-08, B3-04, C8-C10, E-10 | Automation IDE output |
+
+## Supporting Guides
+
+These documents should not redefine core contracts. They point back to the
+source-of-truth documents above.
+
+| Document | Purpose | Owns new checklist items? |
+|----------|---------|---------------------------|
+| [SCREEN_INVENTORY.md](./SCREEN_INVENTORY.md) | GUI surfaces and connected APIs | No, references D items |
+| [UI_UX_DIRECTION.md](./UI_UX_DIRECTION.md) | UI direction for the two workspaces | No, references D items |
+| [SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md) | healing flow detail under Automation IDE | Yes, C12 only |
+| [WORKFLOW_SPEC.md](./WORKFLOW_SPEC.md) | E2E sequence and acceptance notes | No, references E/H items |
+| [NEXT_ACTIONS.md](./NEXT_ACTIONS.md) | AI operating queue for the next implementation batch | No, points to one checklist item |
+
+## Runtime Planning Correction
+
+The 2026-06-03 correction adds explicit planning for:
+
+- real Webwright CLI readiness instead of placeholder config detection;
+- Python/Playwright browser requirements for both raw generation and generated project execution;
+- generated-template pytest fixture/browser policy;
+- raw-script-to-structured-project method body planning;
+- generated file origin links and stale/conflict protection;
+- clean Windows bundled runtime validation.
 
 ## Source Of Truth Rule
 
-- **제품 workspace IA와 handoff**는 PRODUCT_PILLARS를 따른다.
-- **시스템 경계와 서비스 책임**은 architecture 문서를 따른다.
-- **실제 진행 상태**는 implementation checklist의 체크박스를 따른다.
-- 이 스펙 문서들은 구현자가 PR 범위를 잡을 때 보는 계약서다.
-- 코드와 문서가 다르면 해당 PR에서 하나의 체크리스트 라인 범위 안에서 맞춘다.
+- Product workspace IA and handoff: [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md).
+- Runtime paths and readiness: [RUNTIME_SPEC.md](./RUNTIME_SPEC.md).
+- Generated pytest project contract: [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md).
+- Raw-to-structured transformation: [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md).
+- Database schema: [DB_SCHEMA.md](./DB_SCHEMA.md).
+- API shape: [API_SPEC.md](./API_SPEC.md).
+- Implementation status: [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).
+- AI operating queue: [NEXT_ACTIONS.md](./NEXT_ACTIONS.md).
+
+When code and docs disagree, update the relevant spec and checklist in the same
+work item so future implementation does not hide planning gaps.

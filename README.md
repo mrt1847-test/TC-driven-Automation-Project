@@ -1,67 +1,80 @@
 # TC-driven Automation Project Studio
 
-TestRail, Excel, Google Sheets 등의 TC를 Webwright raw code로 변환하고, 구조화된 Playwright 자동화 프로젝트를 생성·실행·결과 반영하는 로컬 QA 자동화 IDE.
+Local QA automation IDE for turning imported test cases into Webwright raw
+scripts, then into structured Playwright pytest automation projects that can be
+edited, run, and exported.
 
-제품은 [Product Workspaces](docs/PRODUCT_PILLARS.md) 기준 **두 workspace**로 구성된다:
+The product is organized around two user-facing workspaces:
 
-1. **Generate Raw** — TC import, LLM/prompt, Webwright raw code/action/artifact 생성
-2. **Automation IDE** — mapping, structure, generated project 편집, run, results, export
+1. **Generate Raw** - import TCs, compose prompts, generate Webwright raw scripts,
+   actions, and artifacts.
+2. **Automation IDE** - map raw actions, structure flows/page objects, edit the
+   generated project, run tests, inspect results, and export.
 
-Setup Wizard와 Settings는 supporting surface이며 product workspace가 아니다.
+Setup Wizard and Settings are supporting surfaces, not separate product
+workspaces.
 
-## 문서
+## Documentation
 
-- [Architecture](webwright_automation_generator_architecture.md)
-- [Spec Index](docs/SPEC_INDEX.md)
-- [Product Workspaces](docs/PRODUCT_PILLARS.md)
-- [API Spec](docs/API_SPEC.md)
-- [Screen Inventory](docs/SCREEN_INVENTORY.md)
-- [UI/UX Direction](docs/UI_UX_DIRECTION.md)
-- [Data Model Spec](docs/DATA_MODEL_SPEC.md)
-- [Structuring Spec](docs/STRUCTURING_SPEC.md)
-- [Self-Healing Spec](docs/SELF_HEALING_SPEC.md)
-- [DB Schema](docs/DB_SCHEMA.md)
-- [Generated Project Spec](docs/GENERATED_PROJECT_SPEC.md)
-- [CI Standalone Guide](docs/CI_STANDALONE_GUIDE.md)
-- [Windows Installer Guide](docs/WINDOWS_INSTALLER.md)
-- [Workflow Spec](docs/WORKFLOW_SPEC.md)
-- [Implementation Checklist](docs/IMPLEMENTATION_CHECKLIST.md)
-- [Next Actions](docs/NEXT_ACTIONS.md)
+Start here:
 
-## 구조
+- [Spec Index](docs/SPEC_INDEX.md) - source-of-truth map and document ownership
+- [Next Actions](docs/NEXT_ACTIONS.md) - AI operating queue for the next implementation batch
+- [Implementation Checklist](docs/IMPLEMENTATION_CHECKLIST.md) - implementation status and next work items
+- [Architecture](webwright_automation_generator_architecture.md) - long-form product/system design
+
+Core contracts:
+
+- [Runtime Spec](docs/RUNTIME_SPEC.md) - Python/Webwright/Playwright runtime contract
+- [Structuring Spec](docs/STRUCTURING_SPEC.md) - raw script/actions to structured project
+- [Generated Project Spec](docs/GENERATED_PROJECT_SPEC.md) - generated pytest project contract
+- [API Spec](docs/API_SPEC.md) - Local Worker HTTP/WebSocket contract
+
+Supporting guides are linked from [Spec Index](docs/SPEC_INDEX.md) only.
+
+## Structure
 
 ```text
-apps/desktop/              Electron + React GUI
-apps/worker/               FastAPI local worker
+apps/desktop/                 Electron + React GUI
+apps/worker/                  FastAPI local worker
 packages/generated-template/  Playwright pytest project template
+docs/                         product, runtime, API, and implementation docs
 ```
 
-## 요구사항
+## Requirements
 
-- Node.js 20+ (see `.nvmrc`, `package.json` `engines`)
+- Node.js 20+ (see `.nvmrc` and `package.json` engines)
 - Python 3.11+ (see `.python-version`)
-- (선택) Webwright CLI 설치 환경
+- Optional: real Webwright CLI/package for live raw generation
 
-## 개발 실행
+## Development
+
+Install Worker dependencies:
 
 ```bash
-# Worker 의존성
 npm run install:worker
+```
 
-# Desktop 의존성
+Install Node dependencies:
+
+```bash
 npm install
+```
 
-# Worker + Desktop 동시 실행
+Run Worker and Desktop together:
+
+```bash
 npm run dev
 ```
 
-Worker만 실행:
+Run Worker only:
 
 ```bash
-cd apps/worker && python -m uvicorn worker.main:app --reload --port 8765
+cd apps/worker
+python -m uvicorn worker.main:app --reload --port 8765
 ```
 
-Generated template CLI:
+Generated template CLI smoke:
 
 ```bash
 cd packages/generated-template
@@ -69,19 +82,23 @@ pip install -r requirements.txt
 python -m runner.cli list-cases
 ```
 
-## Windows installer
+## Windows Installer
 
 ```powershell
 npm run build
-npm run pack:win
 npm run dist:win
 ```
 
-Installer artifacts are written to `apps/desktop/release/`. See
-[Windows Installer Guide](docs/WINDOWS_INSTALLER.md) for prerequisites, output
-paths, and current signing limitations.
+Bundled runtime path:
 
-## 환경
+```powershell
+npm run dist:win:full
+```
+
+Installer artifacts are written to `apps/desktop/release/`. Runtime packaging
+requirements are defined in [Runtime Spec](docs/RUNTIME_SPEC.md).
+
+## Runtime
 
 - Worker API: `http://127.0.0.1:8765`
-- Desktop dev: Vite dev server (Electron)
+- Desktop dev: Electron + Vite renderer

@@ -5,7 +5,7 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlmodel import Session, select
 
-from worker.core.config import load_settings
+from worker.core.runtime import resolve_runtime
 from worker.core.database import get_session
 from worker.models.db import Project, TestCase, WebwrightRun
 from worker.models.schemas import WebwrightRunRequest
@@ -22,8 +22,9 @@ async def _process_runs(project_id: str, request: WebwrightRunRequest, job_id: s
     from sqlmodel import Session as SQLSession
 
     with SQLSession(engine) as session:
-        settings = load_settings()
-        use_mock = not settings.webwright.get("root")
+        profile = resolve_runtime()
+        webwright_readiness = profile.check_webwright_readiness()
+        use_mock = not webwright_readiness.live_ok
         for case_id in request.case_ids:
             case = session.get(TestCase, case_id)
             if not case or case.project_id != project_id:

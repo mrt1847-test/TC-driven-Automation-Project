@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
@@ -18,6 +18,15 @@ type HealthCheck = {
 type HealthResponse = Record<string, HealthCheck | boolean>
 
 type AppSettings = {
+  runtime?: {
+    mode?: 'custom' | 'bundled'
+    python?: string
+    webwrightRoot?: string
+    webwrightPython?: string
+    playwrightBrowsersPath?: string
+    templatePath?: string
+    [key: string]: unknown
+  }
   webwright?: {
     executionMode?: string
     root?: string
@@ -104,6 +113,7 @@ export function SettingsPage() {
   })
 
   const parsedSettings = parseSettings(settingsText)
+  const runtime = parsedSettings?.runtime || {}
   const webwright = parsedSettings?.webwright || {}
   const generator = parsedSettings?.generator || {}
   const runner = parsedSettings?.runner || {}
@@ -163,19 +173,21 @@ export function SettingsPage() {
 
       <section className={sectionClass}>
         <h3 className="text-sm font-medium">Setup Wizard parity</h3>
+        {runtime.mode === 'bundled' && <p className="text-xs text-amber-400">Bundled mode: Webwright/Python paths are installer-managed.</p>}
         <p className="text-xs text-slate-500">Re-edit the same fields configured during first-run setup.</p>
         <label className="block text-xs text-slate-400">
           Webwright root
           <div className="mt-1 flex gap-2">
             <input
-              className={inputClass}
+              disabled={runtime.mode === 'bundled'}
+              className={`${inputClass} ${runtime.mode === 'bundled' ? 'opacity-60' : ''}`}
               value={webwright.root || ''}
               onChange={(e) => applyPatch((draft) => {
                 draft.webwright = { ...(draft.webwright || {}), root: e.target.value }
               })}
               placeholder="Webwright root path"
             />
-            <button className="px-3 py-2 bg-slate-700 rounded text-sm shrink-0" type="button" onClick={() => pickDirectory('webwright.root')}>
+            <button disabled={runtime.mode === 'bundled'} className="px-3 py-2 bg-slate-700 rounded text-sm shrink-0 disabled:opacity-60" type="button" onClick={() => pickDirectory('webwright.root')}>
               Browse
             </button>
           </div>
@@ -184,14 +196,15 @@ export function SettingsPage() {
           Python / venv
           <div className="mt-1 flex gap-2">
             <input
-              className={inputClass}
+              disabled={runtime.mode === 'bundled'}
+              className={`${inputClass} ${runtime.mode === 'bundled' ? 'opacity-60' : ''}`}
               value={webwright.python || ''}
               onChange={(e) => applyPatch((draft) => {
                 draft.webwright = { ...(draft.webwright || {}), python: e.target.value }
               })}
               placeholder="Python path or venv interpreter"
             />
-            <button className="px-3 py-2 bg-slate-700 rounded text-sm shrink-0" type="button" onClick={() => pickDirectory('webwright.python')}>
+            <button disabled={runtime.mode === 'bundled'} className="px-3 py-2 bg-slate-700 rounded text-sm shrink-0 disabled:opacity-60" type="button" onClick={() => pickDirectory('webwright.python')}>
               Browse venv
             </button>
           </div>
@@ -274,7 +287,8 @@ export function SettingsPage() {
           Output root
           <div className="mt-1 flex gap-2">
             <input
-              className={inputClass}
+              disabled={runtime.mode === 'bundled'}
+              className={`${inputClass} ${runtime.mode === 'bundled' ? 'opacity-60' : ''}`}
               value={webwright.outputRoot || ''}
               onChange={(e) => applyPatch((draft) => {
                 draft.webwright = { ...(draft.webwright || {}), outputRoot: e.target.value }
@@ -294,7 +308,8 @@ export function SettingsPage() {
           Default project root
           <div className="mt-1 flex gap-2">
             <input
-              className={inputClass}
+              disabled={runtime.mode === 'bundled'}
+              className={`${inputClass} ${runtime.mode === 'bundled' ? 'opacity-60' : ''}`}
               value={generator.projectRoot || ''}
               onChange={(e) => applyPatch((draft) => {
                 draft.generator = { ...(draft.generator || {}), projectRoot: e.target.value }
@@ -310,7 +325,8 @@ export function SettingsPage() {
           Template path
           <div className="mt-1 flex gap-2">
             <input
-              className={inputClass}
+              disabled={runtime.mode === 'bundled'}
+              className={`${inputClass} ${runtime.mode === 'bundled' ? 'opacity-60' : ''}`}
               value={generator.templatePath || ''}
               onChange={(e) => applyPatch((draft) => {
                 draft.generator = { ...(draft.generator || {}), templatePath: e.target.value }
@@ -529,3 +545,5 @@ function parseSettings(value: string): AppSettings | null {
     return null
   }
 }
+
+

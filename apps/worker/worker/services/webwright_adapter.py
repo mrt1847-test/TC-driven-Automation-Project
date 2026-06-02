@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from worker.core.config import load_settings, mask_secrets, new_id
+from worker.core.config import mask_secrets, new_id
+from worker.core.runtime import resolve_runtime
 from worker.core.log_stream import log_streams
 from worker.services.prompt_builder import build_webwright_prompt
 from worker.services.case_import import case_to_normalized
@@ -35,15 +36,15 @@ def classify_error(stderr: str) -> str:
 
 
 def _resolve_output_root() -> Path:
-    settings = load_settings()
-    root = settings.webwright.get("outputRoot") or str(Path.home() / "webwright-runs")
+    profile = resolve_runtime()
+    root = profile.webwright_output_root or str(Path.home() / "webwright-runs")
     path = Path(root)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 async def run_webwright_for_case(session: Session, project_id: str, case: TestCase, model_config: str, job_id: str) -> WebwrightRun:
-    settings = load_settings()
+    profile = resolve_runtime()
     normalized = case_to_normalized(case)
     start_url = case.start_url or "https://example.com"
     prompt = build_webwright_prompt(normalized, start_url=start_url)
@@ -67,11 +68,12 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
     session.commit()
     session.refresh(run)
 
-    execution_mode = settings.webwright.get("executionMode", "native")
-    webwright_root = settings.webwright.get("root", "")
-    python_path = settings.webwright.get("python", "python")
-    base_config = settings.webwright.get("baseConfig", "base.yaml")
-    model_cfg = model_config or settings.webwright.get("modelConfig", "model_openai.yaml")
+    execution_mode = profile.execution_mode
+    webwright_root = profile.webwright_root
+    python_path = profile.webwright_python
+    base_config = profile.base_config
+    model_cfg = model_config or profile.model_config
+    subprocess_env = profile.subprocess_env()
 
     cmd = [
         python_path, "-m", "webwright.run.cli",
@@ -94,6 +96,7 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=webwright_root or None,
+                env=subprocess_env,
             )
         else:
             process = await asyncio.create_subprocess_exec(
@@ -101,6 +104,7 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=webwright_root or None,
+                env=subprocess_env,
             )
 
         stdout, stderr = await process.communicate()

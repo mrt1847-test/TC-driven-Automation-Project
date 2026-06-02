@@ -1,6 +1,6 @@
-# Implementation Checklist
+﻿# Implementation Checklist
 
-**Last updated:** 2026-06-02
+**Last updated:** 2026-06-03
 **Current phase:** Phase 1
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
@@ -22,24 +22,36 @@
 | Category | Done | Total |
 |----------|------|-------|
 | A. Infra | 33 | 33 |
-| B. Template | 18 | 18 |
-| C. Worker | 52 | 74 |
-| D. GUI | 42 | 47 |
-| E. E2E | 8 | 8 |
+| B. Template | 18 | 20 |
+| C. Worker | 55 | 87 |
+| D. GUI | 42 | 49 |
+| E. E2E | 8 | 12 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
 | H. MVP Gates | 4 | 4 |
-| I. Quality | 6 | 6 |
+| I. Quality | 6 | 8 |
 
 
-## Implementation audit (2026-05-31)
+## Implementation audit (2026-06-02)
 
-Scope checked: current repository files, spec documents, and `npm run build`.
+Scope checked: repository, spec docs under `docs/`, `npm run build`, worker `tests/test_runtime.py` and `tests/e2e/test_smoke.py`.
 
-- Baseline present: monorepo, Electron/React shell, FastAPI worker, core SQLite models, generated-template package, TC import, Webwright run lifecycle, action extraction, mapping, generation, runner, result export, IDE file APIs, two-product-workspace UI.
-- Build gate: desktop renderer passes `npm run build`; D7-01 and I-06 are closed.
-- Spec gaps to keep open: generated-file service/API origin/hash/status tracking (C8-05), structured/page-object service/API persistence (C7-06..C7-10), artifact-backed self-healing service/API flow (C12-04..C12-07), prompt preset/preview API and payload audit trail (C2-04..C2-07), multi-action TC-step join service/API follow-up (C6-07).
-- Artifact reuse direction: Webwright logs/screenshots/trajectory are indexed at run level and raw action selector candidates and execution failure artifacts are persisted, but post-structuring self-healing still needs failure-to-step resolution, proposal accept/apply, regenerate, and rerun flow.
+- **Shipped (runtime + structuring pass):** `RuntimeProfile` resolver, `settings.runtime`, unified health/validate/install, Webwright live readiness gate, DB-backed structuring (`structure/sync`, `structure/validate`), DB-backed `project_generator`, generated-template `pytest_plugins` + single pytest invocation, `ensure_generated_runtime`, Electron bundled env, `prepare-runtime.ps1` + `dist:win:full`, Setup/Settings bundled read-only paths, Runner **Install Runtime** UX. Spec: [RUNTIME_SPEC.md](./RUNTIME_SPEC.md).
+- **Build gate:** `npm run build` passes; I-06, I-07 closed.
+- **Spec gaps to keep open:** C7-10 stale/conflict detection, C7-12 selected raw refresh merge into existing structured entities, C8-06 deterministic regeneration guard, C8-09 selected TC incremental regeneration, C12-04..C12-10 failure disposition/self-healing/raw-refresh/retire API flow, C2-04..C2-07 prompt preset/audit, C6-07 multi-action join API follow-up, C8-04 git-ready output, Webwright subprocess cancel (not only DB status).
+- **Installer verification gap:** `dist:win:full` end-to-end on a clean Windows machine not yet recorded (see RUNTIME_SPEC R-02).
+- **Webwright packaging decision:** resolved by C3-08. Product/live `prepare-runtime` now requires pinned `WEBWRIGHT_SOURCE` + `WEBWRIGHT_SOURCE_VERSION` or pinned `WEBWRIGHT_PIP_PACKAGE`; mock staging requires explicit opt-in.
+
+## Runtime/Generated Project planning correction (2026-06-03)
+
+Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, generated-template pytest fixtures, project_generator, structuring service, Windows runtime staging docs.
+
+- **Resolved:** Webwright live-run readiness now rejects placeholder `base.yaml` roots without an importable `webwright.run.cli` (C3-07), and live bundled runtime staging now requires a pinned Webwright source/package while mock staging requires explicit opt-in (C3-08).
+- **Gap:** raw script generation and generated project execution both need Python + Playwright browser assets. RuntimeProfile wires paths, but installer staging and in-app bootstrap must prove Webwright, pytest-playwright, and browser binaries are actually available before running.
+- **Gap:** generated-template has a minimal pytest contract only. It needs explicit fixture policy for browser/context/page, `base_url`, auth/storage state, trace/screenshot/video capture, env config, browser selection, and artifact paths.
+- **Gap:** raw script to structured project conversion is DB-backed but still shallow. Page object method body planning must support multi-action steps, assertions, waits, selects/checks, test data/env values, and stable source/origin tracking.
+- **Gap:** generated file source tracking writes `source_type/source_id/content_hash`, but `GeneratedFileOrigin` links and stale/conflict detection are not wired. Follow-up work must prevent silent overwrite of edited generated code.
+- **Gap:** selected TC raw refresh is not yet a first-class maintenance operation. In an already structured/generated project, users must be able to pick a few TCs, rerun Webwright for only those TCs, merge the new raw actions into existing structured entities, then incrementally update generated code while preserving unrelated cases.
 
 ---
 
@@ -63,9 +75,9 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **A2-06** `ExecutionRun` / `ExecutionResult` 모델 — §6.6, §6.7 | Phase 0 | Layer: Worker | Depends: A2-01 (baseline scaffold verified; SQLModel tables, execution create/list/detail, and result persistence confirmed)
 - [x] **A2-07** DB 초기화 및 프로젝트별 데이터 격리 — §5.3 | Phase 0 | Layer: Worker | Depends: A2-06 (baseline scaffold verified; configured data-dir create_all and project-scoped case/run/execution isolation confirmed)
 - [x] **A2-08** `CaseActionMappingAction` join 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05 (baseline join model verified; `case_action_mapping_actions` stores ordered multi-action links while preserving current mapping API behavior)
-- [x] **A2-09** `StructuredFlow` / `StructuredStep` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05 (baseline structured flow/step models verified; `structured_flows` and `structured_steps` persist ordered steps linked back to mappings)
-- [x] **A2-10** `PageObject` / `PageObjectMethod` 모델 — Spec: DATA_MODEL_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09 (baseline page object/method models verified; `page_objects` and `page_object_methods` persist typed method plans linked back to mappings)
-- [x] **A2-11** `GeneratedFileOrigin`, `content_hash`, `status` 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10 (baseline generated file origin/hash/status models verified; generated file metadata persists content hash, status, and multiple origin links)
+- [x] **A2-09** `StructuredFlow` / `StructuredStep` 모델 — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-05 (baseline structured flow/step models verified; `structured_flows` and `structured_steps` persist ordered steps linked back to mappings)
+- [x] **A2-10** `PageObject` / `PageObjectMethod` 모델 — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09 (baseline page object/method models verified; `page_objects` and `page_object_methods` persist typed method plans linked back to mappings)
+- [x] **A2-11** `GeneratedFileOrigin`, `content_hash`, `status` 모델 — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10 (schema/model baseline verified; runtime persistence of multiple origin links is tracked separately by C8-07)
 - [x] **A2-12** schema version / migration baseline — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-11 (baseline schema version marker verified; `init_db` records `schema_versions` baseline while preserving SQLModel `create_all`)
 - [x] **A2-13** `ArtifactAsset` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-03, A2-06 (baseline artifact asset model verified; `artifact_assets` stores source-linked artifact path/hash/metadata without DB blobs)
 - [x] **A2-14** `SelectorCandidate` 모델 — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-04, A2-10 (baseline selector candidate model verified; `selector_candidates` stores raw action, optional POM method, artifact evidence, selector value, confidence, and metadata)
@@ -113,12 +125,14 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **B2-05** mapping_loader.py, pytest_runner.py — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
 - [x] **B2-06** result_parser.py, result_writer.py — §5.13 | Phase 1 | Layer: Template | Depends: B2-05
 - [x] **B2-07** CLI 단독 실행 E2E 검증 — §3.5 | Phase 1 | Layer: E2E | Depends: B2-06 (baseline standalone CLI E2E verified; `npm run e2e:cli-standalone` covers list-cases, run, rerun-failed, and excel export against a temporary generated project)
+- [ ] **B2-08** pytest runner artifact contract hardening — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B2-05, B3-04 (runner must pass browser/env/headed/base-url/trace options, capture pytest return/error details, and produce deterministic screenshot/trace/video paths in `artifacts/runs/{runId}`)
 
 ### B3. Page / Flow / Test 샘플 — §5.10
 
 - [x] **B3-01** pages/base_page.py — §5.10 | Phase 1 | Layer: Template | Depends: B1-01
 - [x] **B3-02** fixtures/browser_fixture.py, env_fixture.py — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
 - [x] **B3-03** 샘플 flow + test 1세트 — §5.10 | Phase 1 | Layer: Template | Depends: B3-01, B3-02
+- [ ] **B3-04** generated pytest fixture/browser policy — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B3-02 (define and implement conftest/fixtures for browser/context/page, base_url, storage_state/auth, trace/screenshot/video policy, viewport, timeout, retries, and env config)
 
 ### B4. Result Export Adapters — §5.14
 
@@ -149,7 +163,7 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [ ] **C2-04** batch-level shared prompt + per-case override 모델 — Spec: PRODUCT_PILLARS | Phase 1 | Layer: Worker | Depends: C2-02
 - [ ] **C2-05** prompt preset 모델(login/search/CRUD/assertion-heavy 등) — Spec: PRODUCT_PILLARS | Phase 1 | Layer: Worker | Depends: C2-04
 - [ ] **C2-06** prompt preview API — Spec: API_SPEC, PRODUCT_PILLARS | Phase 1 | Layer: Worker | Depends: C2-05
-- [ ] **C2-07** Webwright prompt payload 저장/추적 — Spec: PRODUCT_PILLARS, DATA_MODEL_SPEC | Phase 1 | Layer: Worker | Depends: C2-06
+- [ ] **C2-07** Webwright prompt payload 저장/추적 — Spec: PRODUCT_PILLARS, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: C2-06
 
 ### C3. Webwright CLI Adapter — §5.4
 
@@ -159,6 +173,8 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **C3-04** API key 환경변수 주입 — §5.4, §13 | Phase 1 | Layer: Worker | Depends: C3-02
 - [x] **C3-05** artifact 수집 — §5.7 | Phase 1 | Layer: Worker | Depends: C3-02
 - [x] **C3-06** error classification — §12.1 | Phase 5 | Layer: Worker | Depends: C3-05
+- [x] **C3-07** live Webwright CLI readiness probe — Spec: RUNTIME_SPEC | Phase 1 | Layer: Worker | Depends: C3-01 (verified: health/run gate now uses root/python/config/CLI import readiness; placeholder `base.yaml` alone falls back to explicit mock mode; `python -m pytest tests/test_runtime.py tests/e2e/test_smoke.py -q` passed from `apps/worker`)
+- [x] **C3-08** Webwright package source/version freeze — Spec: RUNTIME_SPEC | Phase 1 | Layer: Infra | Depends: C3-07 (verified: product/live `prepare-runtime` defaults to live and fails without pinned Webwright source/package; `-WebwrightMode mock -ValidateOnly` passes; unpinned `-WebwrightPipPackage webwright -ValidateOnly` fails)
 
 ### C4. Webwright Run Service — §5.7
 
@@ -193,11 +209,13 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **C7-03** Flow function 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-02
 - [x] **C7-04** Test function 생성 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-03
 - [x] **C7-05** coding convention 적용 — §5.10 | Phase 1 | Layer: Worker | Depends: C7-04
-- [ ] **C7-06** `StructuredFlow` DB persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09, C7-01
-- [ ] **C7-07** `StructuredStep` DB persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: C7-06
-- [ ] **C7-08** `PageObjectMethod` plan persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10, C7-07
-- [ ] **C7-09** structure validation API — Spec: STRUCTURING_SPEC, API_SPEC | Phase 1 | Layer: Worker | Depends: C7-08
+- [x] **C7-06** `StructuredFlow` DB persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-09, C7-01 (runtime+structuring pass: structured flow persisted via `structuring_service.sync_structured_entities`)
+- [x] **C7-07** `StructuredStep` DB persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: C7-06 (runtime+structuring pass: ordered structured steps persisted from reviewed mappings)
+- [x] **C7-08** `PageObjectMethod` plan persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10, C7-07 (runtime+structuring pass: method plans/body json persisted and linked to steps)
+- [x] **C7-09** structure validation API — Spec: STRUCTURING_SPEC, API_SPEC | Phase 1 | Layer: Worker | Depends: C7-08 (runtime+structuring pass: `/projects/{project_id}/cases/{case_id}/structure/validate`)
 - [ ] **C7-10** stale/conflict detection for regeneration — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: C7-09
+- [ ] **C7-11** structured method body planner coverage — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C5-03, C6-07, C7-08 (compile reviewed raw actions into deterministic method body plans covering multi-action steps, assertions, waits, select/check/upload, data/env placeholders, and unsupported-action review flags)
+- [ ] **C7-12** selected raw refresh merge into existing structure — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-11, C8-07 (when a user reruns Webwright for selected already-structured TCs, compare the new RawAction set with existing mappings/StructuredStep/PageObjectMethod plans, preserve reviewed names and user intent where safe, update changed method body plans, and mark ambiguous changes as needs_review/conflict instead of rebuilding from scratch)
 
 ### C8. Project Generator Service — §5.11
 
@@ -205,8 +223,12 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **C8-02** generated file metadata DB — §5.11 | Phase 1 | Layer: Worker | Depends: C8-01
 - [x] **C8-03** Generation API — §7.5 | Phase 1 | Layer: Worker | Depends: C8-01
 - [ ] **C8-04** Git repo 가능 출력 — §5.11 | Phase 1 | Layer: Worker | Depends: C8-01
-- [ ] **C8-05** generated file origin/hash/status tracking — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-11, C8-02
+- [x] **C8-05** generated file origin/hash/status tracking — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-11, C8-02 (runtime+structuring pass: source_type/source_id/content_hash/status written on generation)
 - [ ] **C8-06** deterministic regeneration + conflict guard — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C8-05, C7-10
+- [ ] **C8-07** `GeneratedFileOrigin` link persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: C8-05, C7-11 (write origin links for TestCase, StructuredFlow, StructuredStep, PageObjectMethod, RawAction/Mapping where applicable instead of relying only on single `source_type/source_id`)
+- [ ] **C8-08** generated-project runtime manifest — Spec: GENERATED_PROJECT_SPEC, RUNTIME_SPEC | Phase 2 | Layer: Worker | Depends: C8-03, B3-04 (write a runtime manifest documenting Python package requirements, Playwright browser expectation, fixture policy, and supported standalone/Studio launch commands)
+- [ ] **C8-09** selected TC incremental regeneration — Spec: STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C8-06, C8-07, C7-12 (when `caseIds` targets a subset, regenerate only affected tests/flows/page methods/cases.yaml entries from the merged structured state; preserve unrelated generated cases and never wipe the whole generated project unless full regeneration is explicitly requested)
+- [ ] **C8-10** TC retire/delete generated artifact cleanup — Spec: STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C8-07, C8-09 (after human confirmation, retire/delete a TC and remove or mark obsolete generated tests/flows/mappings/page methods only when no other case still references them)
 
 ### C9. Project Runner Service — §5.13
 
@@ -215,6 +237,8 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [x] **C9-03** stdout/stderr WebSocket — §5.13 | Phase 1 | Layer: Worker | Depends: A4-03, C9-01
 - [x] **C9-04** results.json 파싱 — §5.13 | Phase 1 | Layer: Worker | Depends: C9-01, A2-06
 - [x] **C9-05** Runner API — §7.6 | Phase 1 | Layer: Worker | Depends: C9-04
+- [x] **C9-06** generated runtime bootstrap fail-fast — Spec: RUNTIME_SPEC, GENERATED_PROJECT_SPEC | Phase 1 | Layer: Worker | Depends: C9-01, B1-02 (verified: bootstrap failure now stops before `runner.cli`, writes stdout/stderr/results artifacts, returns actionable bootstrap status/logs, and `python -m pytest tests/test_generated_runtime.py tests/test_runtime.py tests/e2e/test_smoke.py -q` passed)
+- [ ] **C9-07** per-project runtime install state/cache — Spec: RUNTIME_SPEC | Phase 2 | Layer: Worker | Depends: C9-06 (record dependency/browser readiness by generated project hash/runtime profile to avoid repeated installs and to surface stale runtime state)
 
 ### C10. Result Export Service — §5.14
 
@@ -240,6 +264,9 @@ Scope checked: current repository files, spec documents, and `npm run build`.
 - [ ] **C12-05** healing proposal generation API — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: A2-15, C12-04
 - [ ] **C12-06** accepted proposal apply/regenerate/rerun flow — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C12-05, C8-06, C9-05
 - [ ] **C12-07** safe auto-apply guardrails — Spec: SELF_HEALING_SPEC | Phase 3 | Layer: Worker | Depends: C12-06
+- [ ] **C12-08** failure disposition classifier — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C12-04, C12-03 (classify failed cases as `selector_changed`, `raw_refresh_required`, `feature_removed_retire_tc`, or `unknown`, with evidence and confidence)
+- [ ] **C12-09** selected TC Webwright refresh regeneration flow — Spec: SELF_HEALING_SPEC, WORKFLOW_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C4-04, C7-12, C8-09 (for user-selected already-structured TCs, or failures that need fresh raw evidence, rerun Webwright only for those TCs, merge the new raw script/actions into existing structured entities, then incrementally regenerate affected generated files)
+- [ ] **C12-10** TC retire recommendation and cleanup flow — Spec: SELF_HEALING_SPEC, STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C12-08, C8-10 (for removed product areas, present a human-confirmed retire/delete action that explains the failure reason and cleans up generated artifacts safely)
 
 ---
 
@@ -312,6 +339,8 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D6-06** trace/screenshot viewer — §10.6 | Phase 2 | Layer: GUI | Depends: D6-05 (baseline Project IDE artifact affordances verified; latest execution detail exposes results.json, selected-TC screenshot, and trace links via existing open-path behavior)
 - [x] **D6-07** runner/results/export panels embedded in Automation IDE — Spec: PRODUCT_PILLARS | Phase 2 | Layer: GUI | Depends: D6-05, D8-01 (baseline Automation IDE panels verified; Project IDE embeds runner options, execution results, and export preview/export controls using existing APIs)
 - [x] **D6-08** failure diagnosis + healing proposal panel — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-05, D6-06 (baseline read-only diagnosis panel verified; Automation IDE surfaces failed execution rows, error text, screenshot/trace evidence links, and local proposal guidance without new healing APIs)
+- [ ] **D6-09** failure disposition action panel — Spec: SELF_HEALING_SPEC, WORKFLOW_SPEC | Phase 2 | Layer: GUI | Depends: C12-08, D6-08 (show classified failed-case actions: self-heal selector, refresh Webwright raw for selected TC, retire/delete TC, or manual diagnosis)
+- [ ] **D6-10** selected TC regeneration/retire diff review UI — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C8-09, C8-10, C12-09, C12-10 (before applying selected regeneration or retire cleanup, show affected generated files and preserve/unaffected-case summary)
 
 ### D7. Automation IDE — Runner Panel (embedded) — §10.7
 
@@ -345,6 +374,10 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **E-06** Result Export E2E — §11.6 | Phase 3-4 | Layer: E2E | Depends: D8-03 (baseline Result Export E2E verified; pytest covers execution results to Excel preview updates, local Excel write-back using a temp workbook, and ExportLog persistence without external services; live script at scripts/e2e_export.py)
 - [x] **E-07** Reverse handoff rerun E2E (Automation IDE → Generate Raw) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: E2E | Depends: D1-06, E-02 (baseline reverse handoff rerun E2E verified; pytest covers selected TC/project context, Automation IDE mapping gap, Generate Raw retry via existing Webwright API, second Webwright run, refreshed raw actions/mappings visible back in Mapping, and retry log stream; live script at scripts/e2e_reverse_handoff.py)
 - [x] **E-08** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06 (baseline self-healing proposal E2E verified; pytest covers failed execution/result context, local proposal accept/reject state, rerun-failed action, rerun log stream, and persisted rerun result rows without persistent C12 healing APIs; live script at scripts/e2e_self_healing.py)
+- [ ] **E-09** live Webwright runtime E2E — Spec: RUNTIME_SPEC | Phase 1 | Layer: E2E | Depends: C3-07, C3-08 (with a real pinned Webwright install, validate health, generate raw final_script.py, index artifacts, and prove mock mode is not used)
+- [ ] **E-10** generated pytest/browser contract E2E — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: E2E | Depends: B2-08, B3-04, C9-06 (run generated project through Studio and standalone CLI with browser/env/headed/base_url/artifact options; verify results, screenshots/traces, and fail-fast bootstrap behavior)
+- [ ] **E-11** selected TC Webwright refresh incremental regeneration E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C7-12, C12-09, C8-09, D6-09 (with many generated cases already structured/generated, rerun Webwright for selected TCs and verify the new raw actions merge into existing structure while only affected generated artifacts change)
+- [ ] **E-12** feature-removed TC retire cleanup E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C12-10, C8-10, D6-10 (classify a removed-area failure, require human confirmation, retire/delete the TC, clean generated artifacts, and preserve unrelated cases)
 
 ---
 
@@ -379,6 +412,12 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **I-01** Project Health Check — §17.4 | Phase 5 | Layer: Worker | Depends: C9-01
 - [x] **I-02** Install Dependencies 버튼 — §12.3 | Phase 5 | Layer: GUI | Depends: I-01
 - [x] **I-03** Smoke test — §10.1 | Phase 0 | Layer: E2E | Depends: D2-05, D9-02 (baseline smoke test verified; pytest covers root/health/settings/settings-validate, persisted Setup Wizard/Settings parity fields, clean data-dir settings bootstrap, project health pass/fail paths, and live script at scripts/e2e_smoke.py)
-- [x] **I-04** CI standalone 가이드 — §3.5 | Phase 5 | Layer: Docs | Depends: B2-07 (baseline CI standalone guide verified; docs/CI_STANDALONE_GUIDE.md covers dependency install, generated project health, runner.cli list/run/rerun/export commands, artifact paths, environment variables, template CLI limitations, and the B2-07 standalone CLI E2E gate)
-- [x] **I-05** Electron Windows installer — §15 | Phase 5 | Layer: Infra | Depends: A1-02 (baseline Windows installer path verified; desktop package exposes pack:win/dist:win scripts via electron-builder@26.0.12, electron-builder config targets unsigned x64 NSIS output under apps/desktop/release, docs/WINDOWS_INSTALLER.md covers prerequisites, output paths, Worker/Python limitations, and signing/auto-update out-of-scope notes; npm run build verified)
+- [x] **I-04** CI standalone contract — §3.5 | Phase 5 | Layer: Docs | Depends: B2-07 (baseline CI standalone commands and artifact contract are consolidated into GENERATED_PROJECT_SPEC; B2-07 standalone CLI E2E remains the verification gate)
+- [x] **I-05** Electron Windows installer — §15 | Phase 5 | Layer: Infra | Depends: A1-02 (baseline Windows installer path verified; desktop package exposes pack:win/dist:win scripts via electron-builder@26.0.12, output under apps/desktop/release, and runtime packaging contract lives in RUNTIME_SPEC; npm run build verified)
 - [x] **I-06** Desktop renderer build passes (`npm run build`) — Audit 2026-06-02 | Phase 0 | Layer: Quality | Depends: D7-01 (desktop renderer build verified; `npm run build` passes)
+
+- [x] **B1-02** conftest/pytest-playwright contract — Spec: GENERATED_PROJECT_SPEC | Phase 1 | Layer: Template | Depends: B1-01 (runtime+template pass: pytest plugin registration, TC_HEADLESS, PLAYWRIGHT_BROWSERS_PATH contract documented and implemented)
+- [x] **I-07** Runtime Profile + prepare-runtime installer bundle — Spec: RUNTIME_SPEC, GENERATED_PROJECT_SPEC | Phase 5 | Layer: Infra | Depends: I-05 (runtime pass: runtime profile resolver, bundled python env wiring, prepare-runtime.ps1, and dist:win:full path)
+- [ ] **I-08** clean Windows `dist:win:full` validation — Spec: RUNTIME_SPEC | Phase 5 | Layer: Quality | Depends: I-07, C3-08, E-09, E-10 (install on clean Windows, validate bundled runtime, generate raw with real Webwright, generate structured project, run in-app Runner, and record evidence)
+- [ ] **I-09** runtime/docs encoding and checklist ID cleanup — Spec: RUNTIME_SPEC | Phase 5 | Layer: Docs | Depends: I-07 (fix mojibake in Korean spec docs, remove duplicate/misplaced checklist IDs, and align progress summary with open runtime follow-ups)
+
