@@ -275,10 +275,10 @@ regeneration must be explicit.
 
 Subprocess env includes `TC_HEADLESS`, `PLAYWRIGHT_BROWSERS_PATH` when configured.
 
-Before runner execution, dependency bootstrap must be fail-fast (C9-06). If
+Before runner execution, dependency bootstrap is fail-fast (C9-06). If
 `requirements.txt`, pip install, Playwright install, or browser verification
-fails, the API should return/record an execution failure with bootstrap logs
-instead of launching `runner.cli`.
+fails, the API records an execution failure with bootstrap logs/results instead
+of launching `runner.cli`.
 
 ## Artifacts And Self-Healing
 

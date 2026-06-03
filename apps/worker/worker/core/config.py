@@ -34,7 +34,7 @@ def load_settings() -> AppSettings:
         settings = apply_runtime_defaults(AppSettings())
         save_settings(settings)
         return settings
-    settings = AppSettings.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    settings = AppSettings.model_validate(json.loads(path.read_text(encoding="utf-8-sig")))
     return apply_runtime_defaults(settings)
 
 

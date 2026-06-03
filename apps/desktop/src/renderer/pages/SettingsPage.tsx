@@ -487,6 +487,25 @@ export function SettingsPage() {
       )}
       {health && <pre className="text-xs bg-slate-900 p-3 rounded overflow-auto">{health}</pre>}
       <p className="text-xs text-slate-500">API keys are stored in OS credential store via keytar, not in settings.json.</p>
+      <div className="rounded border border-slate-800 p-3 text-sm text-slate-300">
+        <div className="font-medium text-slate-200">Third-party notices</div>
+        <p className="mt-1 text-xs text-slate-500">
+          Includes Microsoft Webwright (MIT) and bundled runtime components. See repository{' '}
+          <span className="text-slate-400">docs/THIRD_PARTY_LEGAL.md</span> for details.
+        </p>
+        <button
+          type="button"
+          className="mt-2 rounded bg-slate-800 px-3 py-1.5 text-xs hover:bg-slate-700"
+          onClick={async () => {
+            const result = await window.electronAPI?.openThirdPartyNotices()
+            if (!result?.ok) {
+              window.alert(result?.message ?? 'Third-party notices file is not available in this build.')
+            }
+          }}
+        >
+          Open bundled notices file
+        </button>
+      </div>
     </div>
   )
 }

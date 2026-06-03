@@ -98,6 +98,19 @@ npm run dist:win:full
 Installer artifacts are written to `apps/desktop/release/`. Runtime packaging
 requirements are defined in [Runtime Spec](docs/RUNTIME_SPEC.md).
 
+## Third-Party Software
+
+This project vendors Microsoft Webwright (MIT) for live raw generation.
+
+- [third_party/NOTICE.md](third_party/NOTICE.md) — attribution, citation, local patches
+- [docs/THIRD_PARTY_LEGAL.md](docs/THIRD_PARTY_LEGAL.md) — compliance checklist and bundled notices
+
+Validate before release:
+
+```powershell
+npm run validate:third-party
+```
+
 ## Runtime
 
 - Worker API: `http://127.0.0.1:8765`

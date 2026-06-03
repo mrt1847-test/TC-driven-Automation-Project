@@ -25,6 +25,7 @@ def check_health() -> dict:
         "webwrightPython": webwright_readiness.python.as_dict(),
         "webwrightCli": webwright_readiness.cli.as_dict(),
         "webwrightConfig": webwright_readiness.config.as_dict(),
+        "webwrightShell": webwright_readiness.shell.as_dict(),
         "templatePath": {"ok": template_path.exists(), "path": str(template_path)},
         "playwright": _check_command([python_cmd, "-m", "playwright", "--version"], env=profile.subprocess_env()),
         "playwrightBrowser": _check_playwright_browser(python_cmd, browser, profile.subprocess_env()),

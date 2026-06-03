@@ -1,5 +1,5 @@
 # Stages embedded Python runtime assets for electron-builder (Windows x64).
-# Live product builds require a pinned Webwright source or pinned pip package.
+# Live product builds use vendored Webwright by default, or an explicit pinned source/package.
 # Dev/mock builds must opt in with -WebwrightMode mock.
 
 param(
@@ -40,6 +40,18 @@ if (-not $WebwrightConfigSource) {
     $WebwrightConfigSource = $env:WEBWRIGHT_CONFIG_SOURCE
 }
 
+$VendoredWebwrightSource = Join-Path $RepoRoot "third_party\webwright"
+if ($WebwrightMode -eq "live" -and -not $WebwrightSource -and -not $WebwrightPipPackage -and (Test-Path $VendoredWebwrightSource)) {
+    $WebwrightSource = $VendoredWebwrightSource
+    $VersionFile = Join-Path $VendoredWebwrightSource "VENDORED_VERSION.txt"
+    if (-not $WebwrightSourceVersion -and (Test-Path $VersionFile)) {
+        $WebwrightSourceVersion = ((Get-Content $VersionFile | Where-Object { $_ -match "^commit=" } | Select-Object -First 1) -replace "^commit=", "").Trim()
+    }
+    if (-not $WebwrightSourceVersion) {
+        $WebwrightSourceVersion = "vendored"
+    }
+}
+
 function Test-PinnedPipSpec {
     param([string]$Spec)
     if (-not $Spec) {
@@ -64,7 +76,7 @@ function Assert-WebwrightPackagingPolicy {
     }
 
     if (-not $WebwrightSource -and -not $WebwrightPipPackage) {
-        throw "Live runtime staging requires WEBWRIGHT_SOURCE plus WEBWRIGHT_SOURCE_VERSION, or a pinned WEBWRIGHT_PIP_PACKAGE. Use -WebwrightMode mock only for dev/mock staging."
+        throw "Live runtime staging requires vendored third_party/webwright, WEBWRIGHT_SOURCE plus WEBWRIGHT_SOURCE_VERSION, or a pinned WEBWRIGHT_PIP_PACKAGE. Use -WebwrightMode mock only for dev/mock staging."
     }
 
     if ($WebwrightSource) {
@@ -89,11 +101,34 @@ function Assert-WebwrightPackagingPolicy {
     }
 }
 
+function Assert-WebwrightSourceLicense {
+    param(
+        [string]$SourceRoot,
+        [switch]$RequireVersionMarker
+    )
+    $licensePath = Join-Path $SourceRoot "LICENSE"
+    if (-not (Test-Path $licensePath)) {
+        throw "Webwright source is missing LICENSE: $licensePath"
+    }
+    $licenseText = Get-Content $licensePath -Raw
+    if ($licenseText -notmatch "MIT License" -or $licenseText -notmatch "Microsoft Corporation") {
+        throw "Webwright LICENSE does not match expected Microsoft MIT license text: $licensePath"
+    }
+    if ($RequireVersionMarker) {
+        $versionPath = Join-Path $SourceRoot "VENDORED_VERSION.txt"
+        if (-not (Test-Path $versionPath)) {
+            throw "Vendored Webwright source is missing VENDORED_VERSION.txt: $versionPath"
+        }
+    }
+}
+
 function Assert-WebwrightConfigFiles {
     param([string]$Root)
     $missing = @()
     foreach ($config in @($BaseConfig, $ModelConfig)) {
-        if (-not (Test-Path (Join-Path $Root $config))) {
+        $rootConfig = Join-Path $Root $config
+        $sourceConfig = Join-Path (Join-Path $Root "src\webwright\config") $config
+        if (-not (Test-Path $rootConfig) -and -not (Test-Path $sourceConfig)) {
             $missing += $config
         }
     }
@@ -102,9 +137,95 @@ function Assert-WebwrightConfigFiles {
     }
 }
 
+function Write-ThirdPartyNotices {
+    param(
+        [string]$OutputPath,
+        [string]$PythonExe,
+        [string]$PythonDir,
+        [string]$RepoRoot
+    )
+
+    $noticeParts = New-Object System.Collections.Generic.List[string]
+    $noticeParts.Add("TC Automation Studio Third-Party Notices")
+    $noticeParts.Add("=========================================")
+    $noticeParts.Add("")
+
+    $thirdPartyNotice = Join-Path $RepoRoot "third_party\NOTICE.md"
+    if (Test-Path $thirdPartyNotice) {
+        $noticeParts.Add((Get-Content $thirdPartyNotice -Raw))
+        $noticeParts.Add("")
+    }
+
+    $webwrightLicense = Join-Path $RepoRoot "third_party\webwright\LICENSE"
+    if (Test-Path $webwrightLicense) {
+        $noticeParts.Add("Microsoft Webwright MIT License (full text)")
+        $noticeParts.Add("---------------------------------------------")
+        $noticeParts.Add((Get-Content $webwrightLicense -Raw))
+        $noticeParts.Add("")
+    }
+
+    $pythonLicense = Join-Path $PythonDir "LICENSE.txt"
+    if (Test-Path $pythonLicense) {
+        $noticeParts.Add("Bundled Python License")
+        $noticeParts.Add("----------------------")
+        $noticeParts.Add((Get-Content $pythonLicense -Raw))
+        $noticeParts.Add("")
+    } else {
+        $noticeParts.Add("Bundled Python")
+        $noticeParts.Add("--------------")
+        $noticeParts.Add("Python is staged from the official Windows embeddable distribution. Include the PSF License notice if the embeddable archive layout changes and LICENSE.txt is not present.")
+        $noticeParts.Add("")
+    }
+
+    $packageScript = @'
+import importlib.metadata as md
+
+rows = []
+for dist in md.distributions():
+    meta = dist.metadata
+    name = meta.get("Name") or "unknown"
+    version = meta.get("Version") or ""
+    license_value = (meta.get("License") or "").strip()
+    classifiers = [
+        value.replace("License :: ", "")
+        for value in meta.get_all("Classifier") or []
+        if value.startswith("License :: ")
+    ]
+    license_text = license_value or "; ".join(classifiers) or "license metadata unavailable"
+    rows.append((name.lower(), f"- {name} {version}: {license_text}"))
+
+for _, row in sorted(rows):
+    print(row)
+'@
+    $packageSummary = & $PythonExe -c $packageScript
+    $noticeParts.Add("Bundled Python Package License Metadata")
+    $noticeParts.Add("---------------------------------------")
+    $noticeParts.Add("Generated from installed package metadata during runtime staging. Package license files, when shipped by the package, remain in the staged Python environment.")
+    $noticeParts.Add("")
+    foreach ($line in $packageSummary) {
+        $noticeParts.Add($line)
+    }
+    $noticeParts.Add("")
+
+    $noticeParts.Add("Playwright Browser Assets")
+    $noticeParts.Add("-------------------------")
+    $noticeParts.Add("Playwright browser binaries are installed into runtime-staging/ms-playwright during packaging. Browser-specific license files and notices should be preserved from the downloaded Playwright browser distribution when present.")
+
+    $noticeParts -join "`r`n" | Set-Content $OutputPath -Encoding UTF8
+}
+
 Assert-WebwrightPackagingPolicy
 
+if ($WebwrightMode -eq "live" -and $WebwrightSource -and (Test-Path $WebwrightSource)) {
+    $isVendored = ($WebwrightSource -eq $VendoredWebwrightSource)
+    Assert-WebwrightSourceLicense -SourceRoot $WebwrightSource -RequireVersionMarker:$isVendored
+}
+
 if ($ValidateOnly) {
+    $repoNotice = Join-Path $RepoRoot "third_party\NOTICE.md"
+    if (-not (Test-Path $repoNotice)) {
+        throw "Missing third_party/NOTICE.md"
+    }
     Write-Host "Runtime staging policy validation passed for WebwrightMode=$WebwrightMode"
     return
 }
@@ -132,7 +253,7 @@ if ($WebwrightMode -eq "mock") {
 "@ | Set-Content (Join-Path $WebwrightDst "model_openai.yaml")
 } else {
     if ($WebwrightSource) {
-        Write-Host "Copying pinned Webwright source from $WebwrightSource ($WebwrightSourceVersion)"
+        Write-Host "Copying Webwright source from $WebwrightSource ($WebwrightSourceVersion)"
         Copy-Item -Recurse (Join-Path $WebwrightSource "*") $WebwrightDst -Force
     }
     if ($WebwrightConfigSource) {
@@ -140,6 +261,9 @@ if ($WebwrightMode -eq "mock") {
         Copy-Item -Recurse (Join-Path $WebwrightConfigSource "*") $WebwrightDst -Force
     }
     Assert-WebwrightConfigFiles $WebwrightDst
+    if ($WebwrightSource) {
+        Assert-WebwrightSourceLicense -SourceRoot $WebwrightDst
+    }
 }
 
 $PythonDir = Join-Path $StagingRoot "python"
@@ -182,6 +306,12 @@ if ($WebwrightMode -eq "live") {
 $BrowsersDir = Join-Path $StagingRoot "ms-playwright"
 $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
 & $PythonExe -m playwright install chromium
+
+Write-ThirdPartyNotices `
+    -OutputPath (Join-Path $StagingRoot "THIRD_PARTY_NOTICES.txt") `
+    -PythonExe $PythonExe `
+    -PythonDir $PythonDir `
+    -RepoRoot $RepoRoot
 
 if ($WebwrightMode -eq "live") {
     Push-Location $WebwrightDst

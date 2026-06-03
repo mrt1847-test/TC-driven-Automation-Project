@@ -19,7 +19,10 @@ from sqlmodel import Session
 
 
 ERROR_PATTERNS = {
-    "api_key_missing": r"api.?key|authentication|401",
+    "api_access_forbidden": r"403|forbidden",
+    "api_key_invalid": r"401|unauthorized",
+    "api_key_missing": r"api.?key|authentication",
+    "bash_missing": r"/bin/bash|winerror 2",
     "browser_missing": r"browser.*not.*install|executable.*doesn't exist",
     "timeout": r"timeout|timed out",
     "url_unreachable": r"net::ERR|ECONNREFUSED|404",
@@ -41,6 +44,30 @@ def _resolve_output_root() -> Path:
     path = Path(root)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _find_webwright_artifact(output_root: Path, file_name: str) -> Path | None:
+    direct = output_root / file_name
+    if direct.exists():
+        return direct
+
+    top_level_nested = [path for path in output_root.glob(f"*/{file_name}") if path.is_file()]
+    if top_level_nested:
+        return max(top_level_nested, key=lambda path: path.stat().st_mtime)
+
+    nested = [path for path in output_root.rglob(file_name) if path.is_file()]
+    if nested:
+        return max(nested, key=lambda path: path.stat().st_mtime)
+    return None
+
+
+def _relative_artifact(output_root: Path, path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return str(path.resolve().relative_to(output_root.resolve()))
+    except ValueError:
+        return str(path)
 
 
 async def run_webwright_for_case(session: Session, project_id: str, case: TestCase, model_config: str, job_id: str) -> WebwrightRun:
@@ -72,18 +99,27 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
     webwright_root = profile.webwright_root
     python_path = profile.webwright_python
     base_config = profile.base_config
-    model_cfg = model_config or profile.model_config
+    model_cfg = profile.model_config or model_config
+    config_args = [base_config, model_cfg]
+    if profile.model_name:
+        config_args.append(f"model.model_name={profile.model_name}")
+    if profile.webwright_shell:
+        config_args.append(f"environment.shell={profile.webwright_shell}")
+    if profile.webwright_step_limit:
+        config_args.append(f"agent.step_limit={profile.webwright_step_limit}")
     subprocess_env = profile.subprocess_env()
 
     cmd = [
         python_path, "-m", "webwright.run.cli",
-        "-c", base_config,
-        "-c", model_cfg,
+    ]
+    for config_arg in config_args:
+        cmd.extend(["-c", config_arg])
+    cmd.extend([
         "-t", prompt,
         "--start-url", start_url,
         "--task-id", case.automation_key,
         "-o", str(output_root),
-    ]
+    ])
 
     await log_streams.publish(job_id, f"[webwright] Starting run for {case.automation_key}")
 
@@ -107,26 +143,39 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
                 env=subprocess_env,
             )
 
-        stdout, stderr = await process.communicate()
+        timed_out = False
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=profile.webwright_run_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            process.kill()
+            stdout, stderr = await process.communicate()
         stdout_text = mask_secrets(stdout.decode("utf-8", errors="replace"))
         stderr_text = mask_secrets(stderr.decode("utf-8", errors="replace"))
+        if timed_out:
+            stderr_text = (stderr_text + "\n" if stderr_text else "") + (
+                f"[timeout] Webwright exceeded {profile.webwright_run_timeout_seconds}s; harvesting available artifacts."
+            )
         (output_root / "stdout.log").write_text(stdout_text, encoding="utf-8")
         (output_root / "stderr.log").write_text(stderr_text, encoding="utf-8")
         await log_streams.publish(job_id, stdout_text)
         if stderr_text:
             await log_streams.publish(job_id, stderr_text)
 
-        final_script = output_root / "final_script.py"
-        trajectory = output_root / "trajectory.json"
+        final_script = _find_webwright_artifact(output_root, "final_script.py")
+        trajectory = _find_webwright_artifact(output_root, "trajectory.json")
 
-        if process.returncode != 0 or not final_script.exists():
+        if not final_script:
             run.status = WebwrightRunStatus.failed.value
-            run.error_message = classify_error(stderr_text)
+            run.error_message = "timeout" if timed_out else classify_error(stderr_text)
             case.status = "webwright_failed"
         else:
             run.status = WebwrightRunStatus.completed.value
             run.final_script_path = str(final_script)
-            run.trajectory_path = str(trajectory) if trajectory.exists() else None
+            run.trajectory_path = str(trajectory) if trajectory else None
             case.status = "webwright_completed"
 
         metadata = {
@@ -139,11 +188,12 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
             "startedAt": run.started_at.isoformat() if run.started_at else None,
             "endedAt": datetime.utcnow().isoformat(),
             "artifacts": {
-                "finalScript": "final_script.py" if final_script.exists() else None,
-                "trajectory": "trajectory.json" if trajectory.exists() else None,
+                "finalScript": _relative_artifact(output_root, final_script),
+                "trajectory": _relative_artifact(output_root, trajectory),
                 "stdout": "stdout.log",
                 "stderr": "stderr.log",
             },
+            "timedOut": timed_out,
         }
         (output_root / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 

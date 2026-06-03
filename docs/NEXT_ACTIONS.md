@@ -6,7 +6,7 @@ Use this file as the operating queue for AI work. The user should be able to say
 only:
 
 ```text
-NEXT ACTION 기반으로 작업 진행해
+NEXT ACTION
 ```
 
 and the AI should infer the current batch, required specs, checklist updates,
@@ -47,32 +47,43 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 ## Current Batch
 
-**Checklist item:** C9-06 generated runtime bootstrap fail-fast
+**Checklist item:** E-10 generated pytest/browser contract E2E
 
-**Why this is next:** after bundled runtime staging can no longer fake a live
-Webwright install, generated project execution needs the same fail-fast
-discipline before `runner.cli` starts.
+**Why this is next:** Live Webwright raw generation is now proven locally. The
+next gate is proving that a generated structured project can run its pytest
+browser contract end to end through the generated template/runner path.
 
-**Owning spec:** [RUNTIME_SPEC.md](./RUNTIME_SPEC.md),
-[GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md)
+**Owning spec:** [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md)
 
 **Implementation scope:**
 
-- Ensure generated project bootstrap stops before runner execution when
-  `requirements.txt`, `pip install`, `pytest-playwright`, Playwright install, or
-  browser executable checks fail.
-- Return actionable install logs and status through the Runner API.
-- Keep the existing **Install Runtime** UX path compatible with the same
-  bootstrap result shape.
-- Avoid repeated installs when a project/runtime pair is already ready where the
-  current implementation can do so safely.
+- Generate or use a structured automation project containing at least one case.
+- Run the generated pytest/Playwright contract through the in-app runner path.
+- Assert generated fixtures provide browser/context/page/env/artifact behavior.
+- Assert runner artifacts include command/return code/log paths and deterministic
+  screenshot/trace/video paths according to the generated-template contract.
 
 **Acceptance evidence:**
 
-- A missing `requirements.txt` or failed dependency/browser check returns a
-  failure before `runner.cli` execution.
-- Successful bootstrap still allows generated project runs.
-- Worker tests cover at least one fail-fast path and one success path.
+- E2E validates generated pytest runs through `runner.cli`, not a mock path.
+- Browser fixtures are exercised with local Chromium and artifact settings.
+- Runner result JSON/logs expose pytest command, return code, and per-case
+  artifact paths.
+- If generated pytest/browser execution is unavailable, the batch remains open
+  and the blocker is recorded instead of marking E-10 complete.
+
+**Current blocker:**
+
+- Not yet investigated in this batch. Start by running the existing generated
+  template/runner tests, then decide whether E-10 needs a new end-to-end case or
+  can close with an existing gate plus stronger assertions.
+
+**Unblock E-10:**
+
+- From `apps/worker`, run the existing generated runtime/template checks first:
+  `python -m pytest tests/test_generated_template_fixture_policy.py tests/e2e/test_cli_standalone.py tests/test_generated_runtime.py -q`
+- Inspect generated-template runner/browser fixture outputs and add/adjust the
+  narrowest E2E needed for E-10 acceptance.
 
 ## Next Batch Candidates
 
@@ -80,16 +91,12 @@ Pick the next item from this list after Current Batch is done:
 
 | Order | Checklist item | Purpose |
 |-------|----------------|---------|
-| 1 | B3-04 | Implement generated pytest fixture/browser policy |
-| 2 | B2-08 | Harden runner artifact contract |
-| 3 | E-09 | Live Webwright runtime E2E |
-| 4 | E-10 | Generated pytest/browser contract E2E |
-| 5 | I-08 | Clean Windows `dist:win:full` validation |
-| 6 | C12-08 | Classify failed generated cases into selector, raw-refresh, retire, or unknown disposition |
-| 7 | C7-12 | Merge selected Webwright raw refresh into existing structured entities |
-| 8 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
-| 9 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
-| 10 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
+| 1 | I-08 | Clean Windows `dist:win:full` validation |
+| 2 | C12-08 | Classify failed generated cases into selector, raw-refresh, retire, or unknown disposition |
+| 3 | C7-12 | Merge selected Webwright raw refresh into existing structured entities |
+| 4 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
+| 5 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
+| 6 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
 
 ## Completed Batch Notes
 
@@ -100,6 +107,20 @@ in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).
   separates root/python/config/CLI readiness and explicit mock mode; Webwright
   runs use the same readiness result.
 - 2026-06-03: Completed C3-08 Webwright package source/version freeze.
-  `prepare-runtime.ps1` now defaults to live staging, fails without a pinned
-  Webwright source/package, rejects unpinned pip specs, and allows placeholder
-  staging only through explicit mock mode.
+  `prepare-runtime.ps1` now defaults to live staging from vendored
+  `third_party/webwright`, still supports explicit external source/package
+  overrides, rejects unpinned pip specs, and allows placeholder staging only
+  through explicit mock mode.
+- 2026-06-03: Completed C9-06 generated runtime bootstrap fail-fast. Runner
+  bootstrap failures now stop before `runner.cli`, write deterministic logs and
+  `results.json`, and are covered by worker tests.
+- 2026-06-03: Completed B3-04 generated pytest fixture/browser policy.
+  Generated-template fixtures now provide env config, base URL, browser/context
+  args, storage state, artifact directory, and trace/screenshot/video policy.
+- 2026-06-03: Completed B2-08 pytest runner artifact contract hardening.
+  Runner results now include pytest command/return code/log paths and
+  deterministic per-case artifact paths for screenshot/trace/video outputs.
+- 2026-06-03: Completed E-09 live Webwright runtime E2E. The live pytest gate
+  passed with real Webwright, `gpt-5-mini`, Git Bash shell readiness, nested
+  `final_script.py` harvesting, RawAction rows, indexed artifacts, and no mock
+  mode.

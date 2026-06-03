@@ -1,14 +1,12 @@
-import os
-
-import pytest
-
 pytest_plugins = ["fixtures.browser_fixture", "fixtures.env_fixture"]
 
 
-@pytest.fixture(scope="session")
-def browser_context_args(browser_context_args):
-    return {
-        **browser_context_args,
-        "ignore_https_errors": True,
-        "viewport": {"width": 1280, "height": 720},
-    }
+def pytest_addoption(parser):
+    for name, kwargs in [
+        ("--browser", {"default": "chromium"}),
+        ("--headed", {"action": "store_true", "default": False}),
+    ]:
+        try:
+            parser.addoption(name, **kwargs)
+        except ValueError:
+            pass

@@ -154,6 +154,11 @@ class AppSettings(BaseModel):
         "python": "",
         "baseConfig": "base.yaml",
         "modelConfig": "model_openai.yaml",
+        "modelName": "",
+        "apiProvider": "openai",
+        "shell": "",
+        "stepLimit": 30,
+        "runTimeoutSeconds": 180,
         "outputRoot": "",
     })
     generator: dict[str, Any] = Field(default_factory=lambda: {

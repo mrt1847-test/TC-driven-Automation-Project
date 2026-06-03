@@ -37,3 +37,20 @@ Artifacts are written to `artifacts/runs/{runId}/results.json`. Archive
 `artifacts/runs` after the run.
 
 `runner.cli run` passes the selected environment to pytest as `TC_ENV`.
+
+## Pytest Runtime Policy
+
+The template registers `fixtures.browser_fixture` and `fixtures.env_fixture`
+from `conftest.py`.
+
+Fixture/environment contract:
+
+- `TC_ENV` selects `config/env.{env}.json`.
+- `TC_RUN_ID` and `TC_ARTIFACT_DIR` control `artifacts/runs/{runId}` output.
+- `TC_BASE_URL` overrides `baseUrl` / `base_url` from env config.
+- `TC_HEADLESS=false` runs headed; default is headless.
+- `TC_BROWSER` records the runner-selected browser.
+- `TC_STORAGE_STATE` or env config `storageState` enables auth state.
+- `TC_VIEWPORT_WIDTH` / `TC_VIEWPORT_HEIGHT` override viewport.
+- `TC_TRACE`, `TC_SCREENSHOT`, and `TC_VIDEO` control trace/screenshot/video
+  capture. Defaults retain trace/video on failure and screenshots on failure.

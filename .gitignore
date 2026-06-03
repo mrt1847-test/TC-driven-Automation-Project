@@ -7,6 +7,8 @@ release/
 .env
 .env.local
 .data/
+/.runtime/
+/Webwright/
 __pycache__/
 *.py[cod]
 .venv/

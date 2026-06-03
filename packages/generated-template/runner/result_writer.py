@@ -6,7 +6,15 @@ from pathlib import Path
 from typing import Any
 
 
-def write_results(run_id: str, env: str, browser: str, cases: list[dict[str, Any]]) -> Path:
+def write_results(
+    run_id: str,
+    env: str,
+    browser: str,
+    cases: list[dict[str, Any]],
+    pytest: dict[str, Any] | None = None,
+    started_at: str | None = None,
+    ended_at: str | None = None,
+) -> Path:
     root = Path(__file__).resolve().parents[1]
     out_dir = root / "artifacts" / "runs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -21,14 +29,15 @@ def write_results(run_id: str, env: str, browser: str, cases: list[dict[str, Any
         "projectName": "generated-automation-project",
         "env": env,
         "browser": browser,
-        "startedAt": now,
-        "endedAt": now,
+        "startedAt": started_at or now,
+        "endedAt": ended_at or now,
         "summary": {
             "total": len(cases),
             "passed": passed,
             "failed": failed,
             "skipped": skipped,
         },
+        "pytest": pytest or {},
         "cases": cases,
     }
     path = out_dir / "results.json"
@@ -36,14 +45,21 @@ def write_results(run_id: str, env: str, browser: str, cases: list[dict[str, Any
     return path
 
 
-def parse_pytest_output(stdout: str, case_meta: dict[str, Any], status: str, error: str | None = None) -> dict[str, Any]:
+def parse_pytest_output(
+    stdout: str,
+    case_meta: dict[str, Any],
+    status: str,
+    error: str | None = None,
+    artifacts: dict[str, str | None] | None = None,
+    duration_ms: int = 0,
+) -> dict[str, Any]:
     return {
         "automationKey": case_meta.get("automationKey"),
         "sourceType": case_meta.get("sourceType"),
         "sourceCaseId": case_meta.get("sourceCaseId"),
         "title": case_meta.get("title"),
         "status": status,
-        "durationMs": 0,
+        "durationMs": duration_ms,
         "error": error,
-        "artifacts": {"screenshot": None, "trace": None, "video": None},
+        "artifacts": artifacts or {"screenshot": None, "trace": None, "video": None},
     }

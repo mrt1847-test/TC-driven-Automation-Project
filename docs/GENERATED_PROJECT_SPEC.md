@@ -124,8 +124,10 @@ The fixture contract must provide or configure:
 | artifacts | screenshot/trace/video paths under `artifacts/runs/{runId}` |
 | browser cache | honor `PLAYWRIGHT_BROWSERS_PATH` when supplied |
 
-The default template may start minimal, but B3-04 is not complete until these
-policies are implemented and documented in the generated project README.
+The default template implements this policy through `fixtures.browser_fixture`,
+`fixtures.env_fixture`, `conftest.py`, and runner-provided `TC_*` environment
+variables. The runner records pytest command/return code/log paths and maps
+fixture-created artifacts back into each case result.
 
 ## Runner CLI
 
@@ -155,7 +157,11 @@ Expected behavior:
 - Invoke pytest once per run unless a documented advanced mode is selected.
 - Pass browser/headed/env/base-url/artifact settings to pytest.
 - Create `artifacts/runs/{runId}/results.json`.
+- Create `artifacts/runs/{runId}/stdout.log` and `stderr.log`.
+- Record pytest command, return code, and log paths in `results.json`.
 - Store failure screenshots and traces when configured.
+- Map deterministic screenshot/trace/video artifact paths back to each case
+  when fixture artifacts exist.
 - Preserve `automationKey` in every result record.
 
 ### rerun-failed
@@ -302,8 +308,6 @@ environment, not generated source files.
 
 ## Open Implementation Work
 
-- B2-08: runner artifact contract hardening.
-- B3-04: generated pytest fixture/browser policy.
 - C8-08: generated-project runtime manifest.
 - C8-09: selected TC incremental regeneration.
 - C8-10: TC retire/delete generated artifact cleanup.

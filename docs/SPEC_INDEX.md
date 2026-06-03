@@ -36,6 +36,7 @@ source-of-truth documents above.
 | [SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md) | healing flow detail under Automation IDE | Yes, C12 only |
 | [WORKFLOW_SPEC.md](./WORKFLOW_SPEC.md) | E2E sequence and acceptance notes | No, references E/H items |
 | [NEXT_ACTIONS.md](./NEXT_ACTIONS.md) | AI operating queue for the next implementation batch | No, points to one checklist item |
+| [THIRD_PARTY_LEGAL.md](./THIRD_PARTY_LEGAL.md) | vendored Webwright MIT compliance, bundled notices, release checklist | No, references C3-08 / I-08 |
 
 ## Runtime Planning Correction
 

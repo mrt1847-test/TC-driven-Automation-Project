@@ -45,15 +45,6 @@ def prepare_generated_project(tmp_path: Path) -> Path:
     )
 
     write_text(
-        project / "conftest.py",
-        """
-def pytest_addoption(parser):
-    parser.addoption("--browser", default="chromium")
-    parser.addoption("--headed", default="false")
-""".strip()
-        + "\n",
-    )
-    write_text(
         project / "mappings" / "cases.yaml",
         """
 cases:
@@ -93,8 +84,10 @@ import os
 
 def test_cli_pass(pytestconfig):
     assert os.environ["TC_ENV"] == "stg"
+    assert os.environ["TC_RUN_ID"].startswith("cli-")
+    assert os.environ["TC_BROWSER"] == "chromium"
+    assert os.environ["TC_HEADLESS"] == "true"
     assert pytestconfig.getoption("browser") == "chromium"
-    assert pytestconfig.getoption("headed") == "false"
 """.lstrip(),
     )
     write_text(
@@ -151,7 +144,12 @@ def test_generated_template_cli_standalone_e2e(tmp_path: Path) -> None:
     )
     pass_results = read_results(project, "cli-pass-run")
     assert pass_results["summary"] == {"total": 1, "passed": 1, "failed": 0, "skipped": 0}
+    assert pass_results["pytest"]["returnCode"] == 0
+    assert pass_results["pytest"]["stdoutPath"] == "artifacts/runs/cli-pass-run/stdout.log"
+    assert (project / pass_results["pytest"]["stdoutPath"]).exists()
+    assert (project / pass_results["pytest"]["stderrPath"]).exists()
     assert pass_results["cases"][0]["automationKey"] == "cli_pass"
+    assert pass_results["cases"][0]["artifacts"] == {"screenshot": None, "trace": None, "video": None}
 
     run_cli(
         project,
@@ -165,8 +163,11 @@ def test_generated_template_cli_standalone_e2e(tmp_path: Path) -> None:
         "cli-all-run",
     )
     all_results = read_results(project, "cli-all-run")
+    assert all_results["pytest"]["returnCode"] != 0
     statuses = {case["automationKey"]: case["status"] for case in all_results["cases"]}
     assert statuses == {"cli_pass": "passed", "cli_fail": "failed"}
+    failed_case = next(case for case in all_results["cases"] if case["automationKey"] == "cli_fail")
+    assert "intentional standalone failure" in failed_case["error"]
 
     run_cli(
         project,

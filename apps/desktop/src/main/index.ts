@@ -138,6 +138,24 @@ ipcMain.handle('select-directory', async () => {
 
 ipcMain.handle('open-path', async (_e, filePath: string) => shell.openPath(filePath))
 
+function getThirdPartyNoticesPath(): string | null {
+  const runtimeRoot = getBundledRuntimeRoot()
+  if (!runtimeRoot) return null
+  const notices = join(runtimeRoot, 'THIRD_PARTY_NOTICES.txt')
+  return existsSync(notices) ? notices : null
+}
+
+ipcMain.handle('get-third-party-notices-path', () => getThirdPartyNoticesPath())
+
+ipcMain.handle('open-third-party-notices', async () => {
+  const noticesPath = getThirdPartyNoticesPath()
+  if (!noticesPath) {
+    return { ok: false, message: 'Third-party notices are available after prepare-runtime or in a bundled installer build.' }
+  }
+  const error = await shell.openPath(noticesPath)
+  return error ? { ok: false, message: error } : { ok: true, path: noticesPath }
+})
+
 ipcMain.handle('credential-set', async (_e, service: string, account: string, password: string) => {
   try {
     const keytar = await import('keytar')

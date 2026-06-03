@@ -22,7 +22,7 @@
 | Category | Done | Total |
 |----------|------|-------|
 | A. Infra | 33 | 33 |
-| B. Template | 18 | 20 |
+| B. Template | 20 | 20 |
 | C. Worker | 55 | 87 |
 | D. GUI | 42 | 49 |
 | E. E2E | 8 | 12 |
@@ -40,13 +40,13 @@ Scope checked: repository, spec docs under `docs/`, `npm run build`, worker `tes
 - **Build gate:** `npm run build` passes; I-06, I-07 closed.
 - **Spec gaps to keep open:** C7-10 stale/conflict detection, C7-12 selected raw refresh merge into existing structured entities, C8-06 deterministic regeneration guard, C8-09 selected TC incremental regeneration, C12-04..C12-10 failure disposition/self-healing/raw-refresh/retire API flow, C2-04..C2-07 prompt preset/audit, C6-07 multi-action join API follow-up, C8-04 git-ready output, Webwright subprocess cancel (not only DB status).
 - **Installer verification gap:** `dist:win:full` end-to-end on a clean Windows machine not yet recorded (see RUNTIME_SPEC R-02).
-- **Webwright packaging decision:** resolved by C3-08. Product/live `prepare-runtime` now requires pinned `WEBWRIGHT_SOURCE` + `WEBWRIGHT_SOURCE_VERSION` or pinned `WEBWRIGHT_PIP_PACKAGE`; mock staging requires explicit opt-in.
+- **Webwright packaging decision:** resolved by C3-08. Product/live `prepare-runtime` now defaults to vendored `third_party/webwright` with license/notice/version metadata; explicit external `WEBWRIGHT_SOURCE` + `WEBWRIGHT_SOURCE_VERSION` or pinned `WEBWRIGHT_PIP_PACKAGE` remains supported; mock staging requires explicit opt-in.
 
 ## Runtime/Generated Project planning correction (2026-06-03)
 
 Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, generated-template pytest fixtures, project_generator, structuring service, Windows runtime staging docs.
 
-- **Resolved:** Webwright live-run readiness now rejects placeholder `base.yaml` roots without an importable `webwright.run.cli` (C3-07), and live bundled runtime staging now requires a pinned Webwright source/package while mock staging requires explicit opt-in (C3-08).
+- **Resolved:** Webwright live-run readiness now rejects placeholder `base.yaml` roots without an importable `webwright.run.cli` (C3-07), and live bundled runtime staging now uses vendored Webwright by default while still allowing explicit external source/package overrides (C3-08).
 - **Gap:** raw script generation and generated project execution both need Python + Playwright browser assets. RuntimeProfile wires paths, but installer staging and in-app bootstrap must prove Webwright, pytest-playwright, and browser binaries are actually available before running.
 - **Gap:** generated-template has a minimal pytest contract only. It needs explicit fixture policy for browser/context/page, `base_url`, auth/storage state, trace/screenshot/video capture, env config, browser selection, and artifact paths.
 - **Gap:** raw script to structured project conversion is DB-backed but still shallow. Page object method body planning must support multi-action steps, assertions, waits, selects/checks, test data/env values, and stable source/origin tracking.
@@ -125,14 +125,14 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **B2-05** mapping_loader.py, pytest_runner.py — §9.4 | Phase 1 | Layer: Template | Depends: B2-01
 - [x] **B2-06** result_parser.py, result_writer.py — §5.13 | Phase 1 | Layer: Template | Depends: B2-05
 - [x] **B2-07** CLI 단독 실행 E2E 검증 — §3.5 | Phase 1 | Layer: E2E | Depends: B2-06 (baseline standalone CLI E2E verified; `npm run e2e:cli-standalone` covers list-cases, run, rerun-failed, and excel export against a temporary generated project)
-- [ ] **B2-08** pytest runner artifact contract hardening — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B2-05, B3-04 (runner must pass browser/env/headed/base-url/trace options, capture pytest return/error details, and produce deterministic screenshot/trace/video paths in `artifacts/runs/{runId}`)
+- [x] **B2-08** pytest runner artifact contract hardening — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B2-05, B3-04 (verified: runner now writes stdout/stderr logs, records pytest command/returnCode/log paths in `results.json`, maps deterministic screenshot/trace/video artifact paths, preserves env/headed/browser/base-url artifact env, and `python -m pytest tests/test_generated_template_fixture_policy.py tests/e2e/test_cli_standalone.py tests/test_generated_runtime.py tests/test_runtime.py tests/e2e/test_smoke.py -q` passed)
 
 ### B3. Page / Flow / Test 샘플 — §5.10
 
 - [x] **B3-01** pages/base_page.py — §5.10 | Phase 1 | Layer: Template | Depends: B1-01
 - [x] **B3-02** fixtures/browser_fixture.py, env_fixture.py — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
 - [x] **B3-03** 샘플 flow + test 1세트 — §5.10 | Phase 1 | Layer: Template | Depends: B3-01, B3-02
-- [ ] **B3-04** generated pytest fixture/browser policy — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B3-02 (define and implement conftest/fixtures for browser/context/page, base_url, storage_state/auth, trace/screenshot/video policy, viewport, timeout, retries, and env config)
+- [x] **B3-04** generated pytest fixture/browser policy — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B3-02 (verified: generated-template fixtures now provide env config, base_url, artifact_dir, headless/browser/context args, storage_state, viewport, trace/screenshot/video policy, runner env propagation, and `python -m pytest tests/test_generated_template_fixture_policy.py tests/test_generated_runtime.py tests/test_runtime.py tests/e2e/test_smoke.py -q` passed)
 
 ### B4. Result Export Adapters — §5.14
 
@@ -174,7 +174,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C3-05** artifact 수집 — §5.7 | Phase 1 | Layer: Worker | Depends: C3-02
 - [x] **C3-06** error classification — §12.1 | Phase 5 | Layer: Worker | Depends: C3-05
 - [x] **C3-07** live Webwright CLI readiness probe — Spec: RUNTIME_SPEC | Phase 1 | Layer: Worker | Depends: C3-01 (verified: health/run gate now uses root/python/config/CLI import readiness; placeholder `base.yaml` alone falls back to explicit mock mode; `python -m pytest tests/test_runtime.py tests/e2e/test_smoke.py -q` passed from `apps/worker`)
-- [x] **C3-08** Webwright package source/version freeze — Spec: RUNTIME_SPEC | Phase 1 | Layer: Infra | Depends: C3-07 (verified: product/live `prepare-runtime` defaults to live and fails without pinned Webwright source/package; `-WebwrightMode mock -ValidateOnly` passes; unpinned `-WebwrightPipPackage webwright -ValidateOnly` fails)
+- [x] **C3-08** Webwright package source/version freeze — Spec: RUNTIME_SPEC | Phase 1 | Layer: Infra | Depends: C3-07 (verified: product/live `prepare-runtime` defaults to vendored `third_party/webwright` with MIT license/notice/version metadata; explicit external source/package override remains supported; `-WebwrightMode mock -ValidateOnly` passes; unpinned `-WebwrightPipPackage webwright -ValidateOnly` fails)
 
 ### C4. Webwright Run Service — §5.7
 
@@ -374,7 +374,7 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **E-06** Result Export E2E — §11.6 | Phase 3-4 | Layer: E2E | Depends: D8-03 (baseline Result Export E2E verified; pytest covers execution results to Excel preview updates, local Excel write-back using a temp workbook, and ExportLog persistence without external services; live script at scripts/e2e_export.py)
 - [x] **E-07** Reverse handoff rerun E2E (Automation IDE → Generate Raw) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: E2E | Depends: D1-06, E-02 (baseline reverse handoff rerun E2E verified; pytest covers selected TC/project context, Automation IDE mapping gap, Generate Raw retry via existing Webwright API, second Webwright run, refreshed raw actions/mappings visible back in Mapping, and retry log stream; live script at scripts/e2e_reverse_handoff.py)
 - [x] **E-08** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06 (baseline self-healing proposal E2E verified; pytest covers failed execution/result context, local proposal accept/reject state, rerun-failed action, rerun log stream, and persisted rerun result rows without persistent C12 healing APIs; live script at scripts/e2e_self_healing.py)
-- [ ] **E-09** live Webwright runtime E2E — Spec: RUNTIME_SPEC | Phase 1 | Layer: E2E | Depends: C3-07, C3-08 (with a real pinned Webwright install, validate health, generate raw final_script.py, index artifacts, and prove mock mode is not used)
+- [x] **E-09** live Webwright runtime E2E — Spec: RUNTIME_SPEC | Phase 1 | Layer: E2E | Depends: C3-07, C3-08 (verified 2026-06-03: `python -m pytest tests\e2e\test_live_webwright_runtime.py -q` passed with real Webwright source/venv, OpenAI `gpt-5-mini`, Git Bash shell readiness, no mock mode, harvested nested `final_script.py`, RawAction rows, and indexed artifacts; source is now vendored under `third_party/webwright`)
 - [ ] **E-10** generated pytest/browser contract E2E — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: E2E | Depends: B2-08, B3-04, C9-06 (run generated project through Studio and standalone CLI with browser/env/headed/base_url/artifact options; verify results, screenshots/traces, and fail-fast bootstrap behavior)
 - [ ] **E-11** selected TC Webwright refresh incremental regeneration E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C7-12, C12-09, C8-09, D6-09 (with many generated cases already structured/generated, rerun Webwright for selected TCs and verify the new raw actions merge into existing structure while only affected generated artifacts change)
 - [ ] **E-12** feature-removed TC retire cleanup E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C12-10, C8-10, D6-10 (classify a removed-area failure, require human confirmation, retire/delete the TC, clean generated artifacts, and preserve unrelated cases)
