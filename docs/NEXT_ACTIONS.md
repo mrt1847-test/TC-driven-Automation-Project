@@ -47,43 +47,47 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 ## Current Batch
 
-**Checklist item:** E-10 generated pytest/browser contract E2E
+**Checklist item:** I-08 clean Windows `dist:win:full` validation
 
-**Why this is next:** Live Webwright raw generation is now proven locally. The
-next gate is proving that a generated structured project can run its pytest
-browser contract end to end through the generated template/runner path.
+**Why this is next:** Live Webwright raw generation and generated pytest/browser
+execution are now proven locally. The next gate is validating the same runtime
+chain from a clean Windows installer/bundled-runtime path.
 
-**Owning spec:** [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md)
+**Owning spec:** [RUNTIME_SPEC.md](./RUNTIME_SPEC.md)
 
 **Implementation scope:**
 
-- Generate or use a structured automation project containing at least one case.
-- Run the generated pytest/Playwright contract through the in-app runner path.
-- Assert generated fixtures provide browser/context/page/env/artifact behavior.
-- Assert runner artifacts include command/return code/log paths and deterministic
-  screenshot/trace/video paths according to the generated-template contract.
+- Run `npm run dist:win:full` or the closest locally available equivalent.
+- Verify `prepare-runtime.ps1` stages vendored Webwright, embeddable Python,
+  generated-template, Chromium browser assets, and `THIRD_PARTY_NOTICES.txt`.
+- Verify bundled runtime settings/readiness on Windows.
+- If possible, install/run the packaged app and execute the raw-generation ->
+  generated-project -> in-app runner chain.
 
 **Acceptance evidence:**
 
-- E2E validates generated pytest runs through `runner.cli`, not a mock path.
-- Browser fixtures are exercised with local Chromium and artifact settings.
-- Runner result JSON/logs expose pytest command, return code, and per-case
-  artifact paths.
-- If generated pytest/browser execution is unavailable, the batch remains open
-  and the blocker is recorded instead of marking E-10 complete.
+- Build/staging command output is recorded.
+- `runtime-staging/runtime-manifest.json` and `THIRD_PARTY_NOTICES.txt` exist.
+- Bundled `runtime/webwright` contains real vendored Webwright with license and
+  configs, not a mock placeholder.
+- Bundled Python can import Worker requirements, `webwright.run.cli`, and
+  Playwright.
+- Chromium browser executable is available from the bundled browser cache.
+- If clean Windows installer execution is unavailable, keep I-08 open and record
+  the blocker instead of advancing the queue.
 
 **Current blocker:**
 
-- Not yet investigated in this batch. Start by running the existing generated
-  template/runner tests, then decide whether E-10 needs a new end-to-end case or
-  can close with an existing gate plus stronger assertions.
+- Not yet investigated in this batch. Start by validating runtime staging output
+  and determine whether a full installer run is possible in the local
+  environment.
 
-**Unblock E-10:**
+**Unblock I-08:**
 
-- From `apps/worker`, run the existing generated runtime/template checks first:
-  `python -m pytest tests/test_generated_template_fixture_policy.py tests/e2e/test_cli_standalone.py tests/test_generated_runtime.py -q`
-- Inspect generated-template runner/browser fixture outputs and add/adjust the
-  narrowest E2E needed for E-10 acceptance.
+- From repo root, run `npm run dist:win:full` if feasible.
+- If full packaging is too slow or unavailable, run `scripts/prepare-runtime.ps1`
+  and validate the staged runtime contents directly, but leave I-08 open unless
+  the checklist acceptance can be proven.
 
 ## Next Batch Candidates
 
@@ -91,12 +95,11 @@ Pick the next item from this list after Current Batch is done:
 
 | Order | Checklist item | Purpose |
 |-------|----------------|---------|
-| 1 | I-08 | Clean Windows `dist:win:full` validation |
-| 2 | C12-08 | Classify failed generated cases into selector, raw-refresh, retire, or unknown disposition |
-| 3 | C7-12 | Merge selected Webwright raw refresh into existing structured entities |
-| 4 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
-| 5 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
-| 6 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
+| 1 | C12-08 | Classify failed generated cases into selector, raw-refresh, retire, or unknown disposition |
+| 2 | C7-12 | Merge selected Webwright raw refresh into existing structured entities |
+| 3 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
+| 4 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
+| 5 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
 
 ## Completed Batch Notes
 
@@ -124,3 +127,7 @@ in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).
   passed with real Webwright, `gpt-5-mini`, Git Bash shell readiness, nested
   `final_script.py` harvesting, RawAction rows, indexed artifacts, and no mock
   mode.
+- 2026-06-03: Completed E-10 generated pytest/browser contract E2E. Worker
+  `run_project` now proves `runner.cli` -> pytest-playwright with local
+  Chromium, `page`/`context`/`base_url`/env/artifact fixtures, preserved pytest
+  logs, and `[chromium]` screenshot/trace mapping into results and DB rows.

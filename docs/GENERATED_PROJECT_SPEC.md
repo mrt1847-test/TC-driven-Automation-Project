@@ -162,6 +162,11 @@ Expected behavior:
 - Store failure screenshots and traces when configured.
 - Map deterministic screenshot/trace/video artifact paths back to each case
   when fixture artifacts exist.
+- When pytest-playwright parameterizes a case by browser, artifact mapping must
+  recognize browser-suffixed node names such as `test_case[chromium].png`.
+- Studio/Worker wrapper logs must not overwrite the generated runner's pytest
+  `stdout.log` / `stderr.log`; wrapper stdout/stderr must use separate files
+  when the runner has already written pytest logs.
 - Preserve `automationKey` in every result record.
 
 ### rerun-failed
@@ -289,6 +294,8 @@ The generated project baseline is acceptable when:
 - `python -m runner.cli run --env stg --browser chromium --all` runs at least one case.
 - `results.json` is produced with `automationKey`.
 - artifact paths are deterministic.
+- Worker-run E2E exercises real pytest-playwright `page`, `context`, `base_url`,
+  env config, and artifact fixtures with local Chromium.
 - the project can run outside Electron after installing `requirements.txt` and Playwright browser assets.
 
 ## Standalone CI Commands

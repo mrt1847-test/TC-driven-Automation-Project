@@ -1,8 +1,6 @@
 Third-party Notice
 ==================
 
-Legal summary and release checklist: [docs/THIRD_PARTY_LEGAL.md](../docs/THIRD_PARTY_LEGAL.md)
-
 This directory contains source vendored for TC Automation Studio runtime use.
 Vendored source is checked into this repository so the product can run without
 requiring a separate Webwright checkout. External Webwright paths remain

@@ -491,7 +491,8 @@ export function SettingsPage() {
         <div className="font-medium text-slate-200">Third-party notices</div>
         <p className="mt-1 text-xs text-slate-500">
           Includes Microsoft Webwright (MIT) and bundled runtime components. See repository{' '}
-          <span className="text-slate-400">docs/THIRD_PARTY_LEGAL.md</span> for details.
+          <span className="text-slate-400">third_party/NOTICE.md</span> and bundled{' '}
+          <span className="text-slate-400">THIRD_PARTY_NOTICES.txt</span> for details.
         </p>
         <button
           type="button"

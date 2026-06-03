@@ -257,8 +257,13 @@ def _write_bootstrap_results(
 def _write_runner_logs(generated_path: Path, run_id: str, stdout_text: str, stderr_text: str) -> None:
     artifact_dir = generated_path / "artifacts" / "runs" / run_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / "stdout.log").write_text(stdout_text, encoding="utf-8")
-    (artifact_dir / "stderr.log").write_text(stderr_text, encoding="utf-8")
+    for name, fallback_name, text in [
+        ("stdout.log", "worker_stdout.log", stdout_text),
+        ("stderr.log", "worker_stderr.log", stderr_text),
+    ]:
+        primary = artifact_dir / name
+        target = artifact_dir / fallback_name if primary.exists() else primary
+        target.write_text(text, encoding="utf-8")
 
 
 def _persist_results(session: Session, exec_run: ExecutionRun, result_path: Path) -> None:

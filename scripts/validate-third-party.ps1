@@ -24,15 +24,11 @@ function Assert-File {
 }
 
 $Notice = Join-Path $RepoRoot "third_party\NOTICE.md"
-$Readme = Join-Path $RepoRoot "third_party\README.md"
-$LegalDoc = Join-Path $RepoRoot "docs\THIRD_PARTY_LEGAL.md"
 $WebwrightRoot = Join-Path $RepoRoot "third_party\webwright"
 $License = Join-Path $WebwrightRoot "LICENSE"
 $VersionFile = Join-Path $WebwrightRoot "VENDORED_VERSION.txt"
 
 Assert-File $Notice "third_party notice" | Out-Null
-Assert-File $Readme "third_party readme" | Out-Null
-Assert-File $LegalDoc "legal doc" | Out-Null
 Assert-File $License "Webwright LICENSE" | Out-Null
 Assert-File $VersionFile "Webwright VENDORED_VERSION" | Out-Null
 

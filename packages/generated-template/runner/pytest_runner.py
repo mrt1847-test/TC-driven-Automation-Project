@@ -65,8 +65,8 @@ def _relative_artifact(path: Path | None) -> str | None:
 def _case_artifacts(run_id: str, test_file: str, test_fn: str) -> dict[str, str | None]:
     out_dir = _artifact_dir(run_id)
     safe_name = _safe_node_name(test_file, test_fn)
-    screenshot = out_dir / f"{safe_name}.png"
-    trace = out_dir / f"{safe_name}.zip"
+    screenshot = _find_single_artifact(out_dir, safe_name, ".png")
+    trace = _find_single_artifact(out_dir, safe_name, ".zip")
     videos_dir = out_dir / "videos"
     video = None
     if videos_dir.exists():
@@ -74,10 +74,18 @@ def _case_artifacts(run_id: str, test_file: str, test_fn: str) -> dict[str, str 
         if len(videos) == 1:
             video = videos[0]
     return {
-        "screenshot": _relative_artifact(screenshot if screenshot.exists() else None),
-        "trace": _relative_artifact(trace if trace.exists() else None),
+        "screenshot": _relative_artifact(screenshot),
+        "trace": _relative_artifact(trace),
         "video": _relative_artifact(video),
     }
+
+
+def _find_single_artifact(out_dir: Path, safe_name: str, suffix: str) -> Path | None:
+    exact = out_dir / f"{safe_name}{suffix}"
+    if exact.exists():
+        return exact
+    matches = sorted(out_dir.glob(f"{safe_name}*{suffix}"))
+    return matches[0] if len(matches) == 1 else None
 
 
 def _write_pytest_logs(run_id: str, stdout: str, stderr: str) -> None:

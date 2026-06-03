@@ -1,3 +1,6 @@
+import argparse
+
+
 pytest_plugins = ["fixtures.browser_fixture", "fixtures.env_fixture"]
 
 
@@ -8,5 +11,5 @@ def pytest_addoption(parser):
     ]:
         try:
             parser.addoption(name, **kwargs)
-        except ValueError:
+        except (ValueError, argparse.ArgumentError):
             pass

@@ -87,7 +87,8 @@ def test_cli_pass(pytestconfig):
     assert os.environ["TC_RUN_ID"].startswith("cli-")
     assert os.environ["TC_BROWSER"] == "chromium"
     assert os.environ["TC_HEADLESS"] == "true"
-    assert pytestconfig.getoption("browser") == "chromium"
+    browser_option = pytestconfig.getoption("browser")
+    assert browser_option == "chromium" or browser_option == ["chromium"]
 """.lstrip(),
     )
     write_text(

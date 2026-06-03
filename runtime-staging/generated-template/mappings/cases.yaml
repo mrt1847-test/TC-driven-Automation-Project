@@ -1,0 +1,16 @@
+cases:
+  - automationKey: sample_case_001
+    sourceType: excel
+    sourceCaseId: TC-001
+    title: Sample navigation test
+    testFile: tests/test_sample_case_001.py
+    testFunction: test_sample_case_001
+    tags:
+      - sample
+    resultTargets:
+      excel:
+        file: imported_cases.xlsx
+        sheet: TestCases
+        row: 2
+      testrailClone:
+        caseId: tc_sample_001

@@ -133,7 +133,7 @@ runtime-staging/
 - a real Webwright package/source tree when bundled live Webwright is expected.
 - `THIRD_PARTY_NOTICES.txt` containing `third_party/NOTICE.md`, the full
   Microsoft Webwright MIT license text, bundled Python license text when available,
-  and installed Python package license metadata. See [THIRD_PARTY_LEGAL.md](./THIRD_PARTY_LEGAL.md).
+  and installed Python package license metadata.
 
 Release policy:
 

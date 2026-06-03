@@ -137,6 +137,55 @@ function Assert-WebwrightConfigFiles {
     }
 }
 
+function Invoke-Checked {
+    param(
+        [string]$Label,
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$WorkingDirectory = ""
+    )
+
+    if ($WorkingDirectory) {
+        Push-Location $WorkingDirectory
+    }
+    try {
+        & $FilePath @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "$Label failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        if ($WorkingDirectory) {
+            Pop-Location
+        }
+    }
+}
+
+function Ensure-Pip {
+    param(
+        [string]$PythonExe,
+        [string]$PythonDir
+    )
+
+    & $PythonExe -m pip --version | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        return
+    }
+
+    $getPip = Join-Path $env:TEMP "tc-studio-get-pip.py"
+    Write-Host "Bootstrapping pip for embeddable Python"
+    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
+    try {
+        Invoke-Checked "get-pip bootstrap" $PythonExe @($getPip, "--no-warn-script-location")
+    } finally {
+        Remove-Item $getPip -Force -ErrorAction SilentlyContinue
+    }
+
+    & $PythonExe -m pip --version | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "pip is still unavailable after get-pip bootstrap in $PythonDir"
+    }
+}
+
 function Write-ThirdPartyNotices {
     param(
         [string]$OutputPath,
@@ -153,6 +202,14 @@ function Write-ThirdPartyNotices {
     $thirdPartyNotice = Join-Path $RepoRoot "third_party\NOTICE.md"
     if (Test-Path $thirdPartyNotice) {
         $noticeParts.Add((Get-Content $thirdPartyNotice -Raw))
+        $noticeParts.Add("")
+    }
+
+    $webwrightLicense = Join-Path $RepoRoot "third_party\webwright\LICENSE"
+    if (Test-Path $webwrightLicense) {
+        $noticeParts.Add("Microsoft Webwright MIT License")
+        $noticeParts.Add("-------------------------------")
+        $noticeParts.Add((Get-Content $webwrightLicense -Raw))
         $noticeParts.Add("")
     }
 
@@ -197,7 +254,16 @@ for dist in md.distributions():
 for _, row in sorted(rows):
     print(row)
 '@
-    $packageSummary = & $PythonExe -c $packageScript
+    $packageScriptPath = Join-Path $env:TEMP "tc-studio-package-licenses.py"
+    Set-Content $packageScriptPath $packageScript -Encoding UTF8
+    try {
+        $packageSummary = & $PythonExe $packageScriptPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python package license metadata collection failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        Remove-Item $packageScriptPath -Force -ErrorAction SilentlyContinue
+    }
     $noticeParts.Add("Bundled Python Package License Metadata")
     $noticeParts.Add("---------------------------------------")
     $noticeParts.Add("Generated from installed package metadata during runtime staging. Package license files, when shipped by the package, remain in the staged Python environment.")
@@ -282,30 +348,31 @@ if (-not (Test-Path (Join-Path $PythonDir "python.exe"))) {
 }
 
 $PythonExe = Join-Path $PythonDir "python.exe"
-& $PythonExe -m pip install --upgrade pip
+Ensure-Pip -PythonExe $PythonExe -PythonDir $PythonDir
+Invoke-Checked "pip upgrade" $PythonExe @("-m", "pip", "install", "--upgrade", "pip")
 $WorkerReq = Join-Path $RepoRoot "apps\worker\requirements.txt"
-& $PythonExe -m pip install -r $WorkerReq
-& $PythonExe -m pip install playwright pytest-playwright
+Invoke-Checked "worker requirements install" $PythonExe @("-m", "pip", "install", "-r", $WorkerReq)
+Invoke-Checked "Playwright pytest packages install" $PythonExe @("-m", "pip", "install", "playwright", "pytest-playwright")
 $TemplateReq = Join-Path $TemplateSrc "requirements.txt"
 if (Test-Path $TemplateReq) {
-    & $PythonExe -m pip install -r $TemplateReq
+    Invoke-Checked "generated-template requirements install" $PythonExe @("-m", "pip", "install", "-r", $TemplateReq)
 }
 
 if ($WebwrightMode -eq "live") {
     if ($WebwrightSource -and ((Test-Path (Join-Path $WebwrightDst "pyproject.toml")) -or (Test-Path (Join-Path $WebwrightDst "setup.py")))) {
         Write-Host "Installing copied Webwright source into bundled Python"
-        & $PythonExe -m pip install $WebwrightDst
+        Invoke-Checked "copied Webwright source install" $PythonExe @("-m", "pip", "install", $WebwrightDst)
     }
 
     if ($WebwrightPipPackage) {
         Write-Host "Installing pinned Webwright package $WebwrightPipPackage"
-        & $PythonExe -m pip install $WebwrightPipPackage
+        Invoke-Checked "pinned Webwright package install" $PythonExe @("-m", "pip", "install", $WebwrightPipPackage)
     }
 }
 
 $BrowsersDir = Join-Path $StagingRoot "ms-playwright"
 $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
-& $PythonExe -m playwright install chromium
+Invoke-Checked "Playwright Chromium install" $PythonExe @("-m", "playwright", "install", "chromium")
 
 Write-ThirdPartyNotices `
     -OutputPath (Join-Path $StagingRoot "THIRD_PARTY_NOTICES.txt") `
@@ -314,15 +381,7 @@ Write-ThirdPartyNotices `
     -RepoRoot $RepoRoot
 
 if ($WebwrightMode -eq "live") {
-    Push-Location $WebwrightDst
-    try {
-        & $PythonExe -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('webwright.run.cli') else 1)"
-        if ($LASTEXITCODE -ne 0) {
-            throw "webwright.run.cli import probe failed after staging"
-        }
-    } finally {
-        Pop-Location
-    }
+    Invoke-Checked "webwright.run.cli import probe" $PythonExe @("-c", "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('webwright.run.cli') else 1)") $WebwrightDst
 }
 
 $Manifest = @{

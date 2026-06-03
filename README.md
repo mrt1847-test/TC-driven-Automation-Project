@@ -103,7 +103,7 @@ requirements are defined in [Runtime Spec](docs/RUNTIME_SPEC.md).
 This project vendors Microsoft Webwright (MIT) for live raw generation.
 
 - [third_party/NOTICE.md](third_party/NOTICE.md) — attribution, citation, local patches
-- [docs/THIRD_PARTY_LEGAL.md](docs/THIRD_PARTY_LEGAL.md) — compliance checklist and bundled notices
+- `runtime-staging/THIRD_PARTY_NOTICES.txt` — generated during full Windows runtime staging
 
 Validate before release:
 

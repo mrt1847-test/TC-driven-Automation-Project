@@ -1,0 +1,4 @@
+defaultEnv: stg
+defaultBrowser: chromium
+headless: true
+artifactsDir: artifacts/runs

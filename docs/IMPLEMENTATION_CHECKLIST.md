@@ -25,7 +25,7 @@
 | B. Template | 20 | 20 |
 | C. Worker | 55 | 87 |
 | D. GUI | 42 | 49 |
-| E. E2E | 8 | 12 |
+| E. E2E | 9 | 12 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
 | H. MVP Gates | 4 | 4 |
@@ -375,7 +375,7 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **E-07** Reverse handoff rerun E2E (Automation IDE → Generate Raw) — Spec: PRODUCT_PILLARS, WORKFLOW_SPEC | Phase 1 | Layer: E2E | Depends: D1-06, E-02 (baseline reverse handoff rerun E2E verified; pytest covers selected TC/project context, Automation IDE mapping gap, Generate Raw retry via existing Webwright API, second Webwright run, refreshed raw actions/mappings visible back in Mapping, and retry log stream; live script at scripts/e2e_reverse_handoff.py)
 - [x] **E-08** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06 (baseline self-healing proposal E2E verified; pytest covers failed execution/result context, local proposal accept/reject state, rerun-failed action, rerun log stream, and persisted rerun result rows without persistent C12 healing APIs; live script at scripts/e2e_self_healing.py)
 - [x] **E-09** live Webwright runtime E2E — Spec: RUNTIME_SPEC | Phase 1 | Layer: E2E | Depends: C3-07, C3-08 (verified 2026-06-03: `python -m pytest tests\e2e\test_live_webwright_runtime.py -q` passed with real Webwright source/venv, OpenAI `gpt-5-mini`, Git Bash shell readiness, no mock mode, harvested nested `final_script.py`, RawAction rows, and indexed artifacts; source is now vendored under `third_party/webwright`)
-- [ ] **E-10** generated pytest/browser contract E2E — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: E2E | Depends: B2-08, B3-04, C9-06 (run generated project through Studio and standalone CLI with browser/env/headed/base_url/artifact options; verify results, screenshots/traces, and fail-fast bootstrap behavior)
+- [x] **E-10** generated pytest/browser contract E2E — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: E2E | Depends: B2-08, B3-04, C9-06 (verified 2026-06-03: `python -m pytest tests\e2e\test_generated_browser_contract.py -q` passed with Worker `run_project` -> `runner.cli` -> pytest-playwright local Chromium, exercising `page`/`context`/`base_url`/env/artifact fixtures, preserving pytest stdout/stderr, mapping `[chromium]` screenshot/trace artifacts into results and DB rows; `python -m pytest tests\test_generated_template_fixture_policy.py tests\e2e\test_cli_standalone.py tests\test_generated_runtime.py -q` also passed)
 - [ ] **E-11** selected TC Webwright refresh incremental regeneration E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C7-12, C12-09, C8-09, D6-09 (with many generated cases already structured/generated, rerun Webwright for selected TCs and verify the new raw actions merge into existing structure while only affected generated artifacts change)
 - [ ] **E-12** feature-removed TC retire cleanup E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C12-10, C8-10, D6-10 (classify a removed-area failure, require human confirmation, retire/delete the TC, clean generated artifacts, and preserve unrelated cases)
 
