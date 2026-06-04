@@ -3,6 +3,7 @@ import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { getCredential, setCredential } from './credentials'
+import { listProviderModels } from './providerModels'
 
 const WORKER_PORT = 8765
 const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`
@@ -204,4 +205,12 @@ ipcMain.handle('credential-get', async (_e, service: string, account: string) =>
     return { ok: true as const, password: result.password }
   }
   return { ok: false as const, message: result.message }
+})
+
+ipcMain.handle('provider-models', async (_e, provider: string) => {
+  const credential = await getCredential('tc-studio', provider)
+  if (!credential.ok) {
+    return { ok: false as const, provider, message: credential.message }
+  }
+  return listProviderModels(provider, credential.password)
 })

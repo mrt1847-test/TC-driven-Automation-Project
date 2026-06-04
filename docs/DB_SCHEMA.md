@@ -1,6 +1,6 @@
 # DB Schema
 
-Last aligned: 2026-06-02
+Last aligned: 2026-06-05
 
 This document defines the relational schema needed to support TC import, Webwright raw action extraction, mapping review, structuring, project generation, execution, and result export.
 
@@ -200,6 +200,19 @@ Suggested `healing_proposals.status` values:
 
 One TC step can map to multiple raw actions, so the mapping table should be many-to-many at the action level.
 
+Mapping API persistence contract:
+
+- `GET /mappings` returns `action_ids` from `case_action_mapping_actions`
+  ordered by `order_index`, with `case_action_mappings.raw_action_id` used only
+  as a legacy fallback when no join rows exist.
+- `PUT /mappings` validates every submitted action ID against Webwright runs
+  owned by the selected case before changing mappings or edited actions.
+- A successful PUT replaces the selected case's mapping/join rows atomically,
+  removes stale links, and keeps legacy `raw_action_id` equal to the first
+  ordered action ID or `NULL` for an empty mapping.
+- Duplicate TC step indexes and duplicate action IDs within one step are
+  rejected instead of creating ambiguous ordered joins.
+
 ```sql
 CREATE TABLE case_action_mappings (
   id TEXT PRIMARY KEY,
@@ -367,6 +380,18 @@ Suggested `generated_file_origins.origin_type` values:
 - `structured_step`
 - `page_object`
 - `page_object_method`
+
+Runtime persistence contract:
+
+- the generator upserts and deduplicates to one active `generated_files` row per
+  project and relative path even where an existing runtime database predates
+  the documented uniqueness constraint;
+- metadata and the actual output hash are written after the file exists;
+- case-specific files receive their complete current origin set, while shared
+  page and mappings files receive the union of relevant case origins;
+- regeneration replaces origin rows deterministically so stale links and
+  duplicate path metadata do not survive;
+- `source_type` and `source_id` remain as a backward-compatible primary origin.
 
 ## Execution And Export
 

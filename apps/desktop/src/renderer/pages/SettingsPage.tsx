@@ -33,6 +33,7 @@ type AppSettings = {
     python?: string
     baseConfig?: string
     modelConfig?: string
+    modelName?: string
     outputRoot?: string
     apiProvider?: string
     [key: string]: unknown
@@ -69,6 +70,8 @@ export function SettingsPage() {
   const [apiKey, setApiKey] = useState('')
   const [health, setHealth] = useState('')
   const [validation, setValidation] = useState<HealthResponse | null>(null)
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [modelStatus, setModelStatus] = useState('Load available models to verify access for the selected provider key.')
   const qc = useQueryClient()
 
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.settings.get })
@@ -109,6 +112,32 @@ export function SettingsPage() {
       setValidation(res)
       setHealth(JSON.stringify(res, null, 2))
       qc.invalidateQueries({ queryKey: ['settings'] })
+    }
+  })
+
+  const loadModelsMut = useMutation({
+    mutationFn: async () => {
+      const body = JSON.parse(settingsText) as AppSettings
+      const provider = body.webwright?.apiProvider || 'openai'
+      if (apiKey) {
+        const stored = await window.electronAPI?.credentialSet('tc-studio', provider, apiKey)
+        if (!stored?.ok) {
+          throw new Error(stored?.message || 'Could not store the API key before loading models.')
+        }
+        setApiKey('')
+      }
+      const result = await window.electronAPI?.providerModels(provider)
+      if (!result) throw new Error('Model discovery is available in the desktop app only.')
+      if (!result.ok) throw new Error(result.message)
+      return result.models
+    },
+    onSuccess: (models) => {
+      setAvailableModels(models)
+      setModelStatus(`${models.length} compatible model(s) available for the stored key.`)
+    },
+    onError: (error) => {
+      setAvailableModels([])
+      setModelStatus(error instanceof Error ? error.message : 'Could not load provider models.')
     }
   })
 
@@ -214,9 +243,17 @@ export function SettingsPage() {
           <select
             className={`${inputClass} mt-1`}
             value={webwright.apiProvider || 'openai'}
-            onChange={(e) => applyPatch((draft) => {
-              draft.webwright = { ...(draft.webwright || {}), apiProvider: e.target.value }
-            })}
+            onChange={(e) => {
+              applyPatch((draft) => {
+                draft.webwright = {
+                  ...(draft.webwright || {}),
+                  apiProvider: e.target.value,
+                  modelName: ''
+                }
+              })
+              setAvailableModels([])
+              setModelStatus('Load available models to verify access for the selected provider key.')
+            }}
           >
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
@@ -282,6 +319,40 @@ export function SettingsPage() {
             })}
             placeholder="model_openai.yaml"
           />
+        </label>
+        <label className="block text-xs text-slate-400">
+          Model name override
+          <div className="mt-1 flex gap-2">
+            <input
+              className={inputClass}
+              list="webwright-model-options"
+              value={webwright.modelName || ''}
+              onChange={(e) => applyPatch((draft) => {
+                draft.webwright = { ...(draft.webwright || {}), modelName: e.target.value }
+              })}
+              placeholder="Use model config default"
+            />
+            <datalist id="webwright-model-options">
+              {availableModels.map((model) => <option key={model} value={model} />)}
+            </datalist>
+            <button
+              className="px-3 py-2 bg-slate-700 rounded text-sm shrink-0 disabled:opacity-50"
+              disabled={loadModelsMut.isPending}
+              type="button"
+              onClick={() => loadModelsMut.mutate()}
+            >
+              {loadModelsMut.isPending ? 'Loading...' : 'Load models'}
+            </button>
+          </div>
+          <span className={`mt-1 block text-xs ${
+            availableModels.length && webwright.modelName && !availableModels.includes(webwright.modelName)
+              ? 'text-amber-400'
+              : 'text-slate-500'
+          }`}>
+            {availableModels.length && webwright.modelName && !availableModels.includes(webwright.modelName)
+              ? `${webwright.modelName} is not available for the stored key. Select one of the ${availableModels.length} available models.`
+              : modelStatus}
+          </span>
         </label>
         <label className="block text-xs text-slate-400">
           Output root

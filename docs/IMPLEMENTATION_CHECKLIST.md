@@ -1,6 +1,6 @@
 ﻿# Implementation Checklist
 
-**Last updated:** 2026-06-04
+**Last updated:** 2026-06-05
 **Current phase:** Phase 1
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
@@ -23,7 +23,7 @@
 |----------|------|-------|
 | A. Infra | 33 | 33 |
 | B. Template | 20 | 20 |
-| C. Worker | 63 | 87 |
+| C. Worker | 66 | 87 |
 | D. GUI | 42 | 49 |
 | E. E2E | 9 | 12 |
 | F. Errors | 0 | 4 |
@@ -38,7 +38,7 @@ Scope checked: repository, spec docs under `docs/`, `npm run build`, worker `tes
 
 - **Shipped (runtime + structuring pass):** `RuntimeProfile` resolver, `settings.runtime`, unified health/validate/install, Webwright live readiness gate, DB-backed structuring (`structure/sync`, `structure/validate`), DB-backed `project_generator`, generated-template `pytest_plugins` + single pytest invocation, `ensure_generated_runtime`, Electron bundled env, `prepare-runtime.ps1` + `dist:win:full`, Setup/Settings bundled read-only paths, Runner **Install Runtime** UX. Spec: [RUNTIME_SPEC.md](./RUNTIME_SPEC.md).
 - **Build gate:** `npm run build` passes; I-06, I-07 closed.
-- **Spec gaps to keep open:** C7-10 stale/conflict detection, C7-12 selected raw refresh merge into existing structured entities, C8-06 deterministic regeneration guard, C8-09 selected TC incremental regeneration, C12-05..C12-07 and C12-09..C12-10 self-healing/raw-refresh/retire API flow, C2-04..C2-07 prompt preset/audit, C6-07 multi-action join API follow-up, C8-04 git-ready output, Webwright subprocess cancel (not only DB status).
+- **Spec gaps to keep open:** C7-10 stale/conflict detection, C7-12 selected raw refresh merge into existing structured entities, C8-06 deterministic regeneration guard, C8-09 selected TC incremental regeneration, C12-05..C12-07 and C12-09..C12-10 self-healing/raw-refresh/retire API flow, C2-04..C2-07 prompt preset/audit, C8-04 git-ready output, Webwright subprocess cancel (not only DB status).
 - **Installer verification resolved (2026-06-04):** clean `dist:win:full`, silent NSIS install into a new directory, fresh Electron user profile, installed bundled live health, installed-app real Webwright raw generation, generated project, and bundled Chromium Runner completion are recorded in RUNTIME_SPEC.
 - **Webwright packaging decision:** resolved by C3-08. Product/live `prepare-runtime` now defaults to vendored `third_party/webwright` with license/notice/version metadata; explicit external `WEBWRIGHT_SOURCE` + `WEBWRIGHT_SOURCE_VERSION` or pinned `WEBWRIGHT_PIP_PACKAGE` remains supported; mock staging requires explicit opt-in.
 
@@ -49,8 +49,8 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - **Resolved:** Webwright live-run readiness now rejects placeholder `base.yaml` roots without an importable `webwright.run.cli` (C3-07), and live bundled runtime staging now uses vendored Webwright by default while still allowing explicit external source/package overrides (C3-08).
 - **Gap:** raw script generation and generated project execution both need Python + Playwright browser assets. RuntimeProfile wires paths, but installer staging and in-app bootstrap must prove Webwright, pytest-playwright, and browser binaries are actually available before running.
 - **Gap:** generated-template has a minimal pytest contract only. It needs explicit fixture policy for browser/context/page, `base_url`, auth/storage state, trace/screenshot/video capture, env config, browser selection, and artifact paths.
-- **Gap:** raw script to structured project conversion is DB-backed but still shallow. Page object method body planning must support multi-action steps, assertions, waits, selects/checks, test data/env values, and stable source/origin tracking.
-- **Gap:** generated file source tracking writes `source_type/source_id/content_hash`, but `GeneratedFileOrigin` links and stale/conflict detection are not wired. Follow-up work must prevent silent overwrite of edited generated code.
+- **Resolved:** C7-11 now compiles ordered multi-action mappings into deterministic PageObjectMethod body plans covering assertions, waits, select/check/upload, value templates, source IDs, and explicit review flags.
+- **Resolved/Gap:** C8-07 now persists complete `GeneratedFileOrigin` links and replaces stale origin sets on regeneration; C7-10/C8-06 stale/conflict detection remains open to prevent silent overwrite of edited generated code.
 - **Gap:** selected TC raw refresh is not yet a first-class maintenance operation. In an already structured/generated project, users must be able to pick a few TCs, rerun Webwright for only those TCs, merge the new raw actions into existing structured entities, then incrementally update generated code while preserving unrelated cases.
 
 ---
@@ -200,7 +200,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [ ] **C6-04** assertion/wait 추가 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-03
 - [x] **C6-05** normalized step / POM method 이름 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-03
 - [x] **C6-06** Mapping API — §7.4 | Phase 1 | Layer: Worker | Depends: C6-01
-- [ ] **C6-07** TC step ↔ multiple raw actions join 저장 — Spec: DB_SCHEMA, STRUCTURING_SPEC | Phase 1 | Layer: Worker | Depends: A2-08, C6-06
+- [x] **C6-07** TC step ↔ multiple raw actions join 저장 — Spec: DB_SCHEMA, STRUCTURING_SPEC | Phase 1 | Layer: Worker | Depends: A2-08, C6-06 (verified 2026-06-04: Mapping GET/PUT round-trips ordered `action_ids`, atomically replaces/removes join rows, aligns legacy `raw_action_id`, and rejects invalid/foreign action IDs before mutation; focused mapping tests passed)
 
 ### C7. Structuring Service — §5.10
 
@@ -214,7 +214,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C7-08** `PageObjectMethod` plan persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-10, C7-07 (runtime+structuring pass: method plans/body json persisted and linked to steps)
 - [x] **C7-09** structure validation API — Spec: STRUCTURING_SPEC, API_SPEC | Phase 1 | Layer: Worker | Depends: C7-08 (runtime+structuring pass: `/projects/{project_id}/cases/{case_id}/structure/validate`)
 - [ ] **C7-10** stale/conflict detection for regeneration — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: C7-09
-- [ ] **C7-11** structured method body planner coverage — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C5-03, C6-07, C7-08 (compile reviewed raw actions into deterministic method body plans covering multi-action steps, assertions, waits, select/check/upload, data/env placeholders, and unsupported-action review flags)
+- [x] **C7-11** structured method body planner coverage — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C5-03, C6-07, C7-08 (verified 2026-06-04: structuring compiles ordered multi-run/multi-action mappings into deterministic traceable body plans, preserves assertion/wait/select/check/upload selectors and value templates, refreshes existing POM plans, and forces review for unsupported/missing actions and hard waits; focused and related tests passed)
 - [ ] **C7-12** selected raw refresh merge into existing structure — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-11, C8-07 (when a user reruns Webwright for selected already-structured TCs, compare the new RawAction set with existing mappings/StructuredStep/PageObjectMethod plans, preserve reviewed names and user intent where safe, update changed method body plans, and mark ambiguous changes as needs_review/conflict instead of rebuilding from scratch)
 
 ### C8. Project Generator Service — §5.11
@@ -225,7 +225,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [ ] **C8-04** Git repo 가능 출력 — §5.11 | Phase 1 | Layer: Worker | Depends: C8-01
 - [x] **C8-05** generated file origin/hash/status tracking — Spec: DB_SCHEMA | Phase 1 | Layer: Worker | Depends: A2-11, C8-02 (runtime+structuring pass: source_type/source_id/content_hash/status written on generation)
 - [ ] **C8-06** deterministic regeneration + conflict guard — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C8-05, C7-10
-- [ ] **C8-07** `GeneratedFileOrigin` link persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: C8-05, C7-11 (write origin links for TestCase, StructuredFlow, StructuredStep, PageObjectMethod, RawAction/Mapping where applicable instead of relying only on single `source_type/source_id`)
+- [x] **C8-07** `GeneratedFileOrigin` link persistence — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: C8-05, C7-11 (verified 2026-06-05: generation upserts one metadata row per project/path after writing files, persists complete case/flow/step/POM/page/mapping/raw/run origin links, aggregates shared-file origins, and replaces stale origins and duplicate metadata rows; focused and related traceability tests passed)
 - [ ] **C8-08** generated-project runtime manifest — Spec: GENERATED_PROJECT_SPEC, RUNTIME_SPEC | Phase 2 | Layer: Worker | Depends: C8-03, B3-04 (write a runtime manifest documenting Python package requirements, Playwright browser expectation, fixture policy, and supported standalone/Studio launch commands)
 - [ ] **C8-09** selected TC incremental regeneration — Spec: STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C8-06, C8-07, C7-12 (when `caseIds` targets a subset, regenerate only affected tests/flows/page methods/cases.yaml entries from the merged structured state; preserve unrelated generated cases and never wipe the whole generated project unless full regeneration is explicitly requested)
 - [ ] **C8-10** TC retire/delete generated artifact cleanup — Spec: STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C8-07, C8-09 (after human confirmation, retire/delete a TC and remove or mark obsolete generated tests/flows/mappings/page methods only when no other case still references them)

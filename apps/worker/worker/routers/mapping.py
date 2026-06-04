@@ -6,7 +6,7 @@ from sqlmodel import Session
 from worker.core.database import get_session
 from worker.models.db import TestCase, WebwrightRun
 from worker.models.schemas import MappingUpdateRequest
-from worker.services.mapping import auto_map_case, get_actions, get_mappings, update_mappings
+from worker.services.mapping import MappingValidationError, auto_map_case, get_actions, get_mappings, update_mappings
 from sqlmodel import select
 
 router = APIRouter(prefix="/projects/{project_id}/cases/{case_id}", tags=["mapping"])
@@ -41,7 +41,10 @@ def list_mappings(project_id: str, case_id: str, session: Session = Depends(get_
 @router.put("/mappings")
 def save_mappings(project_id: str, case_id: str, request: MappingUpdateRequest, session: Session = Depends(get_session)):
     case = _get_case(session, project_id, case_id)
-    return update_mappings(session, case, request)
+    try:
+        return update_mappings(session, case, request)
+    except MappingValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/normalize")

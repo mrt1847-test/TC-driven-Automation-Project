@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import base64
@@ -588,3 +588,4 @@ class BaseModel:
                 "model_type": f"{self.__class__.__module__}.{self.__class__.__name__}",
             }
         }
+

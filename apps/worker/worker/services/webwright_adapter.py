@@ -30,6 +30,9 @@ ERROR_PATTERNS = {
 }
 
 MOCK_START_URL = "data:text/html,%3Ca%20href%3D%22%23done%22%3EMore%20information%3C%2Fa%3E"
+HEARTBEAT_INTERVAL_SECONDS = 15
+PIPE_DRAIN_TIMEOUT_SECONDS = 2
+PROCESS_STOP_TIMEOUT_SECONDS = 10
 
 
 def classify_error(stderr: str) -> str:
@@ -72,6 +75,68 @@ def _relative_artifact(output_root: Path, path: Path | None) -> str | None:
         return str(path)
 
 
+def _append_log(path: Path, text: str) -> None:
+    if not text:
+        return
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+async def _stream_pipe(
+    stream: asyncio.StreamReader,
+    job_id: str,
+    log_path: Path,
+    chunks: list[str],
+) -> None:
+    with log_path.open("a", encoding="utf-8") as handle:
+        while True:
+            line = await stream.readline()
+            if not line:
+                return
+            text = mask_secrets(line.decode("utf-8", errors="replace"))
+            chunks.append(text)
+            handle.write(text)
+            handle.flush()
+            message = text.rstrip("\r\n")
+            if message:
+                await log_streams.publish(job_id, message)
+
+
+async def _publish_heartbeat(
+    process: asyncio.subprocess.Process,
+    job_id: str,
+    automation_key: str,
+) -> None:
+    elapsed = 0
+    while process.returncode is None:
+        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+        elapsed += HEARTBEAT_INTERVAL_SECONDS
+        if process.returncode is None:
+            await log_streams.publish(job_id, f"[webwright] {automation_key} still running ({elapsed}s elapsed)")
+
+
+async def _stop_process(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        await asyncio.wait_for(process.wait(), timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        return
+
+
+async def _finish_background_tasks(tasks: list[asyncio.Task[Any]], timeout: float) -> bool:
+    if not tasks:
+        return True
+    _, pending = await asyncio.wait(tasks, timeout=timeout)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    return not pending
+
+
 async def run_webwright_for_case(session: Session, project_id: str, case: TestCase, model_config: str, job_id: str) -> WebwrightRun:
     profile = resolve_runtime()
     normalized = case_to_normalized(case)
@@ -110,6 +175,7 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
     if profile.webwright_step_limit:
         config_args.append(f"agent.step_limit={profile.webwright_step_limit}")
     subprocess_env = profile.subprocess_env()
+    subprocess_env.setdefault("PYTHONUNBUFFERED", "1")
 
     cmd = [
         python_path, "-m", "webwright.run.cli",
@@ -124,6 +190,18 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
     ])
 
     await log_streams.publish(job_id, f"[webwright] Starting run for {case.automation_key}")
+
+    stdout_path = output_root / "stdout.log"
+    stderr_path = output_root / "stderr.log"
+    stdout_path.write_text("", encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    process: asyncio.subprocess.Process | None = None
+    stream_tasks: list[asyncio.Task[Any]] = []
+    heartbeat_task: asyncio.Task[Any] | None = None
+    timed_out = False
+    return_code: int | None = None
 
     try:
         if execution_mode == "wsl":
@@ -145,33 +223,62 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
                 env=subprocess_env,
             )
 
-        timed_out = False
+        await log_streams.publish(
+            job_id,
+            f"[webwright] Process started for {case.automation_key} (pid={process.pid}, timeout={profile.webwright_run_timeout_seconds}s)",
+        )
+        assert process.stdout is not None
+        assert process.stderr is not None
+        stream_tasks = [
+            asyncio.create_task(_stream_pipe(process.stdout, job_id, stdout_path, stdout_chunks)),
+            asyncio.create_task(_stream_pipe(process.stderr, job_id, stderr_path, stderr_chunks)),
+        ]
+        heartbeat_task = asyncio.create_task(_publish_heartbeat(process, job_id, case.automation_key))
+
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
+            return_code = await asyncio.wait_for(
+                process.wait(),
                 timeout=profile.webwright_run_timeout_seconds,
             )
         except asyncio.TimeoutError:
             timed_out = True
-            process.kill()
-            stdout, stderr = await process.communicate()
-        stdout_text = mask_secrets(stdout.decode("utf-8", errors="replace"))
-        stderr_text = mask_secrets(stderr.decode("utf-8", errors="replace"))
+            await _stop_process(process)
+            return_code = process.returncode
+        finally:
+            if heartbeat_task:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+        pipes_closed = await _finish_background_tasks(stream_tasks, PIPE_DRAIN_TIMEOUT_SECONDS)
+        stderr_text = "".join(stderr_chunks)
+        if not pipes_closed:
+            pipe_message = "[webwright] Output pipes remained open after process exit; continuing with captured output."
+            stderr_text += ("\n" if stderr_text and not stderr_text.endswith("\n") else "") + pipe_message + "\n"
+            _append_log(stderr_path, pipe_message + "\n")
+            await log_streams.publish(job_id, pipe_message)
         if timed_out:
-            stderr_text = (stderr_text + "\n" if stderr_text else "") + (
-                f"[timeout] Webwright exceeded {profile.webwright_run_timeout_seconds}s; harvesting available artifacts."
-            )
-        (output_root / "stdout.log").write_text(stdout_text, encoding="utf-8")
-        (output_root / "stderr.log").write_text(stderr_text, encoding="utf-8")
-        await log_streams.publish(job_id, stdout_text)
-        if stderr_text:
-            await log_streams.publish(job_id, stderr_text)
+            timeout_message = f"[timeout] Webwright exceeded {profile.webwright_run_timeout_seconds}s; harvesting available artifacts."
+            stderr_text += ("\n" if stderr_text and not stderr_text.endswith("\n") else "") + timeout_message + "\n"
+            _append_log(stderr_path, timeout_message + "\n")
+            await log_streams.publish(job_id, timeout_message)
+        elif return_code not in {None, 0}:
+            exit_message = f"[webwright] Process exited with code {return_code} for {case.automation_key}."
+            stderr_text += ("\n" if stderr_text and not stderr_text.endswith("\n") else "") + exit_message + "\n"
+            _append_log(stderr_path, exit_message + "\n")
+            await log_streams.publish(job_id, exit_message)
+        else:
+            await log_streams.publish(job_id, f"[webwright] Process finished for {case.automation_key}")
 
         final_script = _find_webwright_artifact(output_root, "final_script.py")
         trajectory = _find_webwright_artifact(output_root, "trajectory.json")
 
         if not final_script:
             run.status = WebwrightRunStatus.failed.value
+            if not stderr_text:
+                missing_artifact_message = "[error] Webwright exited without final_script.py or diagnostic output."
+                stderr_text = missing_artifact_message + "\n"
+                _append_log(stderr_path, stderr_text)
+                await log_streams.publish(job_id, missing_artifact_message)
             run.error_message = "timeout" if timed_out else classify_error(stderr_text)
             case.status = "webwright_failed"
         else:
@@ -196,14 +303,40 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
                 "stderr": "stderr.log",
             },
             "timedOut": timed_out,
+            "returnCode": return_code,
         }
         (output_root / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     except FileNotFoundError as exc:
+        if process is not None:
+            await _stop_process(process)
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+        await _finish_background_tasks(
+            [*stream_tasks, *([heartbeat_task] if heartbeat_task is not None else [])],
+            PIPE_DRAIN_TIMEOUT_SECONDS,
+        )
         run.status = WebwrightRunStatus.failed.value
         run.error_message = "webwright_not_found"
         case.status = "webwright_failed"
-        await log_streams.publish(job_id, f"[error] {exc}")
+        error_message = f"[error] {exc}"
+        _append_log(stderr_path, error_message + "\n")
+        await log_streams.publish(job_id, error_message)
+    except Exception as exc:
+        if process is not None:
+            await _stop_process(process)
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+        await _finish_background_tasks(
+            [*stream_tasks, *([heartbeat_task] if heartbeat_task is not None else [])],
+            PIPE_DRAIN_TIMEOUT_SECONDS,
+        )
+        error_message = mask_secrets(f"[error] {type(exc).__name__}: {exc}")
+        _append_log(stderr_path, error_message + "\n")
+        await log_streams.publish(job_id, error_message)
+        run.status = WebwrightRunStatus.failed.value
+        run.error_message = classify_error(error_message)
+        case.status = "webwright_failed"
 
     run.ended_at = datetime.utcnow()
     session.add(run)

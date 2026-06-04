@@ -28,7 +28,7 @@ export const api = {
   settings: {
     get: () => request<Record<string, unknown>>('/settings'),
     update: (body: unknown) => request('/settings', { method: 'PUT', body: JSON.stringify(body) }),
-    validate: () => request('/settings/validate')
+    validate: () => request('/settings/validate', { method: 'POST' })
   },
   projects: {
     list: () => request<Project[]>('/projects'),

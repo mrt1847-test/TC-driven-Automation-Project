@@ -1,6 +1,6 @@
 # Structuring Spec
 
-Last aligned: 2026-06-04
+Last aligned: 2026-06-05
 
 This document defines how Webwright raw output becomes a maintainable
 Playwright pytest project.
@@ -88,6 +88,16 @@ Reviewed mapping connects TC steps to one or more raw actions.
 One TC step may map to multiple raw actions. `CaseActionMappingAction` should
 preserve ordered joins.
 
+Mapping review API requirements:
+
+- persist and return each step's `action_ids` in submitted join order;
+- validate action ownership against the selected case's Webwright runs before
+  replacing mappings;
+- replace or remove stale joins atomically, without partially rewriting a
+  reviewed case on validation failure;
+- keep legacy `CaseActionMapping.raw_action_id` aligned with the first ordered
+  action for backward compatibility.
+
 ## Step 3: Structured Flow
 
 `StructuredFlow` is a versioned automation intent model for a TC.
@@ -145,6 +155,19 @@ Planner requirements:
 - mark unsupported actions as `custom` and require review before generation;
 - keep method names deterministic.
 
+Persisted planner entry contract:
+
+- `order` follows `CaseActionMappingAction.order_index`;
+- `sourceMappingId` and `sourceRawActionId` are present on every entry;
+- `selector`, `value`, and `target` preserve the extracted values without
+  rewriting data/env placeholders;
+- supported assertion, wait, select, check, upload, and interaction actions
+  remain explicit action types;
+- unsupported/missing actions and hard waits set `requiresReview=true` with a
+  stable `reviewReason`;
+- any review-required entry keeps the PageObjectMethod in `draft`, marks the
+  StructuredFlow `needs_review`, and is reported by structure validation.
+
 ## Step 5: Code Generation
 
 The generator reads structured DB entities:
@@ -181,6 +204,17 @@ Recommended origins:
 - CaseActionMapping;
 - RawAction;
 - WebwrightRun.
+
+Generation persistence contract:
+
+- write generated-file metadata after the corresponding file exists so
+  `content_hash` describes the actual output;
+- keep one active `GeneratedFile` row per project and relative path;
+- attach the complete relevant origin set to case-specific files;
+- attach the union of current relevant case origins to shared page and mappings
+  files;
+- replace the origin set on regeneration, removing stale origins and duplicate
+  metadata rows while retaining the primary source fields for compatibility.
 
 This is required for:
 
@@ -340,15 +374,21 @@ Done:
 - C5-03 action extraction covers the core 17 action types plus file upload and
   drag interactions, preserving unsupported Playwright calls as reviewable
   `custom_code`.
+- C6-07 Mapping GET/PUT round-trips ordered multi-action joins, atomically
+  replaces/removes stale links, validates selected-case action ownership, and
+  keeps the legacy first-action field aligned.
+- C7-11 structuring compiles ordered mapping joins into deterministic,
+  source-traceable PageObjectMethod body plans and preserves unsupported or
+  hard-wait actions as explicit review-required entries.
+- C8-07 generation persists complete `GeneratedFileOrigin` sets, aggregates
+  shared-file origins, and replaces stale origins and duplicate path metadata
+  during regeneration.
 
 Open:
 
-- C6-07: ordered multi-action mapping API follow-up.
 - C7-10: stale/conflict detection.
-- C7-11: structured method body planner coverage.
 - C7-12: selected raw refresh merge into existing structure.
 - C8-06: deterministic regeneration guard.
-- C8-07: `GeneratedFileOrigin` link persistence.
 - C8-09: selected TC incremental regeneration.
 - C8-10: TC retire/delete generated artifact cleanup.
 - C12-09: selected TC Webwright refresh regeneration flow.

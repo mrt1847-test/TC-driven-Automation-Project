@@ -14,13 +14,18 @@ from worker.core.config import load_settings, new_id
 from worker.core.runtime import resolve_runtime
 from worker.models.db import (
     GeneratedFile,
+    GeneratedFileOrigin,
     PageObjectMethod,
+    RawAction,
     StructuredFlowStatus,
     TestCase,
     WebwrightRun,
 )
 from worker.services.mapping import get_mappings
 from worker.services.structuring_service import get_flow_steps, get_latest_flow, sync_structured_entities
+
+
+Origin = tuple[str, str]
 
 
 def _snake(name: str) -> str:
@@ -90,6 +95,100 @@ def _method_body(pom: PageObjectMethod) -> list[str]:
     return lines
 
 
+def _case_origins(session: Session, case: TestCase, flow, steps) -> set[Origin]:
+    origins: set[Origin] = {("test_case", case.id)}
+    if flow and flow.id:
+        origins.add(("structured_flow", flow.id))
+
+    method_ids: set[str] = set()
+    mapping_ids: set[str] = set()
+    for step in steps:
+        if step.id:
+            origins.add(("structured_step", step.id))
+        if step.page_object_method_id:
+            method_ids.add(step.page_object_method_id)
+        if step.mapping_id:
+            mapping_ids.add(step.mapping_id)
+
+    methods = [
+        session.get(PageObjectMethod, method_id)
+        for method_id in sorted(method_ids)
+    ]
+    for method in methods:
+        if not method or not method.id:
+            continue
+        origins.add(("page_object_method", method.id))
+        origins.add(("page_object", method.page_object_id))
+        if method.source_mapping_id:
+            mapping_ids.add(method.source_mapping_id)
+
+    action_ids: set[str] = set()
+    for mapping in get_mappings(session, case.id):
+        if mapping.id:
+            mapping_ids.add(mapping.id)
+        action_ids.update(mapping.action_ids)
+    origins.update(("mapping", mapping_id) for mapping_id in mapping_ids)
+
+    if action_ids:
+        actions = session.exec(select(RawAction).where(RawAction.id.in_(action_ids))).all()
+        for action in actions:
+            if action.id:
+                origins.add(("raw_action", action.id))
+            if action.webwright_run_id:
+                origins.add(("webwright_run", action.webwright_run_id))
+    return origins
+
+
+def _replace_generated_file(
+    session: Session,
+    *,
+    project_id: str,
+    relative_path: str,
+    content_path: Path,
+    automation_key: str | None,
+    primary_origin: Origin | None,
+    origins: set[Origin],
+) -> GeneratedFile:
+    rows = session.exec(
+        select(GeneratedFile)
+        .where(
+            GeneratedFile.project_id == project_id,
+            GeneratedFile.relative_path == relative_path,
+        )
+        .order_by(GeneratedFile.updated_at.desc(), GeneratedFile.created_at.desc(), GeneratedFile.id.desc())
+    ).all()
+    generated_file = rows[0] if rows else GeneratedFile(
+        id=new_id("gf"),
+        project_id=project_id,
+        relative_path=relative_path,
+    )
+
+    for row in rows:
+        for origin in session.exec(
+            select(GeneratedFileOrigin).where(GeneratedFileOrigin.generated_file_id == row.id)
+        ).all():
+            session.delete(origin)
+    for duplicate in rows[1:]:
+        session.delete(duplicate)
+
+    generated_file.automation_key = automation_key
+    generated_file.source_type = primary_origin[0] if primary_origin else None
+    generated_file.source_id = primary_origin[1] if primary_origin else None
+    generated_file.content_hash = hashlib.sha256(content_path.read_bytes()).hexdigest()
+    generated_file.status = "generated"
+    generated_file.updated_at = datetime.utcnow()
+    session.add(generated_file)
+    session.flush()
+
+    for origin_type, origin_id in sorted(origins):
+        session.add(GeneratedFileOrigin(
+            generated_file_id=generated_file.id,
+            origin_type=origin_type,
+            origin_id=origin_id,
+        ))
+    return generated_file
+
+
 def generate_project(session: Session, project_id: str, project_root: Path, case_ids: list[str] | None = None) -> Path:
     settings = load_settings()
     profile = resolve_runtime(settings)
@@ -104,13 +203,16 @@ def generate_project(session: Session, project_id: str, project_root: Path, case
     query = select(TestCase).where(
         TestCase.project_id == project_id,
         TestCase.status.in_(["mapped", "needs_review", "structured", "generated"]),
-    )
+    ).order_by(TestCase.automation_key, TestCase.id)
     cases = session.exec(query).all()
     if case_ids:
         cases = [c for c in cases if c.id in case_ids]
 
     cases_yaml = {"cases": []}
     page_methods: dict[str, list[str]] = {}
+    file_origins: dict[str, set[Origin]] = {}
+    file_automation_keys: dict[str, set[str]] = {}
+    file_primary_origins: dict[str, Origin] = {}
 
     for case in cases:
         run = session.exec(
@@ -121,6 +223,7 @@ def generate_project(session: Session, project_id: str, project_root: Path, case
         sync_structured_entities(session, project_id, case, run)
         flow = get_latest_flow(session, case.id)
         steps = get_flow_steps(session, flow.id) if flow else []
+        origins = _case_origins(session, case, flow, steps)
 
         flow_class = flow.name if flow else "".join(part.capitalize() for part in case.automation_key.split("_")) + "Flow"
         flow_file = f"flows/{_snake(case.automation_key)}_flow.py"
@@ -168,6 +271,12 @@ def {test_fn}(page: Page):
         test_path.parent.mkdir(parents=True, exist_ok=True)
         test_path.write_text(test_content, encoding="utf-8")
 
+        primary_origin = ("structured_flow", flow.id) if flow and flow.id else ("test_case", case.id)
+        for relative_path in [test_file, flow_file, "pages/generated_page.py", "mappings/cases.yaml"]:
+            file_origins.setdefault(relative_path, set()).update(origins)
+            file_automation_keys.setdefault(relative_path, set()).add(case.automation_key)
+            file_primary_origins.setdefault(relative_path, primary_origin)
+
         source_loc = json.loads(case.source_location_json or "{}")
         cases_yaml["cases"].append({
             "automationKey": case.automation_key,
@@ -191,21 +300,6 @@ def {test_fn}(page: Page):
             flow.status = StructuredFlowStatus.generated.value
             session.add(flow)
 
-        for rel in [test_file, flow_file, "pages/generated_page.py", "mappings/cases.yaml"]:
-            content_path = output / rel
-            file_hash = hashlib.sha256(content_path.read_bytes()).hexdigest() if content_path.exists() else None
-            session.add(GeneratedFile(
-                id=new_id("gf"),
-                project_id=project_id,
-                relative_path=rel,
-                automation_key=case.automation_key,
-                content_hash=file_hash,
-                status="generated",
-                source_type="structured_flow",
-                source_id=flow.id if flow else None,
-                updated_at=datetime.utcnow(),
-            ))
-
     page_path = output / "pages" / "generated_page.py"
     page_path.parent.mkdir(parents=True, exist_ok=True)
     page_lines = ["class GeneratedPage:", "    def __init__(self, page):", "        self.page = page", ""]
@@ -216,6 +310,18 @@ def {test_fn}(page: Page):
     mapping_path = output / "mappings" / "cases.yaml"
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(yaml.dump(cases_yaml, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    for relative_path in sorted(file_origins):
+        automation_keys = file_automation_keys[relative_path]
+        _replace_generated_file(
+            session,
+            project_id=project_id,
+            relative_path=relative_path,
+            content_path=output / relative_path,
+            automation_key=next(iter(automation_keys)) if len(automation_keys) == 1 else None,
+            primary_origin=file_primary_origins.get(relative_path),
+            origins=file_origins[relative_path],
+        )
 
     session.commit()
     return output

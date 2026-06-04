@@ -14,6 +14,9 @@ export interface ElectronAPI {
     service: string,
     account: string
   ) => Promise<{ ok: true; password: string } | { ok: false; message: string }>
+  providerModels: (
+    provider: string
+  ) => Promise<{ ok: true; provider: string; models: string[] } | { ok: false; provider: string; message: string }>
 }
 
 declare global {

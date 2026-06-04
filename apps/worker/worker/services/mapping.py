@@ -5,8 +5,12 @@ from slugify import slugify
 from sqlmodel import Session, select
 
 from worker.core.config import new_id
-from worker.models.db import CaseActionMapping, CaseActionMappingAction, RawAction, TestCase
+from worker.models.db import CaseActionMapping, CaseActionMappingAction, RawAction, TestCase, WebwrightRun
 from worker.models.schemas import ActionItem, MappingItem, MappingUpdateRequest
+
+
+class MappingValidationError(ValueError):
+    pass
 
 
 def _clear_mappings(session: Session, case_id: str) -> None:
@@ -41,6 +45,51 @@ def _add_mapping(session: Session, case_id: str, item: MappingItem) -> CaseActio
             order_index=order_index,
         ))
     return mapping
+
+
+def _case_actions_by_id(session: Session, case: TestCase) -> dict[str, RawAction]:
+    run_ids = session.exec(
+        select(WebwrightRun.id).where(
+            WebwrightRun.project_id == case.project_id,
+            WebwrightRun.test_case_id == case.id,
+        )
+    ).all()
+    if not run_ids:
+        return {}
+
+    actions = session.exec(select(RawAction).where(RawAction.webwright_run_id.in_(run_ids))).all()
+    return {action.id: action for action in actions if action.id}
+
+
+def _validate_mapping_update(
+    session: Session,
+    case: TestCase,
+    request: MappingUpdateRequest,
+) -> dict[str, RawAction]:
+    action_by_id = _case_actions_by_id(session, case)
+    seen_step_indexes: set[int] = set()
+    requested_action_ids: set[str] = set()
+
+    for mapping in request.mappings:
+        if mapping.tc_step_index in seen_step_indexes:
+            raise MappingValidationError(f"Duplicate TC step index: {mapping.tc_step_index}")
+        seen_step_indexes.add(mapping.tc_step_index)
+
+        if len(mapping.action_ids) != len(set(mapping.action_ids)):
+            raise MappingValidationError(
+                f"Duplicate action IDs for TC step {mapping.tc_step_index}"
+            )
+        requested_action_ids.update(mapping.action_ids)
+
+    if request.actions:
+        requested_action_ids.update(action.id for action in request.actions if action.id)
+
+    invalid_action_ids = sorted(requested_action_ids - action_by_id.keys())
+    if invalid_action_ids:
+        raise MappingValidationError(
+            f"Action IDs do not belong to case {case.id}: {', '.join(invalid_action_ids)}"
+        )
+    return action_by_id
 
 
 def auto_map_case(session: Session, case: TestCase, run_id: str) -> tuple[list[MappingItem], str]:
@@ -134,26 +183,31 @@ def get_actions(session: Session, run_id: str) -> list[ActionItem]:
 
 
 def update_mappings(session: Session, case: TestCase, request: MappingUpdateRequest) -> list[MappingItem]:
-    _clear_mappings(session, case.id)
+    action_by_id = _validate_mapping_update(session, case, request)
 
-    if request.actions:
-        run_actions = session.exec(select(RawAction).where(RawAction.automation_key == case.automation_key)).all()
-        action_by_id = {a.id: a for a in run_actions}
-        for action in request.actions:
-            if action.id and action.id in action_by_id:
-                db = action_by_id[action.id]
-                db.type = action.type
-                db.selector = action.selector
-                db.value = action.value
-                db.target = action.target
-                db.order_index = action.order_index
-                session.add(db)
+    try:
+        _clear_mappings(session, case.id)
 
-    for item in request.mappings:
-        _add_mapping(session, case.id, item)
+        if request.actions:
+            for action in request.actions:
+                if action.id:
+                    db = action_by_id[action.id]
+                    db.type = action.type
+                    db.selector = action.selector
+                    db.value = action.value
+                    db.target = action.target
+                    db.order_index = action.order_index
+                    session.add(db)
 
-    unmapped = [m for m in request.mappings if not m.action_ids]
-    case.status = "needs_review" if unmapped else "mapped"
-    session.add(case)
-    session.commit()
-    return request.mappings
+        for item in request.mappings:
+            _add_mapping(session, case.id, item)
+
+        unmapped = [mapping for mapping in request.mappings if not mapping.action_ids]
+        case.status = "needs_review" if not request.mappings or unmapped else "mapped"
+        session.add(case)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    return get_mappings(session, case.id)

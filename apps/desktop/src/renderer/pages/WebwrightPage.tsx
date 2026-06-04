@@ -6,6 +6,7 @@ import { useAppStore } from '@/store/appStore'
 type AppSettings = {
   webwright?: {
     apiProvider?: string
+    modelName?: string
     promptComposer?: PromptComposerSettings
     [key: string]: unknown
   }
@@ -158,6 +159,9 @@ export function WebwrightPage() {
   const [selected, setSelected] = useState<string[]>([])
   const [apiProvider, setApiProvider] = useState('openai')
   const [apiKey, setApiKey] = useState('')
+  const [modelName, setModelName] = useState('')
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [modelStatus, setModelStatus] = useState('Load available models to verify access for the selected provider key.')
   const [llmCheck, setLlmCheck] = useState<LlmCheckState>({
     status: 'idle',
     message: 'Provider credentials not checked yet.'
@@ -190,6 +194,7 @@ export function WebwrightPage() {
   useEffect(() => {
     const savedProvider = (settings as AppSettings | undefined)?.webwright?.apiProvider
     if (savedProvider) setApiProvider(savedProvider)
+    setModelName((settings as AppSettings | undefined)?.webwright?.modelName || '')
     const promptComposer = (settings as AppSettings | undefined)?.webwright?.promptComposer
     setBatchPrompt(promptComposer?.batchPrompt || '')
     setCasePromptOverrides(promptComposer?.caseOverrides || {})
@@ -242,7 +247,8 @@ export function WebwrightPage() {
         ...current,
         webwright: {
           ...(current.webwright || {}),
-          apiProvider
+          apiProvider,
+          modelName
         }
       }
       const saved = await api.settings.update(next) as AppSettings
@@ -270,6 +276,30 @@ export function WebwrightPage() {
         status: 'error',
         message: error instanceof Error ? error.message : 'Provider credential save failed.'
       })
+    }
+  })
+
+  const loadModelsMut = useMutation({
+    mutationFn: async () => {
+      if (apiKey) {
+        const stored = await window.electronAPI?.credentialSet('tc-studio', apiProvider, apiKey)
+        if (!stored?.ok) {
+          throw new Error(stored?.message || 'Could not store the API key before loading models.')
+        }
+        setApiKey('')
+      }
+      const result = await window.electronAPI?.providerModels(apiProvider)
+      if (!result) throw new Error('Model discovery is available in the desktop app only.')
+      if (!result.ok) throw new Error(result.message)
+      return result.models
+    },
+    onSuccess: (models) => {
+      setAvailableModels(models)
+      setModelStatus(`${models.length} compatible model(s) available for the stored key.`)
+    },
+    onError: (error) => {
+      setAvailableModels([])
+      setModelStatus(error instanceof Error ? error.message : 'Could not load provider models.')
     }
   })
 
@@ -373,6 +403,9 @@ export function WebwrightPage() {
               value={apiProvider}
               onChange={(e) => {
                 setApiProvider(e.target.value)
+                setModelName('')
+                setAvailableModels([])
+                setModelStatus('Load available models to verify access for the selected provider key.')
                 setLlmCheck({ status: 'idle', message: 'Provider credentials not checked yet.' })
               }}
             >
@@ -394,16 +427,36 @@ export function WebwrightPage() {
               placeholder="Stored in OS credential store"
             />
           </label>
+          <label className="min-w-64 flex-[2] text-xs text-slate-400">
+            Model
+            <input
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-slate-100"
+              list="webwright-run-model-options"
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              placeholder="Use model config default"
+            />
+            <datalist id="webwright-run-model-options">
+              {availableModels.map((model) => <option key={model} value={model} />)}
+            </datalist>
+          </label>
           <button
             className="px-3 py-2 bg-slate-700 rounded text-sm disabled:opacity-50"
-            disabled={saveLlmMut.isPending || checkLlmMut.isPending}
+            disabled={loadModelsMut.isPending || saveLlmMut.isPending || checkLlmMut.isPending}
+            onClick={() => loadModelsMut.mutate()}
+          >
+            {loadModelsMut.isPending ? 'Loading...' : 'Load models'}
+          </button>
+          <button
+            className="px-3 py-2 bg-slate-700 rounded text-sm disabled:opacity-50"
+            disabled={loadModelsMut.isPending || saveLlmMut.isPending || checkLlmMut.isPending}
             onClick={() => saveLlmMut.mutate()}
           >
             {saveLlmMut.isPending ? 'Saving...' : 'Save LLM'}
           </button>
           <button
             className="px-3 py-2 bg-blue-600 rounded text-sm disabled:opacity-50"
-            disabled={saveLlmMut.isPending || checkLlmMut.isPending}
+            disabled={loadModelsMut.isPending || saveLlmMut.isPending || checkLlmMut.isPending}
             onClick={() => checkLlmMut.mutate()}
           >
             {checkLlmMut.isPending ? 'Checking...' : 'Check Key'}
@@ -411,6 +464,15 @@ export function WebwrightPage() {
         </div>
         <div className={`mt-2 text-xs ${llmCheck.status === 'ok' ? 'text-green-400' : llmCheck.status === 'error' ? 'text-red-400' : 'text-slate-500'}`}>
           {llmCheck.message}
+        </div>
+        <div className={`mt-1 text-xs ${
+          availableModels.length && modelName && !availableModels.includes(modelName)
+            ? 'text-amber-400'
+            : 'text-slate-500'
+        }`}>
+          {availableModels.length && modelName && !availableModels.includes(modelName)
+            ? `${modelName} is not available for the stored key. Select one of the ${availableModels.length} available models.`
+            : modelStatus}
         </div>
       </section>
       <section className="rounded border border-slate-800 bg-slate-900 p-3 space-y-3">

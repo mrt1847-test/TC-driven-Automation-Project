@@ -1,6 +1,6 @@
 # Next Actions
 
-Last aligned: 2026-06-04
+Last aligned: 2026-06-05
 
 Use this file as the operating queue for AI work. The user should be able to say
 only:
@@ -47,34 +47,35 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 ## Current Batch
 
-**Checklist item:** C6-07 ordered multi-action mapping API
+**Checklist item:** C7-12 selected raw refresh merge into existing structure
 
-**Why this is next:** C5-03 now preserves the expanded action sequence required
-by C7-11. Before deterministic method body planning can consume that sequence,
-one reviewed TC step must reliably round-trip an ordered list of raw actions
-through the Mapping API.
+**Why this is next:** C7-11 body plans and C8-07 complete generated-file origins
+now provide stable source relationships. Selected Webwright reruns can compare
+new raw evidence with the reviewed structure before incremental generation.
 
 **Owning specs:** [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md),
-[DB_SCHEMA.md](./DB_SCHEMA.md)
+[SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md)
 
 **Implementation scope:**
 
-- Harden Mapping GET/PUT so each TC step persists and returns ordered
-  `action_ids` through `CaseActionMappingAction`.
-- Keep `CaseActionMapping.raw_action_id` aligned with the first ordered action
-  for backward compatibility.
-- Replace/remove stale join rows deterministically on mapping updates and reject
-  action IDs that do not belong to the selected case's raw runs.
-- Add focused Worker tests for ordered round-trip, replacement/removal, and
-  invalid or foreign action IDs.
+- Compare each selected case's newest `RawAction` sequence with its reviewed
+  mappings, `StructuredStep` rows, and `PageObjectMethod` body plans.
+- Preserve reviewed names, ordering, human intent, and stable structured
+  entities where equivalent actions can be matched safely.
+- Remap equivalent or replaced actions and refresh affected method body plans.
+- Mark removed, new, or ambiguous unmatched changes as
+  `needs_review`/conflict instead of rebuilding or silently deleting structure.
+- Add focused Worker tests for equivalent replacement, changed sequences,
+  ambiguous preservation, and unrelated-case isolation.
 
 **Acceptance evidence:**
 
-- One TC step round-trips multiple raw action IDs in the submitted order.
-- Updating that step replaces its join rows without stale links and keeps the
-  legacy first-action field aligned.
-- Foreign/invalid action IDs are rejected without partially rewriting mappings.
-- Existing and focused Mapping API tests pass.
+- Equivalent raw refresh updates source/action IDs and body plans while
+  preserving reviewed names and intent.
+- Ambiguous differences remain reviewable and do not silently delete existing
+  structured entities.
+- Unrelated cases remain unchanged.
+- Existing structuring and traceability tests pass.
 
 ## Next Batch Candidates
 
@@ -82,12 +83,9 @@ Pick the next item from this list after Current Batch is done:
 
 | Order | Checklist item | Purpose |
 |-------|----------------|---------|
-| 1 | C7-11 | Compile expanded/multi-action mappings into deterministic method body plans |
-| 2 | C8-07 | Persist complete GeneratedFileOrigin links needed for impact analysis |
-| 3 | C7-12 | Merge selected Webwright raw refresh into existing structured entities |
-| 4 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
-| 5 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
-| 6 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
+| 1 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
+| 2 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
+| 3 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
 
 ## Completed Batch Notes
 
@@ -136,3 +134,14 @@ in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).
   extraction now covers the core 17 types plus upload/drag interactions,
   preserves ordered selector/value/source metadata across sync and async
   shapes, and retains unsupported Playwright calls as reviewable `custom_code`.
+- 2026-06-04: Completed C6-07 ordered multi-action Mapping API. Mapping GET/PUT
+  now round-trips ordered joins, atomically replaces/removes stale links, keeps
+  the legacy first-action field aligned, and rejects invalid or foreign action
+  IDs without partial rewrites.
+- 2026-06-04: Completed C7-11 structured method body planner coverage.
+  Structuring now produces deterministic ordered plans with stable source IDs,
+  preserves supported selectors/value templates, and forces review for
+  unsupported/missing actions and hard waits.
+- 2026-06-05: Completed C8-07 GeneratedFileOrigin link persistence. Generation
+  now records complete case and structured origins, aggregates shared-file
+  origins, and replaces stale links and duplicate path metadata on regeneration.

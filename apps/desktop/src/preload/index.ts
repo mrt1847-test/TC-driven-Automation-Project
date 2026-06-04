@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openThirdPartyNotices: () => ipcRenderer.invoke('open-third-party-notices'),
   credentialSet: (service: string, account: string, password: string) =>
     ipcRenderer.invoke('credential-set', service, account, password),
-  credentialGet: (service: string, account: string) => ipcRenderer.invoke('credential-get', service, account)
+  credentialGet: (service: string, account: string) => ipcRenderer.invoke('credential-get', service, account),
+  providerModels: (provider: string) => ipcRenderer.invoke('provider-models', provider)
 })
