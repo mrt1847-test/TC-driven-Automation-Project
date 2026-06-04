@@ -1,6 +1,6 @@
 # Generated Project Spec
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-04
 
 The generated automation project is the final executable automation artifact.
 Webwright `final_script.py` is raw input material; it is not the final project.
@@ -105,6 +105,7 @@ cases:
 
 ```python
 pytest_plugins = [
+    "pytest_playwright.pytest_playwright",
     "fixtures.browser_fixture",
     "fixtures.env_fixture",
 ]
@@ -128,6 +129,10 @@ The default template implements this policy through `fixtures.browser_fixture`,
 `fixtures.env_fixture`, `conftest.py`, and runner-provided `TC_*` environment
 variables. The runner records pytest command/return code/log paths and maps
 fixture-created artifacts back into each case result.
+
+The runner disables ambient pytest entry-point plugin autoloading and registers
+required plugins explicitly through `pytest_plugins`. Generated projects that
+need additional third-party pytest plugins must register them explicitly.
 
 ## Runner CLI
 
@@ -167,6 +172,9 @@ Expected behavior:
 - Studio/Worker wrapper logs must not overwrite the generated runner's pytest
   `stdout.log` / `stderr.log`; wrapper stdout/stderr must use separate files
   when the runner has already written pytest logs.
+- Studio/Worker execution status must be `failed` when the generated
+  `results.json` summary contains failed cases, even if `runner.cli` exited zero
+  after successfully writing the result contract.
 - Preserve `automationKey` in every result record.
 
 ### rerun-failed
@@ -266,6 +274,14 @@ run artifacts under `artifacts/runs/{runId}`:
 | Mapping YAML | TC to code/result link | TestCase + generation metadata |
 | Runtime manifest | execution contract | template + RuntimeProfile-derived defaults |
 
+Page object code generation normalizes persisted Playwright locator expressions:
+
+- a terminal action already present in a selector expression is stripped before
+  the reviewed action is emitted, preventing output such as
+  `.click().click()`;
+- a leading `page.` locator is scoped to the generated page object as
+  `self.page.`.
+
 ## Maintenance Contract
 
 The generated project is expected to contain many TCs. A maintenance action for
@@ -296,6 +312,8 @@ The generated project baseline is acceptable when:
 - artifact paths are deterministic.
 - Worker-run E2E exercises real pytest-playwright `page`, `context`, `base_url`,
   env config, and artifact fixtures with local Chromium.
+- the default generated-template sample runs against a deterministic `data:`
+  page and does not depend on an external website.
 - the project can run outside Electron after installing `requirements.txt` and Playwright browser assets.
 
 ## Standalone CI Commands

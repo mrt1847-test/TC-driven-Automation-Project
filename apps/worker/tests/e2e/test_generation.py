@@ -88,6 +88,8 @@ def test_project_generation_workflow(client: TestClient, project_id: str, import
         params={"path": "pages/generated_page.py"},
     ).json()["content"]
     assert "perform_project_generation_step_1" in page_content
+    assert "self.page.get_by_role('link', name='More information').click()" in page_content
+    assert ".click().click()" not in page_content
 
     import worker.core.database as database
 

@@ -1,6 +1,6 @@
 # API Spec
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-04
 
 Base URL in development: `http://127.0.0.1:8765`
 
@@ -286,13 +286,45 @@ of launching `runner.cli`.
 |--------|------|--------|---------|-----------|
 | GET | `/projects/{project_id}/artifacts?automation_key=...` | Planned | Webwright/execution artifacts 조회 | C12-01, C12-03 |
 | GET | `/projects/{project_id}/cases/{case_id}/selector-candidates` | Planned | raw action/POM selector candidates 조회 | C12-02 |
-| POST | `/projects/{project_id}/executions/{execution_id}/diagnose` | Planned | failed cases를 disposition으로 분류하고 evidence/confidence 반환 | C12-08 |
+| POST | `/projects/{project_id}/executions/{execution_id}/diagnose` | Implemented | failed cases를 disposition으로 분류하고 evidence/confidence 반환 | C12-08 |
 | POST | `/projects/{project_id}/executions/{execution_id}/healing-proposals` | Planned | 실패 실행 기반 healing proposal 생성 | C12-05 |
 | GET | `/projects/{project_id}/healing-proposals?automation_key=...` | Planned | proposal 목록 조회 | C12-05 |
 | POST | `/projects/{project_id}/healing-proposals/{proposal_id}/accept` | Planned | proposal 수락 및 structured metadata 패치 | C12-06 |
 | POST | `/projects/{project_id}/healing-proposals/{proposal_id}/reject` | Planned | proposal 거절 | C12-06 |
 | POST | `/projects/{project_id}/healing-proposals/{proposal_id}/apply` | Planned | 수락된 proposal 적용, regenerate 준비 | C12-06 |
 | POST | `/projects/{project_id}/cases/{case_id}/refresh-webwright-and-regenerate` | Planned | selected already-structured TC Webwright refresh → raw merge into existing structure → incremental regeneration | C12-09, C7-12, C8-09 |
+
+### Execution Diagnosis
+
+`POST /projects/{project_id}/executions/{execution_id}/diagnose` is read-only.
+It returns one diagnosis for each failed execution result and omits passed
+results. It does not create or apply healing proposals.
+
+```json
+{
+  "project_id": "proj_123",
+  "execution_id": "exec_123",
+  "diagnoses": [
+    {
+      "execution_result_id": "result_123",
+      "automation_key": "user_login_001",
+      "disposition": "selector_changed",
+      "reason": "linked_selector_failure_evidence",
+      "confidence": 0.9,
+      "evidence_artifact_ids": ["art_001", "art_009"],
+      "selector_candidate_ids": ["sel_001"],
+      "target": {
+        "status": "resolved",
+        "structured_step_id": "step_123",
+        "page_object_method_id": "pom_123"
+      }
+    }
+  ]
+}
+```
+
+Unresolved target links, mixed failure signals, and selector failures without
+linked selector context return `unknown`.
 
 ### HealingProposal
 
@@ -324,5 +356,5 @@ of launching `runner.cli`.
 |------|------|
 | Webwright | subprocess cancel for in-flight CLI |
 | Structuring | stale/conflict API beyond validate issues list |
-| Healing | C12-04..C12-10 proposal lifecycle, failure disposition, selected raw refresh, and TC retire cleanup |
+| Healing | C12-05..C12-07 and C12-09..C12-10 proposal lifecycle, selected raw refresh, and TC retire cleanup |
 | Prompt | C2-04..C2-07 batch prompt / preset / audit APIs |

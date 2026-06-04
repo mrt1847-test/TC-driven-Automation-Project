@@ -248,7 +248,11 @@ export function WebwrightPage() {
       const saved = await api.settings.update(next) as AppSettings
       if (apiKey) {
         const stored = await window.electronAPI?.credentialSet('tc-studio', apiProvider, apiKey)
-        if (!stored) throw new Error('Could not store API key in the OS credential store.')
+        if (!stored?.ok) {
+          throw new Error(
+            stored?.message ?? 'Could not store API key. Run the desktop app (not the browser) and retry.'
+          )
+        }
         setApiKey('')
       }
       return saved
@@ -274,13 +278,17 @@ export function WebwrightPage() {
       const saved = await saveLlmMut.mutateAsync()
       await api.settings.validate()
       const storedKey = await window.electronAPI?.credentialGet('tc-studio', apiProvider)
-      if (!storedKey) throw new Error(`No API key found in the OS credential store for ${providerLabel(apiProvider)}.`)
+      if (!storedKey?.ok) {
+        throw new Error(
+          storedKey?.message ?? `No API key found for ${providerLabel(apiProvider)}. Enter a key and click Check Key again.`
+        )
+      }
       return saved
     },
     onSuccess: () => {
       setLlmCheck({
         status: 'ok',
-        message: `${providerLabel(apiProvider)} key is available in the OS credential store.`
+        message: `${providerLabel(apiProvider)} key is stored securely (Credential Manager or encrypted app store).`
       })
     },
     onError: (error) => {

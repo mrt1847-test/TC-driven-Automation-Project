@@ -161,7 +161,16 @@ def _check_command(
     failure_message: str | None = None,
 ) -> RuntimeCheck:
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            cwd=cwd,
+            env=env,
+        )
     except Exception as exc:
         return RuntimeCheck(False, str(exc))
 

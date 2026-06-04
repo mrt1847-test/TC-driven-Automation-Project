@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import shutil
@@ -26,6 +27,37 @@ def _snake(name: str) -> str:
     return name.lower().replace("-", "_").replace(" ", "_")
 
 
+def _selector_expression(selector: str, action: str) -> str:
+    expression_text = selector.strip()
+    try:
+        expression = ast.parse(expression_text, mode="eval").body
+        if (
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Attribute)
+            and expression.func.attr == action
+        ):
+            expression = expression.func.value
+        expression_text = ast.unparse(expression)
+    except SyntaxError:
+        pass
+    if expression_text == "page" or expression_text.startswith("page."):
+        return f"self.{expression_text}"
+    return expression_text
+
+
+def _interaction_line(action: str, selector: str | None, value: str | None) -> str | None:
+    if not selector:
+        return None
+    expression = _selector_expression(selector, action)
+    if action == "fill":
+        return f"{expression}.fill({json.dumps(value or '')})"
+    if action == "press":
+        return f"{expression}.press({json.dumps(value or '')})"
+    if action in {"click", "check", "uncheck", "hover"}:
+        return f"{expression}.{action}()"
+    return None
+
+
 def _method_body(pom: PageObjectMethod) -> list[str]:
     lines: list[str] = []
     try:
@@ -39,20 +71,20 @@ def _method_body(pom: PageObjectMethod) -> list[str]:
         value = entry.get("value") or entry.get("target")
         if action == "goto" and value:
             lines.append(f"        self.page.goto({json.dumps(value)})")
-        elif action == "click" and selector:
-            lines.append(f"        {selector}.click()")
-        elif action == "fill" and selector:
-            lines.append(f"        {selector}.fill({json.dumps(value or '')})")
+        elif interaction := _interaction_line(action, selector, value):
+            lines.append(f"        {interaction}")
         else:
             lines.append(f"        # {action}: {entry.get('target', '')}")
             lines.append("        pass")
     elif pom.selector:
-        if pom.method_type == "goto":
+        action = "goto" if pom.method_type == "navigate" else pom.method_type
+        if action == "goto":
             lines.append(f"        self.page.goto({json.dumps(pom.value_template or '')})")
-        elif pom.method_type == "fill":
-            lines.append(f"        {pom.selector}.fill({json.dumps(pom.value_template or '')})")
+        elif interaction := _interaction_line(action, pom.selector, pom.value_template):
+            lines.append(f"        {interaction}")
         else:
-            lines.append(f"        {pom.selector}.click()")
+            lines.append(f"        # {action}: unsupported generated interaction")
+            lines.append("        pass")
     else:
         lines.append("        pass")
     return lines

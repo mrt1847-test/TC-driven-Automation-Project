@@ -1,6 +1,6 @@
 # Runtime Spec
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-04
 
 This document defines the runtime contract for three execution contexts:
 
@@ -166,6 +166,7 @@ CI environments that want to close E-09 must provide:
 | `TC_LIVE_WEBWRIGHT_BASE_CONFIG` | optional | base config name; defaults to `base.yaml` |
 | `TC_LIVE_WEBWRIGHT_MODEL_CONFIG` | optional | model config name; defaults to `model_openai.yaml` |
 | `TC_LIVE_PLAYWRIGHT_BROWSERS_PATH` | optional | explicit Playwright browser cache for live validation |
+| `TC_E2E_WAIT_TIMEOUT_SECONDS` | optional | terminal-state wait timeout for the installed-app MVP1 gate; defaults to 20 seconds |
 
 ## Installing Live Webwright
 
@@ -358,7 +359,34 @@ Done:
   checkout/venv, OpenAI `gpt-5-mini`, Git Bash shell readiness, explicit
   `webwrightShell` health, nested `final_script.py` harvesting, indexed
   `RawAction` rows, artifact indexing, and mock mode disabled.
-
-Open:
-
-- clean Windows bundled runtime E2E must be recorded.
+- 2026-06-04 I-08 dev-machine preflight evidence: after deleting `out`,
+  `release`, and `runtime-staging`, `npm run dist:win:full` passes. Live staging
+  produced `runtime-manifest.json`,
+  `THIRD_PARTY_NOTICES.txt`, real vendored Webwright, embeddable Python,
+  generated-template, and Playwright Chromium assets; packaging produced the
+  Windows NSIS installer and `win-unpacked` resources after correcting
+  electron-builder Windows config.
+- Packaged bundled `/health` reports `allOk=true` when live readiness passes and
+  `mockMode.enabled=false`; `mockMode` is treated as a fallback indicator, not a
+  readiness failure.
+- The packaged generated-template passed a deterministic Chromium case using
+  the packaged embedded Python, browser cache, and the same generated-project
+  entrypoint used by the in-app Worker runner.
+- I-08 clean-install evidence is complete: the final NSIS installer
+  (`SHA256 4E4A3222348809FA69394512AF58A1F9A342313A0D993BA10E7C10724E8D923F`)
+  installed silently with exit code 0 into a new directory, containing the app,
+  Worker, embedded Python, Chromium cache, and uninstaller.
+- The installed app launched with a fresh Electron `--user-data-dir`; before any
+  fallback configuration, bundled live `/health` reported `allOk=true`,
+  `runtimeMode=bundled`, `mockMode.enabled=false`, and ready Python,
+  Webwright CLI, generated-template, and Chromium checks.
+- After explicitly selecting mock Webwright to avoid external API/secret use,
+  the installed app passed `scripts/e2e_mvp1_gate.py`: Excel import, raw
+  generation, reviewed mapping, generated runtime bootstrap, and bundled
+  Chromium Runner execution all completed.
+- After explicit approval for external OpenAI API use, the installed app passed
+  the same official MVP1 gate with real Webwright and `gpt-5-mini`.
+  `webwrightStatus=completed`, the final script existed, stdout contained no
+  mock marker, three RawAction rows were indexed, and the generated project
+  completed the bundled Chromium Runner with
+  `{"total": 1, "passed": 1, "failed": 0, "skipped": 0}`.

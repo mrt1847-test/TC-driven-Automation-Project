@@ -1,6 +1,7 @@
 """H-01 MVP 1 gate E2E against a live Worker on http://127.0.0.1:8765."""
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -10,9 +11,15 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 EXCEL = ROOT / "fixtures" / "sample_cases.xlsx"
 BASE = "http://127.0.0.1:8765"
+WAIT_TIMEOUT_SECONDS = float(os.environ.get("TC_E2E_WAIT_TIMEOUT_SECONDS", "20"))
 
 
-def wait_for_first(client: httpx.Client, path: str, terminal: set[str], timeout_s: float = 20.0) -> dict | None:
+def wait_for_first(
+    client: httpx.Client,
+    path: str,
+    terminal: set[str],
+    timeout_s: float = WAIT_TIMEOUT_SECONDS,
+) -> dict | None:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         items = client.get(path).json()
@@ -79,8 +86,8 @@ def main() -> int:
         },
     ).raise_for_status()
     execution = wait_for_first(client, f"/projects/{project_id}/executions", {"completed", "failed", "cancelled"})
-    if not execution or not execution.get("result_path"):
-        print(f"Execution did not produce results: {execution}", file=sys.stderr)
+    if not execution or execution.get("status") != "completed" or not execution.get("result_path"):
+        print(f"Execution did not complete successfully: {execution}", file=sys.stderr)
         return 1
     detail = client.get(f"/projects/{project_id}/executions/{execution['id']}").json()
     if not any(result["automation_key"] == automation_key for result in detail["results"]):

@@ -15,6 +15,13 @@ from worker.core.runtime import resolve_runtime
 from worker.services.artifact_indexing import index_execution_failure_artifacts
 from worker.services.generated_runtime import ensure_generated_runtime
 
+RUNNER_ENTRYPOINT = (
+    "import sys; "
+    "sys.path.insert(0, sys.argv.pop(1)); "
+    "from runner.cli import main; "
+    "raise SystemExit(main())"
+)
+
 
 async def run_project(session: Session, project: Project, request: ExecutionRequest, job_id: str) -> ExecutionRun:
     generated_path = Path(project.generated_project_path or (Path(project.root_path) / "generated"))
@@ -42,7 +49,7 @@ async def run_project(session: Session, project: Project, request: ExecutionRequ
     profile = resolve_runtime()
 
     cmd = [
-        profile.python, "-m", "runner.cli", "run",
+        profile.python, "-c", RUNNER_ENTRYPOINT, str(generated_path), "run",
         "--env", request.env,
         "--browser", request.browser,
         "--run-id", run_id,
@@ -76,7 +83,7 @@ async def run_project(session: Session, project: Project, request: ExecutionRequ
         await log_streams.publish(job_id, stderr_text)
 
     result_path = generated_path / "artifacts" / "runs" / run_id / "results.json"
-    exec_run.status = "completed" if process.returncode == 0 else "failed"
+    exec_run.status = _execution_status(process.returncode, result_path)
     exec_run.ended_at = datetime.utcnow()
     exec_run.result_path = str(result_path) if result_path.exists() else None
     session.add(exec_run)
@@ -115,7 +122,10 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
         return exec_run
 
     profile = resolve_runtime()
-    cmd = [profile.python, "-m", "runner.cli", "rerun-failed", "--from-run-id", prev.run_id, "--run-id", run_id]
+    cmd = [
+        profile.python, "-c", RUNNER_ENTRYPOINT, str(generated_path),
+        "rerun-failed", "--from-run-id", prev.run_id, "--run-id", run_id,
+    ]
     exec_run = ExecutionRun(
         id=new_id("exec"),
         project_id=project.id,
@@ -148,7 +158,7 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
         await log_streams.publish(job_id, stderr_text)
 
     result_path = generated_path / "artifacts" / "runs" / run_id / "results.json"
-    exec_run.status = "completed" if process.returncode == 0 else "failed"
+    exec_run.status = _execution_status(process.returncode, result_path)
     exec_run.ended_at = datetime.utcnow()
     exec_run.result_path = str(result_path) if result_path.exists() else None
     session.add(exec_run)
@@ -264,6 +274,16 @@ def _write_runner_logs(generated_path: Path, run_id: str, stdout_text: str, stde
         primary = artifact_dir / name
         target = artifact_dir / fallback_name if primary.exists() else primary
         target.write_text(text, encoding="utf-8")
+
+
+def _execution_status(returncode: int | None, result_path: Path) -> str:
+    if returncode != 0 or not result_path.exists():
+        return "failed"
+    try:
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "failed"
+    return "failed" if (data.get("summary") or {}).get("failed", 0) else "completed"
 
 
 def _persist_results(session: Session, exec_run: ExecutionRun, result_path: Path) -> None:

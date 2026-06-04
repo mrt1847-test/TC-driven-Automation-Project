@@ -18,6 +18,7 @@ def _subprocess_env(env: str, run_id: str, browser: str) -> dict[str, str]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     merged = {
         **os.environ,
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         "TC_ENV": env,
         "TC_RUN_ID": run_id,
         "TC_BROWSER": browser,

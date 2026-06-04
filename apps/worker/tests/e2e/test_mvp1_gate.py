@@ -114,6 +114,7 @@ def test_mvp1_excel_to_automation_ide_run_gate(client: TestClient, project_id: s
     assert execution_queue.status_code == 200
     execution_job_id = execution_queue.json()["jobId"]
     execution = _wait_for_execution(client, project_id)
+    assert execution["status"] == "completed"
     assert execution["result_path"]
     assert Path(execution["result_path"]).exists()
 

@@ -1,6 +1,6 @@
 # Structuring Spec
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-04
 
 This document defines how Webwright raw output becomes a maintainable
 Playwright pytest project.
@@ -335,10 +335,14 @@ Done:
 - structure sync and validate APIs exist.
 - project generator reads structured entities.
 - GeneratedFile stores hash/status and simple source fields.
+- failure disposition classifier resolves structured targets before returning
+  evidence-backed maintenance dispositions.
+- C5-03 action extraction covers the core 17 action types plus file upload and
+  drag interactions, preserving unsupported Playwright calls as reviewable
+  `custom_code`.
 
 Open:
 
-- C5-03: expanded action type coverage.
 - C6-07: ordered multi-action mapping API follow-up.
 - C7-10: stale/conflict detection.
 - C7-11: structured method body planner coverage.
@@ -347,7 +351,6 @@ Open:
 - C8-07: `GeneratedFileOrigin` link persistence.
 - C8-09: selected TC incremental regeneration.
 - C8-10: TC retire/delete generated artifact cleanup.
-- C12-08: failure disposition classifier.
 - C12-09: selected TC Webwright refresh regeneration flow.
 - C12-10: TC retire recommendation and cleanup flow.
 - E-11: selected TC Webwright refresh incremental regeneration E2E.

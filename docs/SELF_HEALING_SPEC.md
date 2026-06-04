@@ -1,6 +1,6 @@
 # Self-Healing And Failure Disposition Spec
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-04
 
 Webwright produces raw code, logs, screenshots, trajectory, and run metadata.
 Generated pytest runs produce logs, screenshots, traces, videos, and
@@ -69,6 +69,13 @@ ExecutionResult
   -> RawAction
   -> Webwright artifacts / SelectorCandidate
 ```
+
+Classification is read-only and conservative:
+
+- unresolved or ambiguous target links return `unknown`;
+- mixed disposition signals return `unknown`;
+- `selector_changed` requires a resolved target plus linked selector context;
+- classification does not create/apply proposals or mutate structured data.
 
 ## Selector Healing
 
@@ -187,15 +194,18 @@ Done:
 - Webwright artifacts are indexed.
 - raw action selector candidates are persisted.
 - execution failure artifacts are indexed.
+- C12-04 failure-to-structured target resolver returns linked target/evidence
+  IDs with deterministic resolved, missing, or ambiguous status.
+- C12-08 failure disposition classifier and execution diagnosis API return one
+  evidence-backed disposition per failed result, with conservative `unknown`
+  fallback for unresolved, mixed, or unsupported evidence.
 - baseline GUI diagnosis panel exists.
 
 Open:
 
-- C12-04: failure-to-structured target resolver.
 - C12-05: healing proposal API.
 - C12-06: accepted proposal apply/regenerate/rerun flow.
 - C12-07: safe auto-apply guardrails.
-- C12-08: failure disposition classifier.
 - C12-09: selected TC Webwright refresh regeneration flow.
 - C12-10: TC retire recommendation and cleanup flow.
 - D6-09/D6-10: disposition actions and diff review UI.

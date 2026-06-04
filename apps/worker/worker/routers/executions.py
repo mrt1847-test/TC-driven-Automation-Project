@@ -10,6 +10,7 @@ from worker.core.database import get_session
 from worker.models.db import ExecutionResult, ExecutionRun, Project
 from worker.models.schemas import ExecutionRequest, ExportRequest
 from worker.services.project_runner import rerun_failed, run_project
+from worker.services.failure_disposition import diagnose_execution_failures
 from worker.services.result_export import export_excel, export_google_sheets, export_testrail, export_testrail_clone
 
 router = APIRouter(prefix="/projects/{project_id}/executions", tags=["executions"])
@@ -65,6 +66,12 @@ def get_execution(project_id: str, execution_id: str, session: Session = Depends
     if run.result_path and Path(run.result_path).exists():
         summary = json.loads(Path(run.result_path).read_text(encoding="utf-8"))
     return {"run": run, "results": results, "summary": summary}
+
+
+@router.post("/{execution_id}/diagnose")
+def diagnose_execution(project_id: str, execution_id: str, session: Session = Depends(get_session)):
+    run = _get_execution_run(session, project_id, execution_id)
+    return diagnose_execution_failures(session, run)
 
 
 @router.post("/{execution_id}/rerun-failed")

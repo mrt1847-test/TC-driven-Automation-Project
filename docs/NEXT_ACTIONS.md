@@ -1,6 +1,6 @@
 # Next Actions
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-04
 
 Use this file as the operating queue for AI work. The user should be able to say
 only:
@@ -47,47 +47,34 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 ## Current Batch
 
-**Checklist item:** I-08 clean Windows `dist:win:full` validation
+**Checklist item:** C6-07 ordered multi-action mapping API
 
-**Why this is next:** Live Webwright raw generation and generated pytest/browser
-execution are now proven locally. The next gate is validating the same runtime
-chain from a clean Windows installer/bundled-runtime path.
+**Why this is next:** C5-03 now preserves the expanded action sequence required
+by C7-11. Before deterministic method body planning can consume that sequence,
+one reviewed TC step must reliably round-trip an ordered list of raw actions
+through the Mapping API.
 
-**Owning spec:** [RUNTIME_SPEC.md](./RUNTIME_SPEC.md)
+**Owning specs:** [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md),
+[DB_SCHEMA.md](./DB_SCHEMA.md)
 
 **Implementation scope:**
 
-- Run `npm run dist:win:full` or the closest locally available equivalent.
-- Verify `prepare-runtime.ps1` stages vendored Webwright, embeddable Python,
-  generated-template, Chromium browser assets, and `THIRD_PARTY_NOTICES.txt`.
-- Verify bundled runtime settings/readiness on Windows.
-- If possible, install/run the packaged app and execute the raw-generation ->
-  generated-project -> in-app runner chain.
+- Harden Mapping GET/PUT so each TC step persists and returns ordered
+  `action_ids` through `CaseActionMappingAction`.
+- Keep `CaseActionMapping.raw_action_id` aligned with the first ordered action
+  for backward compatibility.
+- Replace/remove stale join rows deterministically on mapping updates and reject
+  action IDs that do not belong to the selected case's raw runs.
+- Add focused Worker tests for ordered round-trip, replacement/removal, and
+  invalid or foreign action IDs.
 
 **Acceptance evidence:**
 
-- Build/staging command output is recorded.
-- `runtime-staging/runtime-manifest.json` and `THIRD_PARTY_NOTICES.txt` exist.
-- Bundled `runtime/webwright` contains real vendored Webwright with license and
-  configs, not a mock placeholder.
-- Bundled Python can import Worker requirements, `webwright.run.cli`, and
-  Playwright.
-- Chromium browser executable is available from the bundled browser cache.
-- If clean Windows installer execution is unavailable, keep I-08 open and record
-  the blocker instead of advancing the queue.
-
-**Current blocker:**
-
-- Not yet investigated in this batch. Start by validating runtime staging output
-  and determine whether a full installer run is possible in the local
-  environment.
-
-**Unblock I-08:**
-
-- From repo root, run `npm run dist:win:full` if feasible.
-- If full packaging is too slow or unavailable, run `scripts/prepare-runtime.ps1`
-  and validate the staged runtime contents directly, but leave I-08 open unless
-  the checklist acceptance can be proven.
+- One TC step round-trips multiple raw action IDs in the submitted order.
+- Updating that step replaces its join rows without stale links and keeps the
+  legacy first-action field aligned.
+- Foreign/invalid action IDs are rejected without partially rewriting mappings.
+- Existing and focused Mapping API tests pass.
 
 ## Next Batch Candidates
 
@@ -95,11 +82,12 @@ Pick the next item from this list after Current Batch is done:
 
 | Order | Checklist item | Purpose |
 |-------|----------------|---------|
-| 1 | C12-08 | Classify failed generated cases into selector, raw-refresh, retire, or unknown disposition |
-| 2 | C7-12 | Merge selected Webwright raw refresh into existing structured entities |
-| 3 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
-| 4 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
-| 5 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
+| 1 | C7-11 | Compile expanded/multi-action mappings into deterministic method body plans |
+| 2 | C8-07 | Persist complete GeneratedFileOrigin links needed for impact analysis |
+| 3 | C7-12 | Merge selected Webwright raw refresh into existing structured entities |
+| 4 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
+| 5 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
+| 6 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
 
 ## Completed Batch Notes
 
@@ -131,3 +119,20 @@ in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).
   `run_project` now proves `runner.cli` -> pytest-playwright with local
   Chromium, `page`/`context`/`base_url`/env/artifact fixtures, preserved pytest
   logs, and `[chromium]` screenshot/trace mapping into results and DB rows.
+- 2026-06-04: Completed I-08 clean Windows installer validation. A clean
+  `dist:win:full` installer was installed into a new directory and launched
+  with a fresh Electron profile; installed bundled live health passed, real
+  Webwright produced a non-mock final script and three RawAction rows, and the
+  generated project completed the bundled Chromium Runner with one passed case.
+- 2026-06-04: Completed C12-04 failure target resolver. Failed execution results
+  now resolve through latest generated-file/origin links to structured
+  step/POM targets and return linked mapping, raw-action, run, and artifact IDs
+  with deterministic resolved, missing, or ambiguous outcomes.
+- 2026-06-04: Completed C12-08 failure disposition classifier. Execution
+  diagnosis now returns exactly one evidence-backed disposition per failed
+  result and conservatively falls back to `unknown` for unresolved, mixed, or
+  unsupported evidence without applying maintenance actions.
+- 2026-06-04: Completed C5-03 expanded action type coverage. Line-based
+  extraction now covers the core 17 types plus upload/drag interactions,
+  preserves ordered selector/value/source metadata across sync and async
+  shapes, and retains unsupported Playwright calls as reviewable `custom_code`.

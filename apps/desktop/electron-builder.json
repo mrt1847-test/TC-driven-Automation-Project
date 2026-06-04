@@ -1,6 +1,7 @@
 {
   "appId": "com.tcautomation.studio",
   "productName": "TC Automation Studio",
+  "electronVersion": "33.4.11",
   "asar": true,
   "directories": {
     "output": "release"
@@ -11,13 +12,13 @@
     "package.json"
   ],
   "win": {
+    "signAndEditExecutable": false,
     "target": [
       {
         "target": "nsis",
         "arch": ["x64"]
       }
-    ],
-    "publisherName": "TC Automation Studio"
+    ]
   },
   "nsis": {
     "oneClick": false,

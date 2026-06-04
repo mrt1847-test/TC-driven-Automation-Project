@@ -29,6 +29,8 @@ ERROR_PATTERNS = {
     "script_generation_failed": r"final_script|generation failed",
 }
 
+MOCK_START_URL = "data:text/html,%3Ca%20href%3D%22%23done%22%3EMore%20information%3C%2Fa%3E"
+
 
 def classify_error(stderr: str) -> str:
     text = stderr.lower()
@@ -224,9 +226,9 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto("{case.start_url or 'https://example.com'}")
+        page.goto({json.dumps(MOCK_START_URL)})
         page.get_by_role("link", name="More information").click()
-        expect(page).to_have_url("https://www.iana.org/help/example-domains")
+        expect(page).to_have_url({json.dumps(MOCK_START_URL)})
         browser.close()
 
 if __name__ == "__main__":
@@ -254,7 +256,7 @@ if __name__ == "__main__":
         "automationKey": case.automation_key,
         "caseId": case.source_case_id,
         "sourceType": case.source_type,
-        "startUrl": case.start_url or "https://example.com",
+        "startUrl": MOCK_START_URL,
         "status": run.status,
         "startedAt": run.started_at.isoformat() if run.started_at else None,
         "endedAt": run.ended_at.isoformat() if run.ended_at else None,

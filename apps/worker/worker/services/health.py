@@ -35,7 +35,8 @@ def check_health() -> dict:
             "message": "Live Webwright is ready" if webwright_readiness.live_ok else "Live Webwright is not ready; mock mode will be used",
         },
     }
-    checks["allOk"] = all(v.get("ok", False) for k, v in checks.items() if k != "allOk")
+    readiness_keys = [k for k in checks if k not in {"allOk", "mockMode"}]
+    checks["allOk"] = all(checks[k].get("ok", False) for k in readiness_keys)
     return checks
 
 

@@ -1,5 +1,0 @@
-upstream=https://github.com/microsoft/Webwright
-commit=734bc60ea73653498215694d0cc4bc96fbc09e9c
-license=MIT
-vendored_at=2026-06-03
-local_patches=windows-bash-validation-skip,windows-git-bash-lc-execution

@@ -94,6 +94,7 @@ def get_mappings(session: Session, case_id: str) -> list[MappingItem]:
     for row in rows:
         if row.tc_step_index not in grouped:
             grouped[row.tc_step_index] = MappingItem(
+                id=row.id,
                 tc_step_index=row.tc_step_index,
                 normalized_step_id=row.normalized_step_id,
                 normalized_step_name=row.normalized_step_name,

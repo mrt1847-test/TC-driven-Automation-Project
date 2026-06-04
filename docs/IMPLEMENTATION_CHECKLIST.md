@@ -1,6 +1,6 @@
 ﻿# Implementation Checklist
 
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-04
 **Current phase:** Phase 1
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
@@ -23,13 +23,13 @@
 |----------|------|-------|
 | A. Infra | 33 | 33 |
 | B. Template | 20 | 20 |
-| C. Worker | 55 | 87 |
+| C. Worker | 63 | 87 |
 | D. GUI | 42 | 49 |
 | E. E2E | 9 | 12 |
 | F. Errors | 0 | 4 |
 | G. Security | 0 | 3 |
 | H. MVP Gates | 4 | 4 |
-| I. Quality | 6 | 8 |
+| I. Quality | 7 | 8 |
 
 
 ## Implementation audit (2026-06-02)
@@ -38,8 +38,8 @@ Scope checked: repository, spec docs under `docs/`, `npm run build`, worker `tes
 
 - **Shipped (runtime + structuring pass):** `RuntimeProfile` resolver, `settings.runtime`, unified health/validate/install, Webwright live readiness gate, DB-backed structuring (`structure/sync`, `structure/validate`), DB-backed `project_generator`, generated-template `pytest_plugins` + single pytest invocation, `ensure_generated_runtime`, Electron bundled env, `prepare-runtime.ps1` + `dist:win:full`, Setup/Settings bundled read-only paths, Runner **Install Runtime** UX. Spec: [RUNTIME_SPEC.md](./RUNTIME_SPEC.md).
 - **Build gate:** `npm run build` passes; I-06, I-07 closed.
-- **Spec gaps to keep open:** C7-10 stale/conflict detection, C7-12 selected raw refresh merge into existing structured entities, C8-06 deterministic regeneration guard, C8-09 selected TC incremental regeneration, C12-04..C12-10 failure disposition/self-healing/raw-refresh/retire API flow, C2-04..C2-07 prompt preset/audit, C6-07 multi-action join API follow-up, C8-04 git-ready output, Webwright subprocess cancel (not only DB status).
-- **Installer verification gap:** `dist:win:full` end-to-end on a clean Windows machine not yet recorded (see RUNTIME_SPEC R-02).
+- **Spec gaps to keep open:** C7-10 stale/conflict detection, C7-12 selected raw refresh merge into existing structured entities, C8-06 deterministic regeneration guard, C8-09 selected TC incremental regeneration, C12-05..C12-07 and C12-09..C12-10 self-healing/raw-refresh/retire API flow, C2-04..C2-07 prompt preset/audit, C6-07 multi-action join API follow-up, C8-04 git-ready output, Webwright subprocess cancel (not only DB status).
+- **Installer verification resolved (2026-06-04):** clean `dist:win:full`, silent NSIS install into a new directory, fresh Electron user profile, installed bundled live health, installed-app real Webwright raw generation, generated project, and bundled Chromium Runner completion are recorded in RUNTIME_SPEC.
 - **Webwright packaging decision:** resolved by C3-08. Product/live `prepare-runtime` now defaults to vendored `third_party/webwright` with license/notice/version metadata; explicit external `WEBWRIGHT_SOURCE` + `WEBWRIGHT_SOURCE_VERSION` or pinned `WEBWRIGHT_PIP_PACKAGE` remains supported; mock staging requires explicit opt-in.
 
 ## Runtime/Generated Project planning correction (2026-06-03)
@@ -188,7 +188,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 
 - [x] **C5-01** 라인 기반 Playwright API 추출 — §5.8 | Phase 1 | Layer: Worker | Depends: C3-05
 - [x] **C5-02** trajectory.json 보조 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01
-- [ ] **C5-03** action type enum 17종 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01
+- [x] **C5-03** action type enum 17종 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01 (verified 2026-06-04: line-based extraction covers the 17 core action types plus `set_input_files`/`drag_to`, preserves ordered selector/value/source metadata, supports sync/async wait contexts, and retains unsupported Playwright/expect calls as `custom_code`)
 - [x] **C5-04** RawAction DB 저장 — §5.8 | Phase 1 | Layer: Worker | Depends: A2-04, C5-01
 - [ ] **C5-05** Python AST 고도화 — §5.8 | Phase 5 | Layer: Worker | Depends: C5-01
 
@@ -260,11 +260,11 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C12-01** Webwright logs/screenshots/trajectory artifact indexing — Spec: SELF_HEALING_SPEC | Phase 1 | Layer: Worker | Depends: C3-05, A2-13 (baseline Webwright artifact indexing verified; final script, trajectory, logs, metadata, and screenshots are indexed as `ArtifactAsset` rows)
 - [x] **C12-02** raw action selector candidate extraction — Spec: SELF_HEALING_SPEC | Phase 1 | Layer: Worker | Depends: C5-04, A2-14 (baseline raw-action selector candidate extraction verified; role/text/test-id/css/xpath candidates persist from `RawAction.selector` with artifact evidence links)
 - [x] **C12-03** execution failure artifact indexing — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C9-04, A2-13 (baseline execution failure artifact indexing verified; failed execution results and run logs/results are indexed as `ArtifactAsset` rows)
-- [ ] **C12-04** failure → structured step/POM method link resolver — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-08, C12-03
+- [x] **C12-04** failure → structured step/POM method link resolver — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-08, C12-03 (verified 2026-06-04: read-only resolver follows the latest generated-file/origin links through flow/step/POM, returns mapping/raw-action/artifact evidence IDs, and covers deterministic resolved/missing/ambiguous outcomes)
 - [ ] **C12-05** healing proposal generation API — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: A2-15, C12-04
 - [ ] **C12-06** accepted proposal apply/regenerate/rerun flow — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C12-05, C8-06, C9-05
 - [ ] **C12-07** safe auto-apply guardrails — Spec: SELF_HEALING_SPEC | Phase 3 | Layer: Worker | Depends: C12-06
-- [ ] **C12-08** failure disposition classifier — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C12-04, C12-03 (classify failed cases as `selector_changed`, `raw_refresh_required`, `feature_removed_retire_tc`, or `unknown`, with evidence and confidence)
+- [x] **C12-08** failure disposition classifier — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C12-04, C12-03 (verified 2026-06-04: read-only execution diagnosis endpoint classifies each failed result as `selector_changed`, `raw_refresh_required`, `feature_removed_retire_tc`, or conservative `unknown`, returning reason/confidence/evidence/target context without applying maintenance actions)
 - [ ] **C12-09** selected TC Webwright refresh regeneration flow — Spec: SELF_HEALING_SPEC, WORKFLOW_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C4-04, C7-12, C8-09 (for user-selected already-structured TCs, or failures that need fresh raw evidence, rerun Webwright only for those TCs, merge the new raw script/actions into existing structured entities, then incrementally regenerate affected generated files)
 - [ ] **C12-10** TC retire recommendation and cleanup flow — Spec: SELF_HEALING_SPEC, STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C12-08, C8-10 (for removed product areas, present a human-confirmed retire/delete action that explains the failure reason and cleans up generated artifacts safely)
 
@@ -418,6 +418,6 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 
 - [x] **B1-02** conftest/pytest-playwright contract — Spec: GENERATED_PROJECT_SPEC | Phase 1 | Layer: Template | Depends: B1-01 (runtime+template pass: pytest plugin registration, TC_HEADLESS, PLAYWRIGHT_BROWSERS_PATH contract documented and implemented)
 - [x] **I-07** Runtime Profile + prepare-runtime installer bundle — Spec: RUNTIME_SPEC, GENERATED_PROJECT_SPEC | Phase 5 | Layer: Infra | Depends: I-05 (runtime pass: runtime profile resolver, bundled python env wiring, prepare-runtime.ps1, and dist:win:full path)
-- [ ] **I-08** clean Windows `dist:win:full` validation — Spec: RUNTIME_SPEC | Phase 5 | Layer: Quality | Depends: I-07, C3-08, E-09, E-10 (install on clean Windows, validate bundled runtime, generate raw with real Webwright, generate structured project, run in-app Runner, and record evidence)
+- [x] **I-08** clean Windows `dist:win:full` validation — Spec: RUNTIME_SPEC | Phase 5 | Layer: Quality | Depends: I-07, C3-08, E-09, E-10 (verified 2026-06-04: clean full rebuild, real bundled runtime/notices, silent NSIS install into a new directory, fresh Electron profile, installed live `/health allOk=true`, real non-mock Webwright final script plus RawAction indexing, generated project, and bundled Chromium Runner `1 passed`)
 - [ ] **I-09** runtime/docs encoding and checklist ID cleanup — Spec: RUNTIME_SPEC | Phase 5 | Layer: Docs | Depends: I-07 (fix mojibake in Korean spec docs, remove duplicate/misplaced checklist IDs, and align progress summary with open runtime follow-ups)
 

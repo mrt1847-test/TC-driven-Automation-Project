@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
 import { join } from 'path'
 import { existsSync } from 'fs'
+import { getCredential, setCredential } from './credentials'
 
 const WORKER_PORT = 8765
 const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`
@@ -9,6 +10,34 @@ const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`
 let mainWindow: BrowserWindow | null = null
 let workerProcess: ChildProcessWithoutNullStreams | null = null
 let workerKillTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Packaged Windows apps often have no console; writing to stdout/stderr then throws EPIPE. */
+function safeWrite(stream: NodeJS.WriteStream, text: string): void {
+  try {
+    if (!stream.writable || stream.destroyed) return
+    stream.write(text)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code
+    if (code !== 'EPIPE' && code !== 'ERR_STREAM_DESTROYED') {
+      throw error
+    }
+  }
+}
+
+function logWorkerChunk(kind: 'stdout' | 'stderr', chunk: Buffer | string): void {
+  const text = typeof chunk === 'string' ? chunk : chunk.toString()
+  const line = `[worker] ${text}`
+  if (kind === 'stderr') {
+    safeWrite(process.stderr, line)
+  } else {
+    safeWrite(process.stdout, line)
+  }
+}
+
+function detachWorkerStreamHandlers(proc: ChildProcessWithoutNullStreams): void {
+  proc.stdout?.removeAllListeners('data')
+  proc.stderr?.removeAllListeners('data')
+}
 
 function getWorkerDir(): string {
   const devWorkerDir = join(__dirname, '../../../worker')
@@ -39,7 +68,9 @@ function buildWorkerEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     TC_STUDIO_DATA_DIR: join(app.getPath('userData'), 'data'),
-    TC_STUDIO_PYTHON: resolvePythonExecutable()
+    TC_STUDIO_PYTHON: resolvePythonExecutable(),
+    PYTHONUTF8: process.env.PYTHONUTF8 ?? '1',
+    PYTHONIOENCODING: process.env.PYTHONIOENCODING ?? 'utf-8'
   }
   const runtimeRoot = getBundledRuntimeRoot()
   if (runtimeRoot) {
@@ -66,9 +97,10 @@ function startWorker(): void {
     ['-m', 'uvicorn', 'worker.main:app', '--host', '127.0.0.1', '--port', String(WORKER_PORT)],
     { cwd: workerDir, env: buildWorkerEnv() }
   )
-  workerProcess.stdout.on('data', (d) => console.log('[worker]', d.toString()))
-  workerProcess.stderr.on('data', (d) => console.error('[worker]', d.toString()))
+  workerProcess.stdout.on('data', (d) => logWorkerChunk('stdout', d))
+  workerProcess.stderr.on('data', (d) => logWorkerChunk('stderr', d))
   workerProcess.on('exit', () => {
+    detachWorkerStreamHandlers(workerProcess!)
     workerProcess = null
     if (workerKillTimer) {
       clearTimeout(workerKillTimer)
@@ -82,6 +114,7 @@ function stopWorker(): void {
 
   const processToStop = workerProcess
   workerProcess = null
+  detachWorkerStreamHandlers(processToStop)
   processToStop.kill('SIGTERM')
   workerKillTimer = setTimeout(() => {
     if (processToStop.exitCode === null) {
@@ -157,20 +190,18 @@ ipcMain.handle('open-third-party-notices', async () => {
 })
 
 ipcMain.handle('credential-set', async (_e, service: string, account: string, password: string) => {
-  try {
-    const keytar = await import('keytar')
-    await keytar.setPassword(service, account, password)
-    return true
-  } catch {
-    return false
+  const result = await setCredential(service, account, password)
+  if (result.ok) {
+    return { ok: true as const }
   }
+  safeWrite(process.stderr, `[credential-set] ${result.message}\n`)
+  return { ok: false as const, message: result.message }
 })
 
 ipcMain.handle('credential-get', async (_e, service: string, account: string) => {
-  try {
-    const keytar = await import('keytar')
-    return await keytar.getPassword(service, account)
-  } catch {
-    return null
+  const result = await getCredential(service, account)
+  if (result.ok) {
+    return { ok: true as const, password: result.password }
   }
+  return { ok: false as const, message: result.message }
 })

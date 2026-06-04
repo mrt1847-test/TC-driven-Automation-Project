@@ -1,8 +1,52 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, Field, ConfigDict
+
+
+class FailureTargetResolution(BaseModel):
+    status: Literal["resolved", "missing", "ambiguous"]
+    reason: str
+    execution_result_id: Optional[str] = None
+    execution_run_id: Optional[str] = None
+    project_id: Optional[str] = None
+    automation_key: Optional[str] = None
+    source_type: Optional[str] = None
+    source_case_id: Optional[str] = None
+    structured_step_id: Optional[str] = None
+    page_object_method_id: Optional[str] = None
+    test_case_ids: list[str] = Field(default_factory=list)
+    generated_file_ids: list[str] = Field(default_factory=list)
+    structured_flow_ids: list[str] = Field(default_factory=list)
+    structured_step_ids: list[str] = Field(default_factory=list)
+    page_object_method_ids: list[str] = Field(default_factory=list)
+    mapping_ids: list[str] = Field(default_factory=list)
+    raw_action_ids: list[str] = Field(default_factory=list)
+    webwright_run_ids: list[str] = Field(default_factory=list)
+    artifact_ids: list[str] = Field(default_factory=list)
+
+
+class FailureDispositionDiagnosis(BaseModel):
+    execution_result_id: str
+    automation_key: Optional[str] = None
+    disposition: Literal[
+        "selector_changed",
+        "raw_refresh_required",
+        "feature_removed_retire_tc",
+        "unknown",
+    ]
+    reason: str
+    confidence: float = Field(ge=0, le=1)
+    evidence_artifact_ids: list[str] = Field(default_factory=list)
+    selector_candidate_ids: list[str] = Field(default_factory=list)
+    target: FailureTargetResolution
+
+
+class ExecutionDiagnosis(BaseModel):
+    project_id: str
+    execution_id: str
+    diagnoses: list[FailureDispositionDiagnosis] = Field(default_factory=list)
 
 
 class TestStep(BaseModel):
@@ -94,6 +138,7 @@ class ActionItem(BaseModel):
 
 
 class MappingItem(BaseModel):
+    id: Optional[str] = None
     tc_step_index: int
     action_ids: list[str] = Field(default_factory=list)
     normalized_step_id: Optional[str] = None

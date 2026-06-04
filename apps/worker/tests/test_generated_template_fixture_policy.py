@@ -50,6 +50,7 @@ def test_pytest_runner_passes_fixture_policy_environment(monkeypatch) -> None:
     monkeypatch.delenv("TC_BASE_URL", raising=False)
     env = pytest_runner._subprocess_env("stg", "run_123", "chromium")
 
+    assert env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
     assert env["TC_ENV"] == "stg"
     assert env["TC_RUN_ID"] == "run_123"
     assert env["TC_BROWSER"] == "chromium"

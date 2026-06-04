@@ -8,7 +8,8 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "pack:win": "npm run build && npx electron-builder@26.0.12 --win dir --config electron-builder.json",
-    "dist:win": "npm run build && npx electron-builder@26.0.12 --win nsis --config electron-builder.json"
+    "dist:win": "npm run build && npx electron-builder@26.0.12 --win nsis --config electron-builder.json",
+    "rebuild:native": "electron-rebuild -f -w keytar"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -27,6 +28,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^33.2.1",
+    "@electron/rebuild": "^3.7.1",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",

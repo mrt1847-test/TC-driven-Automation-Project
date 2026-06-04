@@ -135,6 +135,16 @@ def test_webwright_action_extraction_persists_selector_candidates(
     import worker.core.database as database
 
     with Session(database.engine) as session:
+        actions = session.exec(
+            select(RawAction)
+            .where(RawAction.webwright_run_id == run["id"])
+            .order_by(RawAction.order_index)
+        ).all()
+        goto_action = next(action for action in actions if action.type == "goto")
+        assert goto_action.target.startswith("data:text/html,")
+        click_action = next(action for action in actions if action.type == "click")
+        assert click_action.selector == "page.get_by_role('link', name='More information')"
+
         candidates = session.exec(
             select(SelectorCandidate)
             .where(SelectorCandidate.selector_type == SelectorCandidateType.role.value)
