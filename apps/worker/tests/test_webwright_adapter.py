@@ -93,7 +93,7 @@ def test_webwright_run_finishes_when_output_pipe_stays_open(monkeypatch, tmp_pat
         messages.append(message)
 
     monkeypatch.setattr(webwright_adapter, "resolve_runtime", lambda: profile)
-    monkeypatch.setattr(webwright_adapter.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(webwright_adapter, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(webwright_adapter.log_streams, "publish", capture_publish)
     monkeypatch.setattr(webwright_adapter, "index_webwright_run_artifacts", lambda *_args: None)
     monkeypatch.setattr(webwright_adapter, "PIPE_DRAIN_TIMEOUT_SECONDS", 0.01)
@@ -142,7 +142,7 @@ def test_webwright_run_includes_batch_and_case_prompt_context(monkeypatch, tmp_p
         return None
 
     monkeypatch.setattr(webwright_adapter, "resolve_runtime", lambda: profile)
-    monkeypatch.setattr(webwright_adapter.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(webwright_adapter, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(webwright_adapter.log_streams, "publish", capture_publish)
     monkeypatch.setattr(webwright_adapter, "index_webwright_run_artifacts", lambda *_args: None)
 
@@ -172,7 +172,7 @@ def test_webwright_run_records_unexpected_spawn_error(monkeypatch, tmp_path: Pat
         messages.append(message)
 
     monkeypatch.setattr(webwright_adapter, "resolve_runtime", lambda: profile)
-    monkeypatch.setattr(webwright_adapter.asyncio, "create_subprocess_exec", fail_create_subprocess_exec)
+    monkeypatch.setattr(webwright_adapter, "create_subprocess_exec", fail_create_subprocess_exec)
     monkeypatch.setattr(webwright_adapter.log_streams, "publish", capture_publish)
     monkeypatch.setattr(webwright_adapter, "index_webwright_run_artifacts", lambda *_args: None)
 

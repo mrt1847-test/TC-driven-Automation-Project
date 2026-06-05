@@ -10,6 +10,7 @@ from typing import Any
 
 from worker.core.config import mask_secrets, new_id
 from worker.core.runtime import resolve_runtime
+from worker.core.subprocess_compat import create_subprocess_exec
 from worker.core.log_stream import log_streams
 from worker.services.prompt_payloads import build_webwright_prompt_payload_components, record_webwright_prompt_payload
 from worker.models.db import Project, TestCase, WebwrightRun, WebwrightRunStatus
@@ -102,7 +103,7 @@ async def _stream_pipe(
 
 
 async def _publish_heartbeat(
-    process: asyncio.subprocess.Process,
+    process: Any,
     job_id: str,
     automation_key: str,
 ) -> None:
@@ -114,7 +115,7 @@ async def _publish_heartbeat(
             await log_streams.publish(job_id, f"[webwright] {automation_key} still running ({elapsed}s elapsed)")
 
 
-async def _stop_process(process: asyncio.subprocess.Process) -> None:
+async def _stop_process(process: Any) -> None:
     if process.returncode is None:
         try:
             process.kill()
@@ -224,7 +225,7 @@ async def run_webwright_for_case(
     stderr_path.write_text("", encoding="utf-8")
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
-    process: asyncio.subprocess.Process | None = None
+    process: Any = None
     stream_tasks: list[asyncio.Task[Any]] = []
     heartbeat_task: asyncio.Task[Any] | None = None
     timed_out = False
@@ -234,7 +235,7 @@ async def run_webwright_for_case(
         if execution_mode == "wsl":
             inner = " ".join([f"'{c}'" if " " in c else c for c in cmd])
             shell_cmd = ["wsl.exe", "bash", "-lc", f"cd {webwright_root} && source .venv/bin/activate && {inner}"]
-            process = await asyncio.create_subprocess_exec(
+            process = await create_subprocess_exec(
                 *shell_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -242,7 +243,7 @@ async def run_webwright_for_case(
                 env=subprocess_env,
             )
         else:
-            process = await asyncio.create_subprocess_exec(
+            process = await create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

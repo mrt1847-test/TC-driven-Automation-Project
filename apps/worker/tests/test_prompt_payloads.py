@@ -97,7 +97,7 @@ def _patch_successful_webwright(monkeypatch, tmp_path: Path, captured_prompt: li
         return None
 
     monkeypatch.setattr(webwright_adapter, "resolve_runtime", lambda: profile)
-    monkeypatch.setattr(webwright_adapter.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(webwright_adapter, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(webwright_adapter.log_streams, "publish", capture_publish)
     monkeypatch.setattr(webwright_adapter, "index_webwright_run_artifacts", lambda *_args: None)
 

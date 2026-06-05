@@ -16,16 +16,30 @@ from worker.models.schemas import ExcelColumnMapping, ExcelImportRequest, ExcelP
 DEFAULT_MAPPING = ExcelColumnMapping()
 
 
+def _split_import_lines(raw_text: str) -> list[str]:
+    return [line.strip() for line in re.split(r"[\n;]+", raw_text or "") if line.strip()]
+
+
 def _parse_steps(raw_step: str, raw_expected: str) -> list[TestStep]:
-    steps: list[TestStep] = []
-    step_lines = [s.strip() for s in re.split(r"[\n;]+", raw_step or "") if s.strip()]
-    expected_lines = [s.strip() for s in re.split(r"[\n;]+", raw_expected or "") if s.strip()]
+    step_lines = _split_import_lines(raw_step)
+    expected_lines = _split_import_lines(raw_expected)
     if not step_lines and raw_step:
         step_lines = [raw_step.strip()]
-    for idx, action in enumerate(step_lines, start=1):
-        expected = expected_lines[idx - 1] if idx - 1 < len(expected_lines) else None
-        steps.append(TestStep(index=idx, action=action, expected=expected))
-    return steps
+
+    # A single expected value with multiple steps is treated as the TC-level
+    # expected result only, not as the first step's per-step expectation.
+    if len(expected_lines) == 1 and len(step_lines) > 1:
+        per_step_expected: list[str | None] = [None] * len(step_lines)
+    else:
+        per_step_expected = [
+            expected_lines[idx - 1] if idx - 1 < len(expected_lines) else None
+            for idx in range(1, len(step_lines) + 1)
+        ]
+
+    return [
+        TestStep(index=idx, action=action, expected=per_step_expected[idx - 1])
+        for idx, action in enumerate(step_lines, start=1)
+    ]
 
 
 def _generate_automation_key(title: str, case_id: str, existing: set[str]) -> str:

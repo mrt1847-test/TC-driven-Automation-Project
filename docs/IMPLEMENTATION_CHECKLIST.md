@@ -1,7 +1,7 @@
 ﻿# Implementation Checklist
 
 **Last updated:** 2026-06-06
-**Current phase:** Phase 5
+**Current phase:** Post-MVP
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
 **UI/UX:** [UI_UX_DIRECTION.md](./UI_UX_DIRECTION.md)  
@@ -23,13 +23,15 @@
 |----------|------|-------|
 | A. Infra | 33 | 33 |
 | B. Template | 20 | 20 |
-| C. Worker | 87 | 87 |
-| D. GUI | 49 | 49 |
+| C. Worker | 87 | 98 |
+| D. GUI | 49 | 53 |
 | E. E2E | 12 | 12 |
 | F. Errors | 4 | 4 |
-| G. Security | 3 | 3 |
+| G. Security | 3 | 4 |
 | H. MVP Gates | 4 | 4 |
-| I. Quality | 9 | 9 |
+| I. Quality | 9 | 10 |
+
+Post-MVP optional extensions live in section **J** but keep their C/D ID prefixes (`C7-14`, `C12-13`, `D1-08`, `D9-04`).
 
 
 ## Implementation audit (2026-06-02)
@@ -38,7 +40,7 @@ Scope checked: repository, spec docs under `docs/`, `npm run build`, worker `tes
 
 - **Shipped (runtime + structuring pass):** `RuntimeProfile` resolver, `settings.runtime`, unified health/validate/install, Webwright live readiness gate, DB-backed structuring (`structure/sync`, `structure/validate`), DB-backed `project_generator`, generated-template `pytest_plugins` + single pytest invocation, `ensure_generated_runtime`, Electron bundled env, `prepare-runtime.ps1` + `dist:win:full`, Setup/Settings bundled read-only paths, Runner **Install Runtime** UX. Spec: [RUNTIME_SPEC.md](./RUNTIME_SPEC.md).
 - **Build gate:** `npm run build` passes; I-06, I-07 closed.
-- **Spec gaps to keep open:** Webwright subprocess cancel (not only DB status).
+- **Post-MVP gaps (2026-06-06 docs audit):** tracked as open checklist rows — subprocess cancel (C3-09, C9-08), Generate Raw Worker C2 prompt wiring (D4-07), API_SPEC Planned/Partial follow-ups (C1-08..09, C7-13, C10-07..08, C12-11..12), and optional Post-MVP extensions (J).
 - **Installer verification resolved (2026-06-04):** clean `dist:win:full`, silent NSIS install into a new directory, fresh Electron user profile, installed bundled live health, installed-app real Webwright raw generation, generated project, and bundled Chromium Runner completion are recorded in RUNTIME_SPEC.
 - **Webwright packaging decision:** resolved by C3-08. Product/live `prepare-runtime` now defaults to vendored `third_party/webwright` with license/notice/version metadata; explicit external `WEBWRIGHT_SOURCE` + `WEBWRIGHT_SOURCE_VERSION` or pinned `WEBWRIGHT_PIP_PACKAGE` remains supported; mock staging requires explicit opt-in.
 
@@ -152,8 +154,10 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C1-02** Excel preview API — §7.2 | Phase 1 | Layer: Worker | Depends: C1-01
 - [x] **C1-03** Excel import API — §7.2 | Phase 1 | Layer: Worker | Depends: C1-02
 - [x] **C1-04** testrail-clone import adapter — §5.5 | Phase 3 | Layer: Worker | Depends: C1-01
-- [x] **C1-05** TestRail import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01
-- [x] **C1-06** Google Sheets import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01
+- [x] **C1-05** TestRail import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01 (baseline stub connector verified for preview/import UI; real TestRail API v2 tracked by C1-08)
+- [x] **C1-06** Google Sheets import adapter — §5.5 | Phase 4 | Layer: Worker | Depends: C1-01 (baseline stub connector verified for preview/import UI; real Sheets API/OAuth tracked by C1-09)
+- [ ] **C1-08** TestRail import real API — §5.5, §14.4 | Phase 4 | Layer: Worker | Depends: C1-05, G-04 | Spec: API_SPEC (replace placeholder import with authenticated TestRail API v2)
+- [ ] **C1-09** Google Sheets import real API — §5.5, §14.4 | Phase 4 | Layer: Worker | Depends: C1-06, G-04 | Spec: API_SPEC (replace placeholder import with service-account or OAuth-backed Sheets read)
 - [x] **C1-07** GET/PATCH /cases — §7.2 | Phase 1 | Layer: Worker | Depends: C1-01
 
 ### C2. Prompt Builder — §5.6
@@ -176,13 +180,14 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C3-06** error classification — §12.1 | Phase 5 | Layer: Worker | Depends: C3-05
 - [x] **C3-07** live Webwright CLI readiness probe — Spec: RUNTIME_SPEC | Phase 1 | Layer: Worker | Depends: C3-01 (verified: health/run gate now uses root/python/config/CLI import readiness; placeholder `base.yaml` alone falls back to explicit mock mode; `python -m pytest tests/test_runtime.py tests/e2e/test_smoke.py -q` passed from `apps/worker`)
 - [x] **C3-08** Webwright package source/version freeze — Spec: RUNTIME_SPEC | Phase 1 | Layer: Infra | Depends: C3-07 (verified: product/live `prepare-runtime` defaults to vendored `third_party/webwright` with MIT license/notice/version metadata; explicit external source/package override remains supported; `-WebwrightMode mock -ValidateOnly` passes; unpinned `-WebwrightPipPackage webwright -ValidateOnly` fails)
+- [ ] **C3-09** Webwright subprocess cancel — §7.3 | Phase 5 | Layer: Worker | Depends: C3-02, C4-04 | Spec: API_SPEC (terminate in-flight Webwright CLI subprocess, close log stream, and align Stop UX with real cancellation instead of DB-only `cancelled` status)
 
 ### C4. Webwright Run Service — §5.7
 
 - [x] **C4-01** 1 TC = 1 Run — §5.7 | Phase 1 | Layer: Worker | Depends: C3-02
 - [x] **C4-02** 상태 모델 — §5.7 | Phase 1 | Layer: Worker | Depends: A2-03
 - [x] **C4-03** artifact 디렉터리 + metadata.json — §5.7 | Phase 1 | Layer: Worker | Depends: C4-01
-- [x] **C4-04** API create/list/get/cancel/retry — §7.3 | Phase 1 | Layer: Worker | Depends: C4-03
+- [x] **C4-04** API create/list/get/cancel/retry — §7.3 | Phase 1 | Layer: Worker | Depends: C4-03 (cancel endpoint currently updates DB status only until C3-09)
 - [x] **C4-05** Action Extraction 자동 트리거 — §11.2 | Phase 1 | Layer: Worker | Depends: C4-04, C5-04
 
 ### C5. Action Extraction Service — §5.8
@@ -217,6 +222,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C7-10** stale/conflict detection for regeneration — Spec: STRUCTURING_SPEC, DB_SCHEMA | Phase 2 | Layer: Worker | Depends: C7-09 (verified 2026-06-05: generated-file status refresh compares stored `content_hash` with current on-disk hashes, marks edited files, preflights planned incremental content to mark stale or conflict, blocks source-changed edited files before overwrite, and surfaces generated-file issues through structure validation and generated-file metadata; focused and related generation/maintenance tests passed)
 - [x] **C7-11** structured method body planner coverage — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C5-03, C6-07, C7-08 (verified 2026-06-04: structuring compiles ordered multi-run/multi-action mappings into deterministic traceable body plans, preserves assertion/wait/select/check/upload selectors and value templates, refreshes existing POM plans, and forces review for unsupported/missing actions and hard waits; focused and related tests passed)
 - [x] **C7-12** selected raw refresh merge into existing structure — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-11, C8-07 (verified 2026-06-05: selected Webwright reruns conservatively match equivalent replacement actions, preserve reviewed mapping/flow/step/POM identities, names, order, and unrelated cases, remap raw-action links and refresh safe body plans in place, and mark count/order/ambiguity/shared-method conflicts as `needs_review`; focused and related structuring/traceability tests passed)
+- [ ] **C7-13** project-level stale/conflict API — Spec: API_SPEC, STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C7-10, C8-06 (project-wide edited/stale/conflict summary beyond per-case `structure/validate`)
 
 ### C8. Project Generator Service — §5.11
 
@@ -237,18 +243,21 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C9-02** env/browser/headless/target 전달 — §5.13 | Phase 1 | Layer: Worker | Depends: C9-01
 - [x] **C9-03** stdout/stderr WebSocket — §5.13 | Phase 1 | Layer: Worker | Depends: A4-03, C9-01
 - [x] **C9-04** results.json 파싱 — §5.13 | Phase 1 | Layer: Worker | Depends: C9-01, A2-06
-- [x] **C9-05** Runner API — §7.6 | Phase 1 | Layer: Worker | Depends: C9-04
+- [x] **C9-05** Runner API — §7.6 | Phase 1 | Layer: Worker | Depends: C9-04 (execution cancel endpoint currently updates DB status only until C9-08)
 - [x] **C9-06** generated runtime bootstrap fail-fast — Spec: RUNTIME_SPEC, GENERATED_PROJECT_SPEC | Phase 1 | Layer: Worker | Depends: C9-01, B1-02 (verified: bootstrap failure now stops before `runner.cli`, writes stdout/stderr/results artifacts, returns actionable bootstrap status/logs, and `python -m pytest tests/test_generated_runtime.py tests/test_runtime.py tests/e2e/test_smoke.py -q` passed)
 - [x] **C9-07** per-project runtime install state/cache — Spec: RUNTIME_SPEC | Phase 2 | Layer: Worker | Depends: C9-06 (verified 2026-06-05: generated runtime bootstrap stores successful per-project readiness by generated project path/hash, requirements hash, runtime manifest hash, RuntimeProfile hash, Python path, browser, and browser cache; cache hits skip redundant pip/Playwright install commands while still verifying the browser executable; stale requirements/runtime/profile/browser inputs rerun bootstrap; failed installs are not cached as ready; `python -m pytest tests/test_generated_runtime_cache.py tests/test_generated_runtime.py -q` passed)
+- [ ] **C9-08** execution subprocess cancel — §7.6 | Phase 5 | Layer: Worker | Depends: C9-05, C9-01 | Spec: API_SPEC (terminate in-flight `runner.cli` subprocess and align execution Stop UX with real cancellation instead of DB-only `cancelled` status)
 
 ### C10. Result Export Service — §5.14
 
 - [x] **C10-01** testrail-clone bulk upload — §5.14 | Phase 3 | Layer: Worker | Depends: C9-04
-- [x] **C10-02** TestRail result update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
+- [x] **C10-02** TestRail result update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04 (baseline local-mock export gate verified for H-04; real TestRail write-back tracked by C10-07)
 - [x] **C10-03** Excel write-back — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
-- [x] **C10-04** Google Sheets update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
+- [x] **C10-04** Google Sheets update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04 (baseline local-mock export gate verified for H-04; real Sheets write-back tracked by C10-08)
 - [x] **C10-05** export preview + 이중 검증 — §17.3 | Phase 4 | Layer: Worker | Depends: C10-01 (verified 2026-06-05: preview returns deterministic target payloads plus validation without external/file/ExportLog mutation; non-preview export rejects missing, duplicate, or mismatched results/ExecutionResult/mappings identity rows before target mutation; `python -m pytest tests/test_result_export_validation.py tests/e2e/test_export.py -q` passed)
 - [x] **C10-06** Export API — §7.7 | Phase 3-4 | Layer: Worker | Depends: C10-01
+- [ ] **C10-07** TestRail export real API — §5.14, §14.4 | Phase 4 | Layer: Worker | Depends: C10-02, G-04 | Spec: API_SPEC (replace local-mock result update with authenticated TestRail API write-back)
+- [ ] **C10-08** Google Sheets export real API — §5.14, §14.4 | Phase 4 | Layer: Worker | Depends: C10-04, G-04 | Spec: API_SPEC (replace local-mock result update with authenticated Sheets write-back)
 
 ### C11. Project IDE Service — §5.12
 
@@ -268,6 +277,8 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C12-08** failure disposition classifier — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C12-04, C12-03 (verified 2026-06-04: read-only execution diagnosis endpoint classifies each failed result as `selector_changed`, `raw_refresh_required`, `feature_removed_retire_tc`, or conservative `unknown`, returning reason/confidence/evidence/target context without applying maintenance actions)
 - [x] **C12-09** selected TC Webwright refresh regeneration flow — Spec: SELF_HEALING_SPEC, WORKFLOW_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C4-04, C7-12, C8-09 (verified 2026-06-05: the selected-case maintenance API returns traceable run/merge/generation outcomes, preserves prior raw evidence and unrelated structured/generated cases, incrementally regenerates only after a safe raw merge, and stops without generated-file rewrites on review-required changes; focused and related raw refresh/generation tests passed)
 - [x] **C12-10** TC retire recommendation and cleanup flow — Spec: SELF_HEALING_SPEC, STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C12-08, C8-10 (verified 2026-06-05: a diagnosis-bound execution-result endpoint requires explicit confirmation, reclassifies the failed result, verifies resolved project/execution/automation-key/source/sole-TC identity before invoking C8-10, rejects unresolved/non-feature/mismatched/unconfirmed requests without mutation, and returns diagnosis reason/confidence/evidence with deterministic cleanup details; focused disposition/cleanup/diagnosis tests passed)
+- [ ] **C12-11** artifact read API — Spec: API_SPEC, SELF_HEALING_SPEC | Phase 5 | Layer: Worker | Depends: C12-01, C12-03 | Spec: API_SPEC Planned (`GET /projects/{id}/artifacts?automation_key=...`)
+- [ ] **C12-12** selector-candidates read API — Spec: API_SPEC, SELF_HEALING_SPEC | Phase 5 | Layer: Worker | Depends: C12-02 | Spec: API_SPEC Planned (`GET /projects/{id}/cases/{case_id}/selector-candidates`)
 
 ---
 
@@ -318,7 +329,8 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D4-03** raw script/log/folder — §10.4 | Phase 1 | Layer: GUI | Depends: D4-01 (baseline raw artifact links verified; folder, final script, trajectory, stdout, and stderr open from latest run data)
 - [x] **D4-04** LLM provider/API key 입력 + 검증 UI — Spec: PRODUCT_PILLARS, UI_UX_DIRECTION | Phase 1 | Layer: GUI | Depends: A3-03, A3-05 (baseline Generate Raw LLM provider/key panel verified; provider saves to settings, key saves through keytar, and key presence check runs before raw generation)
 - [x] **D4-05** prompt composer(batch shared + per-case override) — Spec: PRODUCT_PILLARS | Phase 1 | Layer: GUI | Depends: C2-04 (baseline Generate Raw prompt composer verified; batch prompt and selected-case override persist through settings)
-- [x] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06 (baseline local preset selector and prompt preview verified; preview combines selected TC, preset guidance, batch prompt, and case override)
+- [x] **D4-06** prompt preset selector + prompt preview — Spec: PRODUCT_PILLARS, API_SPEC | Phase 1 | Layer: GUI | Depends: C2-06 (baseline local preset selector and prompt preview verified; preview combines selected TC, preset guidance, batch prompt, and case override from settings — Worker C2 API wiring tracked by D4-07)
+- [ ] **D4-07** Worker C2 prompt API GUI wiring — Spec: API_SPEC, PRODUCT_PILLARS | Phase 5 | Layer: GUI | Depends: C2-04, C2-05, C2-06, D4-05, D4-06 | Spec: API_SPEC (wire `prompt-composer`, `prompt-presets`, and `prompt-preview` APIs; persist batch/case overrides and preset selection through Worker instead of settings-only/local preview)
 
 ### D5. Automation IDE: Mapping & Structure — §10.5 — Workspace: Automation IDE
 
@@ -329,6 +341,7 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08 (baseline Page Object method planner verified; per-step POM method names are editable and saved through existing mappings API)
 - [x] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09 (verified 2026-06-06: Mapping draft validation plus Automation IDE generation conflict UX now parse Worker 409 edited/stale/conflict summaries, show recovery guidance, support preview/apply selected regeneration, and surface conflicts from guarded maintenance actions; `npm run build` passed)
 - [x] **D5-07** selector candidate/evidence viewer — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-02 (baseline selector evidence viewer verified; Mapping pane derives selector candidates from raw actions and links artifact evidence from latest Webwright run)
+- [ ] **D5-08** Worker structure validate API in Mapping — Spec: STRUCTURING_SPEC, API_SPEC | Phase 5 | Layer: GUI | Depends: C7-09, D5-06 | Spec: API_SPEC (call Worker `structure/validate` from Mapping Review instead of client-only draft validation only)
 
 ### D6. Automation IDE: Project Editing — §10.6 — Workspace: Automation IDE
 
@@ -396,6 +409,7 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **G-01** API key 평문 저장 금지 — §13.1 | Phase 0 | Layer: Infra | Depends: A3-03 (verified 2026-06-05: Worker settings save/load and `/settings` responses strip secret-looking keys such as apiKey/token/password recursively while preserving provider/model config; Electron credential checks return presence only to the renderer and keep model discovery secret use in main process; `python -m pytest tests/test_settings_security.py tests/test_runtime.py tests/test_generated_runtime.py tests/test_generated_runtime_cache.py -q` and `npm run build` passed)
 - [x] **G-02** 로그 마스킹 — §13.2 | Phase 5 | Layer: Worker | Depends: A4-03 (verified 2026-06-06: Worker `mask_secrets` now redacts provider keys, bearer tokens, password assignments, session cookies, and secret env values; WebSocket log buffers mask centrally; execution/export persisted messages use the same redaction; generated-template `secret_redaction` patterns aligned; `python -m pytest tests/test_log_masking.py tests/test_generated_runtime.py tests/e2e/test_cli_standalone.py -q` passed)
 - [x] **G-03** generated project secret 분리 — §13.3 | Phase 1 | Layer: Template | Depends: B1-03 (verified 2026-06-05: generated-template runner redacts secret env values before writing stdout/stderr/results artifacts, Worker runner/bootstrap artifacts apply the same value-based masking, template copy skips `.env*` and local secret override config files, generated `.gitignore` ignores secret overrides, and runtime manifests exclude API key values/names; `python -m pytest tests/test_generated_runtime.py tests/test_generated_template_fixture_policy.py tests/test_regeneration_guard.py tests/e2e/test_cli_standalone.py -q` and `npm run build` passed)
+- [ ] **G-04** connector OAuth/token storage — §8.2, §13.1 | Phase 4 | Layer: Infra | Depends: G-01, A3-03 | Spec: API_SPEC (TestRail/Google Sheets credentials via OS credential store without persisting tokens in `settings.json`)
 
 ---
 
@@ -419,4 +433,16 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **I-07** Runtime Profile + prepare-runtime installer bundle — Spec: RUNTIME_SPEC, GENERATED_PROJECT_SPEC | Phase 5 | Layer: Infra | Depends: I-05 (runtime pass: runtime profile resolver, bundled python env wiring, prepare-runtime.ps1, and dist:win:full path)
 - [x] **I-08** clean Windows `dist:win:full` validation — Spec: RUNTIME_SPEC | Phase 5 | Layer: Quality | Depends: I-07, C3-08, E-09, E-10 (verified 2026-06-04: clean full rebuild, real bundled runtime/notices, silent NSIS install into a new directory, fresh Electron profile, installed live `/health allOk=true`, real non-mock Webwright final script plus RawAction indexing, generated project, and bundled Chromium Runner `1 passed`)
 - [x] **I-09** runtime/docs encoding and checklist ID cleanup — Spec: RUNTIME_SPEC | Phase 5 | Layer: Docs | Depends: I-07 (verified 2026-06-06: Korean spec docs under `docs/` contain no mojibake on UTF-8 readback; duplicate misplaced `B1-02` row removed from section I and folded into `B3-04`; progress summary aligned to D 49/49, E 12/12, I 9/9; stale runtime planning gaps marked resolved)
+- [ ] **I-10** third-party legal packaging gate — Spec: THIRD_PARTY_LEGAL, RUNTIME_SPEC | Phase 5 | Layer: Quality | Depends: I-08 | Spec: THIRD_PARTY_LEGAL (release runbook: `validate-third-party.ps1`, packaged `THIRD_PARTY_NOTICES.txt`, and notice freshness checks before distribution)
+
+---
+
+## J. Post-MVP 확장 — Spec follow-ups
+
+Optional product depth after MVP gates. These are tracked separately from the core MVP checklist closure.
+
+- [ ] **C12-13** extended healing proposal kinds — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 5 | Layer: Worker | Depends: C12-05 | Spec: DB_SCHEMA (`wait_adjust`, `assertion_update`, `pom_method_patch` beyond `selector_replace`)
+- [ ] **C7-14** generated protected regions — Spec: STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C7-10, C8-06 | Spec: STRUCTURING_SPEC (manual-edit protected regions during regeneration; conflict detection exists, region preservation does not)
+- [ ] **D1-08** automation_key deep linking — Spec: UI_UX_DIRECTION, PRODUCT_PILLARS | Phase 5 | Layer: GUI | Depends: D1-05 | Spec: UI_UX_DIRECTION (route/deeplink to a case by `automation_key` beyond persisted handoff state)
+- [ ] **D9-04** self-healing auto-apply Settings toggle — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 5 | Layer: GUI | Depends: C12-07, D9-02 | Spec: API_SPEC (`self_healing.autoApplyProjectIds` exposed as structured Settings control instead of advanced JSON only)
 

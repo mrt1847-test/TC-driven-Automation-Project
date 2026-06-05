@@ -37,6 +37,17 @@ source-of-truth documents above.
 | [WORKFLOW_SPEC.md](./WORKFLOW_SPEC.md) | E2E sequence and acceptance notes | No, references E/H items |
 | [NEXT_ACTIONS.md](./NEXT_ACTIONS.md) | AI operating queue for the next implementation batch | No, points to one checklist item |
 
+## Post-MVP Checklist Follow-ups
+
+After the 2026-06-06 docs audit, [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md)
+tracks additional open rows for:
+
+- subprocess cancel depth (`C3-09`, `C9-08`);
+- Generate Raw Worker C2 prompt API wiring (`D4-07`);
+- API_SPEC Planned/Partial endpoints (`C7-13`, `C12-11`, `C12-12`);
+- real TestRail/Sheets connector depth (`C1-08`, `C1-09`, `C10-07`, `C10-08`, `G-04`);
+- optional extensions in section **J. Post-MVP**.
+
 ## Runtime Planning Correction
 
 The 2026-06-03 correction adds explicit planning for:

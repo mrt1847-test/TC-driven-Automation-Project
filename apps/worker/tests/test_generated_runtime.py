@@ -58,7 +58,7 @@ def test_runner_bootstrap_failure_stops_before_runner_cli(monkeypatch, tmp_path:
     async def fail_if_runner_starts(*args, **kwargs):  # pragma: no cover - failure path assertion
         raise AssertionError("runner.cli subprocess should not start when bootstrap fails")
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fail_if_runner_starts)
+    monkeypatch.setattr("worker.services.project_runner.create_subprocess_exec", fail_if_runner_starts)
 
     engine = create_engine(f"sqlite:///{tmp_path / 'studio.db'}")
     SQLModel.metadata.create_all(engine)
@@ -117,7 +117,7 @@ def test_runner_bootstrap_failure_redacts_secret_values(monkeypatch, tmp_path: P
     async def fail_if_runner_starts(*args, **kwargs):  # pragma: no cover - failure path assertion
         raise AssertionError("runner.cli subprocess should not start when bootstrap fails")
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fail_if_runner_starts)
+    monkeypatch.setattr("worker.services.project_runner.create_subprocess_exec", fail_if_runner_starts)
 
     engine = create_engine(f"sqlite:///{tmp_path / 'studio.db'}")
     SQLModel.metadata.create_all(engine)

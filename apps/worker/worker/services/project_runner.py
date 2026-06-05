@@ -12,6 +12,7 @@ from worker.core.log_stream import log_streams
 from worker.models.db import ExecutionResult, ExecutionRun, Project
 from worker.models.schemas import ExecutionRequest
 from worker.core.runtime import resolve_runtime
+from worker.core.subprocess_compat import create_subprocess_exec
 from worker.services.artifact_indexing import index_execution_failure_artifacts
 from worker.services.generated_runtime import ensure_generated_runtime
 
@@ -73,7 +74,7 @@ async def run_project(session: Session, project: Project, request: ExecutionRequ
     await log_streams.publish(job_id, f"[runner] {' '.join(cmd)}")
 
     runner_env = profile.subprocess_env({"TC_HEADLESS": "false" if request.headed else "true"})
-    process = await asyncio.create_subprocess_exec(
+    process = await create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -155,7 +156,7 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
     await log_streams.publish(job_id, f"[runner] {' '.join(cmd)}")
 
     runner_env = profile.subprocess_env()
-    process = await asyncio.create_subprocess_exec(
+    process = await create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
