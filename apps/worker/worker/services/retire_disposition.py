@@ -10,16 +10,13 @@ from worker.services.failure_disposition import classify_failure_disposition
 from worker.services.project_generator import retire_generated_case
 
 
-def retire_from_failure_disposition(
+def _validate_failure_disposition_retire(
     session: Session,
     project: Project,
     execution_run: ExecutionRun,
     result: ExecutionResult,
     case: TestCase,
-    request: DispositionRetireRequest,
-) -> dict:
-    if not request.confirmed:
-        raise ValueError("Retire disposition action requires confirmed=true")
+):
     if execution_run.project_id != project.id:
         raise ValueError("Execution does not belong to project")
     if result.execution_run_id != execution_run.id:
@@ -52,7 +49,52 @@ def retire_from_failure_disposition(
         raise ValueError("Execution result source case does not match selected case")
     if result.source_type and result.source_type != case.source_type:
         raise ValueError("Execution result source type does not match selected case")
+    return diagnosis
 
+
+def preview_retire_from_failure_disposition(
+    session: Session,
+    project: Project,
+    execution_run: ExecutionRun,
+    result: ExecutionResult,
+    case: TestCase,
+    request: DispositionRetireRequest,
+) -> dict:
+    diagnosis = _validate_failure_disposition_retire(session, project, execution_run, result, case)
+    output = Path(project.generated_project_path or Path(project.root_path) / "generated")
+    cleanup = retire_generated_case(
+        session,
+        project.id or "",
+        output,
+        case.id or "",
+        action=request.action,
+        reason=diagnosis.reason,
+        preview=True,
+    )
+    return {
+        "status": cleanup["status"],
+        "preview": True,
+        "projectId": project.id,
+        "executionId": execution_run.id,
+        "executionResultId": result.id,
+        "caseId": case.id,
+        "automationKey": case.automation_key,
+        "diagnosis": diagnosis.model_dump(),
+        "cleanup": cleanup,
+    }
+
+
+def retire_from_failure_disposition(
+    session: Session,
+    project: Project,
+    execution_run: ExecutionRun,
+    result: ExecutionResult,
+    case: TestCase,
+    request: DispositionRetireRequest,
+) -> dict:
+    if not request.confirmed:
+        raise ValueError("Retire disposition action requires confirmed=true")
+    diagnosis = _validate_failure_disposition_retire(session, project, execution_run, result, case)
     output = Path(project.generated_project_path or Path(project.root_path) / "generated")
     cleanup = retire_generated_case(
         session,

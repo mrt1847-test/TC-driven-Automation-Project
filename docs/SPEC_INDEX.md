@@ -1,6 +1,6 @@
 # Spec Index
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-06
 
 This index maps product workspaces, implementation areas, and supporting specs.
 Implementation progress is tracked in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).

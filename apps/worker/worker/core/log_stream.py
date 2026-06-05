@@ -6,6 +6,8 @@ from typing import AsyncGenerator
 
 from fastapi import WebSocket
 
+from worker.core.config import mask_secrets
+
 
 class LogStreamManager:
     def __init__(self) -> None:
@@ -23,11 +25,12 @@ class LogStreamManager:
             self._connections[job_id].remove(websocket)
 
     async def publish(self, job_id: str, message: str) -> None:
-        self._buffers[job_id].append(message)
+        safe_message = mask_secrets(message)
+        self._buffers[job_id].append(safe_message)
         dead: list[WebSocket] = []
         for ws in self._connections.get(job_id, []):
             try:
-                await ws.send_text(message)
+                await ws.send_text(safe_message)
             except Exception:
                 dead.append(ws)
         for ws in dead:
@@ -39,7 +42,7 @@ class LogStreamManager:
             line = await process.stdout.readline()
             if not line:
                 break
-            await self.publish(job_id, line.decode("utf-8", errors="replace").rstrip())
+            await self.publish(job_id, line.decode("utf-8", errors="replace").rstrip("\r\n"))
 
 
 log_streams = LogStreamManager()

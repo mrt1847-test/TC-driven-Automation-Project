@@ -1,7 +1,7 @@
 ﻿# Implementation Checklist
 
-**Last updated:** 2026-06-05
-**Current phase:** Phase 1
+**Last updated:** 2026-06-06
+**Current phase:** Phase 5
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
 **UI/UX:** [UI_UX_DIRECTION.md](./UI_UX_DIRECTION.md)  
@@ -23,13 +23,13 @@
 |----------|------|-------|
 | A. Infra | 33 | 33 |
 | B. Template | 20 | 20 |
-| C. Worker | 85 | 87 |
-| D. GUI | 42 | 49 |
-| E. E2E | 9 | 12 |
-| F. Errors | 1 | 4 |
-| G. Security | 0 | 3 |
+| C. Worker | 87 | 87 |
+| D. GUI | 49 | 49 |
+| E. E2E | 12 | 12 |
+| F. Errors | 4 | 4 |
+| G. Security | 3 | 3 |
 | H. MVP Gates | 4 | 4 |
-| I. Quality | 7 | 8 |
+| I. Quality | 9 | 9 |
 
 
 ## Implementation audit (2026-06-02)
@@ -47,8 +47,8 @@ Scope checked: repository, spec docs under `docs/`, `npm run build`, worker `tes
 Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, generated-template pytest fixtures, project_generator, structuring service, Windows runtime staging docs.
 
 - **Resolved:** Webwright live-run readiness now rejects placeholder `base.yaml` roots without an importable `webwright.run.cli` (C3-07), and live bundled runtime staging now uses vendored Webwright by default while still allowing explicit external source/package overrides (C3-08).
-- **Gap:** raw script generation and generated project execution both need Python + Playwright browser assets. RuntimeProfile wires paths, but installer staging and in-app bootstrap must prove Webwright, pytest-playwright, and browser binaries are actually available before running.
-- **Gap:** generated-template has a minimal pytest contract only. It needs explicit fixture policy for browser/context/page, `base_url`, auth/storage state, trace/screenshot/video capture, env config, browser selection, and artifact paths.
+- **Resolved:** installer staging, in-app bootstrap, and bundled Chromium validation now prove Python + Playwright browser assets before raw generation or generated execution (C9-06, C9-07, I-07, I-08, E-09, E-10).
+- **Resolved:** generated-template now documents and implements explicit pytest fixture/browser policy, including `conftest.py` plugin registration, `TC_HEADLESS`, and `PLAYWRIGHT_BROWSERS_PATH` (B3-04, B2-08).
 - **Resolved:** C7-11 now compiles ordered multi-action mappings into deterministic PageObjectMethod body plans covering assertions, waits, select/check/upload, value templates, source IDs, and explicit review flags.
 - **Resolved:** C8-07 now persists complete `GeneratedFileOrigin` links and replaces stale origin sets on regeneration; C7-10 detects edited/stale/conflict generated-file state; C8-06 enforces deterministic full/selected regeneration preflight before rewrites/deletes; C8-04 makes generated output Git-ready while preserving existing Git metadata; C8-08 writes a deterministic generated-project runtime manifest from template and RuntimeProfile defaults; C9-07 caches successful generated runtime readiness per project/runtime fingerprint.
 - **Resolved:** C12-06 applies accepted selector proposals through guarded selected regeneration with conflict rollback and rerun context; C12-07 adds project-enabled auto-apply guardrails for safe selector proposals.
@@ -133,7 +133,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **B3-01** pages/base_page.py — §5.10 | Phase 1 | Layer: Template | Depends: B1-01
 - [x] **B3-02** fixtures/browser_fixture.py, env_fixture.py — §9.2 | Phase 1 | Layer: Template | Depends: B1-01
 - [x] **B3-03** 샘플 flow + test 1세트 — §5.10 | Phase 1 | Layer: Template | Depends: B3-01, B3-02
-- [x] **B3-04** generated pytest fixture/browser policy — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B3-02 (verified: generated-template fixtures now provide env config, base_url, artifact_dir, headless/browser/context args, storage_state, viewport, trace/screenshot/video policy, runner env propagation, and `python -m pytest tests/test_generated_template_fixture_policy.py tests/test_generated_runtime.py tests/test_runtime.py tests/e2e/test_smoke.py -q` passed)
+- [x] **B3-04** generated pytest fixture/browser policy — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: Template | Depends: B3-02 (verified: generated-template fixtures now provide env config, base_url, artifact_dir, headless/browser/context args, storage_state, viewport, trace/screenshot/video policy, runner env propagation, `conftest.py` pytest plugin registration, `TC_HEADLESS`, and `PLAYWRIGHT_BROWSERS_PATH` contract, and `python -m pytest tests/test_generated_template_fixture_policy.py tests/test_generated_runtime.py tests/test_runtime.py tests/e2e/test_smoke.py -q` passed)
 
 ### B4. Result Export Adapters — §5.14
 
@@ -191,7 +191,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C5-02** trajectory.json 보조 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01
 - [x] **C5-03** action type enum 17종 — §5.8 | Phase 1 | Layer: Worker | Depends: C5-01 (verified 2026-06-04: line-based extraction covers the 17 core action types plus `set_input_files`/`drag_to`, preserves ordered selector/value/source metadata, supports sync/async wait contexts, and retains unsupported Playwright/expect calls as `custom_code`)
 - [x] **C5-04** RawAction DB 저장 — §5.8 | Phase 1 | Layer: Worker | Depends: A2-04, C5-01
-- [ ] **C5-05** Python AST 고도화 — §5.8 | Phase 5 | Layer: Worker | Depends: C5-01
+- [x] **C5-05** Python AST 고도화 — §5.8 | Phase 5 | Layer: Worker | Depends: C5-01 (verified 2026-06-05: action extraction now parses complete Python ASTs for multi-line, async/await, chained locator, simple locator alias, context-manager, and `expect(...).to_*` assertion shapes, preserves deterministic `RawAction` order/source/selector/value metadata, keeps unsupported Playwright calls as `custom_code`, and falls back to the legacy line parser for syntactically invalid scripts; `python -m pytest tests/test_action_extraction.py tests/test_webwright_adapter.py tests/test_raw_refresh_regeneration.py -q` passed)
 
 ### C6. Mapping & Review Service — §5.9
 
@@ -247,7 +247,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C10-02** TestRail result update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
 - [x] **C10-03** Excel write-back — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
 - [x] **C10-04** Google Sheets update — §5.14 | Phase 4 | Layer: Worker | Depends: C9-04
-- [ ] **C10-05** export preview + 이중 검증 — §17.3 | Phase 4 | Layer: Worker | Depends: C10-01
+- [x] **C10-05** export preview + 이중 검증 — §17.3 | Phase 4 | Layer: Worker | Depends: C10-01 (verified 2026-06-05: preview returns deterministic target payloads plus validation without external/file/ExportLog mutation; non-preview export rejects missing, duplicate, or mismatched results/ExecutionResult/mappings identity rows before target mutation; `python -m pytest tests/test_result_export_validation.py tests/e2e/test_export.py -q` passed)
 - [x] **C10-06** Export API — §7.7 | Phase 3-4 | Layer: Worker | Depends: C10-01
 
 ### C11. Project IDE Service — §5.12
@@ -327,7 +327,7 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D5-03** mapping 편집 UX — §10.5 | Phase 1 | Layer: GUI | Depends: D5-01 (baseline mapping edit UX verified; per-step raw action, normalized step name, and status edits save through the existing mappings API)
 - [x] **D5-04** normalized flow editor — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-06 (baseline flow editor verified; ordered normalized steps are editable from current mapping data and save through existing mappings API)
 - [x] **D5-05** Page Object method planner — Spec: STRUCTURING_SPEC, SCREEN_INVENTORY | Phase 1 | Layer: GUI | Depends: C7-08 (baseline Page Object method planner verified; per-step POM method names are editable and saved through existing mappings API)
-- [x] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09 (baseline GUI validation panel verified; current mapping draft surfaces missing raw links, empty normalized/POM names, review states, and step count mismatches)
+- [x] **D5-06** structure validation/stale/conflict panel — Spec: STRUCTURING_SPEC | Phase 2 | Layer: GUI | Depends: C7-09 (verified 2026-06-06: Mapping draft validation plus Automation IDE generation conflict UX now parse Worker 409 edited/stale/conflict summaries, show recovery guidance, support preview/apply selected regeneration, and surface conflicts from guarded maintenance actions; `npm run build` passed)
 - [x] **D5-07** selector candidate/evidence viewer — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-02 (baseline selector evidence viewer verified; Mapping pane derives selector candidates from raw actions and links artifact evidence from latest Webwright run)
 
 ### D6. Automation IDE: Project Editing — §10.6 — Workspace: Automation IDE
@@ -340,8 +340,8 @@ First-run onboarding only. Values persist to `settings.json` / keytar; **post-se
 - [x] **D6-06** trace/screenshot viewer — §10.6 | Phase 2 | Layer: GUI | Depends: D6-05 (baseline Project IDE artifact affordances verified; latest execution detail exposes results.json, selected-TC screenshot, and trace links via existing open-path behavior)
 - [x] **D6-07** runner/results/export panels embedded in Automation IDE — Spec: PRODUCT_PILLARS | Phase 2 | Layer: GUI | Depends: D6-05, D8-01 (baseline Automation IDE panels verified; Project IDE embeds runner options, execution results, and export preview/export controls using existing APIs)
 - [x] **D6-08** failure diagnosis + healing proposal panel — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C12-05, D6-06 (baseline read-only diagnosis panel verified; Automation IDE surfaces failed execution rows, error text, screenshot/trace evidence links, and local proposal guidance without new healing APIs)
-- [ ] **D6-09** failure disposition action panel — Spec: SELF_HEALING_SPEC, WORKFLOW_SPEC | Phase 2 | Layer: GUI | Depends: C12-08, D6-08 (show classified failed-case actions: self-heal selector, refresh Webwright raw for selected TC, retire/delete TC, or manual diagnosis)
-- [ ] **D6-10** selected TC regeneration/retire diff review UI — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C8-09, C8-10, C12-09, C12-10 (before applying selected regeneration or retire cleanup, show affected generated files and preserve/unaffected-case summary)
+- [x] **D6-09** failure disposition action panel — Spec: SELF_HEALING_SPEC, WORKFLOW_SPEC | Phase 2 | Layer: GUI | Depends: C12-08, D6-08 (verified 2026-06-06: Automation IDE diagnosis now consumes Worker disposition results, shows evidence/confidence/target context, wires selector proposal create/accept-apply/reject, selected raw refresh/regenerate, diagnosis-bound retire/delete with explicit confirmation, and manual-only unknown handling to existing APIs; `npm run build` and `python -m pytest tests/test_healing_proposals.py tests/test_retire_disposition.py tests/test_raw_refresh_regeneration.py -q` passed)
+- [x] **D6-10** selected TC regeneration/retire diff review UI — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: GUI | Depends: C8-09, C8-10, C12-09, C12-10 (verified 2026-06-02: Worker preview endpoints for selected regeneration, raw refresh regeneration, and diagnosis-bound retire cleanup; Automation IDE diagnosis panel shows MaintenanceImpactReview with affected/preserved/changed/removed/conflict summaries before apply; `npm run build` and retire preview pytest passed)
 
 ### D7. Automation IDE — Runner Panel (embedded) — §10.7
 
@@ -377,25 +377,25 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **E-08** Self-healing proposal E2E — Spec: SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: D8-04, C12-06 (baseline self-healing proposal E2E verified; pytest covers failed execution/result context, local proposal accept/reject state, rerun-failed action, rerun log stream, and persisted rerun result rows without persistent C12 healing APIs; live script at scripts/e2e_self_healing.py)
 - [x] **E-09** live Webwright runtime E2E — Spec: RUNTIME_SPEC | Phase 1 | Layer: E2E | Depends: C3-07, C3-08 (verified 2026-06-03: `python -m pytest tests\e2e\test_live_webwright_runtime.py -q` passed with real Webwright source/venv, OpenAI `gpt-5-mini`, Git Bash shell readiness, no mock mode, harvested nested `final_script.py`, RawAction rows, and indexed artifacts; source is now vendored under `third_party/webwright`)
 - [x] **E-10** generated pytest/browser contract E2E — Spec: GENERATED_PROJECT_SPEC | Phase 2 | Layer: E2E | Depends: B2-08, B3-04, C9-06 (verified 2026-06-03: `python -m pytest tests\e2e\test_generated_browser_contract.py -q` passed with Worker `run_project` -> `runner.cli` -> pytest-playwright local Chromium, exercising `page`/`context`/`base_url`/env/artifact fixtures, preserving pytest stdout/stderr, mapping `[chromium]` screenshot/trace artifacts into results and DB rows; `python -m pytest tests\test_generated_template_fixture_policy.py tests\e2e\test_cli_standalone.py tests\test_generated_runtime.py -q` also passed)
-- [ ] **E-11** selected TC Webwright refresh incremental regeneration E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C7-12, C12-09, C8-09, D6-09 (with many generated cases already structured/generated, rerun Webwright for selected TCs and verify the new raw actions merge into existing structure while only affected generated artifacts change)
-- [ ] **E-12** feature-removed TC retire cleanup E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C12-10, C8-10, D6-10 (classify a removed-area failure, require human confirmation, retire/delete the TC, clean generated artifacts, and preserve unrelated cases)
+- [x] **E-11** selected TC Webwright refresh incremental regeneration E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C7-12, C12-09, C8-09, D6-09 (verified 2026-06-06: `python -m pytest tests/e2e/test_raw_refresh_regeneration.py -q` passed with three structured/generated cases, refresh preview plus selected `refresh-webwright-and-regenerate`, safe raw merge, incremental regeneration, preserved peer tests/flows/artifacts, and updated selected-case origins only)
+- [x] **E-12** feature-removed TC retire cleanup E2E — Spec: WORKFLOW_SPEC, STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: E2E | Depends: C12-10, C8-10, D6-10 (verified 2026-06-06: `python -m pytest tests/e2e/test_retire_cleanup.py -q` passed with three structured/generated cases, execution diagnosis `feature_removed_retire_tc`, retire preview plus confirmed diagnosis-bound retire, selected artifact cleanup, and preserved peer tests/flows/artifacts/history)
 
 ---
 
 ## F. 오류 처리 — §12
 
-- [ ] **F-01** Webwright 실행 오류 UX — §12.1 | Phase 5 | Layer: GUI | Depends: C3-06
+- [x] **F-01** Webwright 실행 오류 UX — §12.1 | Phase 5 | Layer: GUI | Depends: C3-06 (verified 2026-06-06: Generate Raw Webwright Runs and Mapping artifact evidence now map Worker `error_message` categories to actionable titles, recovery steps, retry/run-folder/stderr actions, and preserve run/log/history behavior; `npm run build` passed)
 - [x] **F-02** Mapping 오류 UX — §12.2 | Phase 1 | Layer: GUI | Depends: C6-02 (verified 2026-06-05: Desktop API client now preserves FastAPI/Pydantic `detail` messages, Mapping Review surfaces Auto Map/save failures inline without clearing local draft or selected TC, and Mapping action CRUD/assertion-wait client calls share the same error extraction; `npm run build` and `python -m pytest tests/test_action_crud.py tests/test_assertion_wait_actions.py -q` passed)
-- [ ] **F-03** Execution 오류 UX — §12.3 | Phase 5 | Layer: GUI | Depends: I-01
-- [ ] **F-04** Export 오류 UX — §12.4 | Phase 4 | Layer: GUI | Depends: C10-06
+- [x] **F-03** Execution 오류 UX — §12.3 | Phase 5 | Layer: GUI | Depends: I-01 (verified 2026-06-06: Automation IDE Runner/Results now classify bootstrap and test failures into actionable guidance with Health Check, Install Dependencies, rerun-failed, diagnosis, retry, and run-folder/log links while preserving execution history and terminal streaming; `npm run build` passed)
+- [x] **F-04** Export 오류 UX — §12.4 | Phase 4 | Layer: GUI | Depends: C10-06 (verified 2026-06-06: Automation IDE Export panel now maps preview validation issues, API export failures, and Excel partial write-back errors to actionable guidance with per-item details, retry preview/export, Settings/mapping/results links, and preserved local results.json; `npm run build` passed)
 
 ---
 
 ## G. 보안 — §13
 
-- [ ] **G-01** API key 평문 저장 금지 — §13.1 | Phase 0 | Layer: Infra | Depends: A3-03
-- [ ] **G-02** 로그 마스킹 — §13.2 | Phase 5 | Layer: Worker | Depends: A4-03
-- [ ] **G-03** generated project secret 분리 — §13.3 | Phase 1 | Layer: Template | Depends: B1-03
+- [x] **G-01** API key 평문 저장 금지 — §13.1 | Phase 0 | Layer: Infra | Depends: A3-03 (verified 2026-06-05: Worker settings save/load and `/settings` responses strip secret-looking keys such as apiKey/token/password recursively while preserving provider/model config; Electron credential checks return presence only to the renderer and keep model discovery secret use in main process; `python -m pytest tests/test_settings_security.py tests/test_runtime.py tests/test_generated_runtime.py tests/test_generated_runtime_cache.py -q` and `npm run build` passed)
+- [x] **G-02** 로그 마스킹 — §13.2 | Phase 5 | Layer: Worker | Depends: A4-03 (verified 2026-06-06: Worker `mask_secrets` now redacts provider keys, bearer tokens, password assignments, session cookies, and secret env values; WebSocket log buffers mask centrally; execution/export persisted messages use the same redaction; generated-template `secret_redaction` patterns aligned; `python -m pytest tests/test_log_masking.py tests/test_generated_runtime.py tests/e2e/test_cli_standalone.py -q` passed)
+- [x] **G-03** generated project secret 분리 — §13.3 | Phase 1 | Layer: Template | Depends: B1-03 (verified 2026-06-05: generated-template runner redacts secret env values before writing stdout/stderr/results artifacts, Worker runner/bootstrap artifacts apply the same value-based masking, template copy skips `.env*` and local secret override config files, generated `.gitignore` ignores secret overrides, and runtime manifests exclude API key values/names; `python -m pytest tests/test_generated_runtime.py tests/test_generated_template_fixture_policy.py tests/test_regeneration_guard.py tests/e2e/test_cli_standalone.py -q` and `npm run build` passed)
 
 ---
 
@@ -416,9 +416,7 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **I-04** CI standalone contract — §3.5 | Phase 5 | Layer: Docs | Depends: B2-07 (baseline CI standalone commands and artifact contract are consolidated into GENERATED_PROJECT_SPEC; B2-07 standalone CLI E2E remains the verification gate)
 - [x] **I-05** Electron Windows installer — §15 | Phase 5 | Layer: Infra | Depends: A1-02 (baseline Windows installer path verified; desktop package exposes pack:win/dist:win scripts via electron-builder@26.0.12, output under apps/desktop/release, and runtime packaging contract lives in RUNTIME_SPEC; npm run build verified)
 - [x] **I-06** Desktop renderer build passes (`npm run build`) — Audit 2026-06-02 | Phase 0 | Layer: Quality | Depends: D7-01 (desktop renderer build verified; `npm run build` passes)
-
-- [x] **B1-02** conftest/pytest-playwright contract — Spec: GENERATED_PROJECT_SPEC | Phase 1 | Layer: Template | Depends: B1-01 (runtime+template pass: pytest plugin registration, TC_HEADLESS, PLAYWRIGHT_BROWSERS_PATH contract documented and implemented)
 - [x] **I-07** Runtime Profile + prepare-runtime installer bundle — Spec: RUNTIME_SPEC, GENERATED_PROJECT_SPEC | Phase 5 | Layer: Infra | Depends: I-05 (runtime pass: runtime profile resolver, bundled python env wiring, prepare-runtime.ps1, and dist:win:full path)
 - [x] **I-08** clean Windows `dist:win:full` validation — Spec: RUNTIME_SPEC | Phase 5 | Layer: Quality | Depends: I-07, C3-08, E-09, E-10 (verified 2026-06-04: clean full rebuild, real bundled runtime/notices, silent NSIS install into a new directory, fresh Electron profile, installed live `/health allOk=true`, real non-mock Webwright final script plus RawAction indexing, generated project, and bundled Chromium Runner `1 passed`)
-- [ ] **I-09** runtime/docs encoding and checklist ID cleanup — Spec: RUNTIME_SPEC | Phase 5 | Layer: Docs | Depends: I-07 (fix mojibake in Korean spec docs, remove duplicate/misplaced checklist IDs, and align progress summary with open runtime follow-ups)
+- [x] **I-09** runtime/docs encoding and checklist ID cleanup — Spec: RUNTIME_SPEC | Phase 5 | Layer: Docs | Depends: I-07 (verified 2026-06-06: Korean spec docs under `docs/` contain no mojibake on UTF-8 readback; duplicate misplaced `B1-02` row removed from section I and folded into `B3-04`; progress summary aligned to D 49/49, E 12/12, I 9/9; stale runtime planning gaps marked resolved)
 

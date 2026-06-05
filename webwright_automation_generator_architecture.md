@@ -842,6 +842,8 @@ check
 uncheck
 hover
 press
+set_input_files
+drag_to
 wait
 wait_for_request
 wait_for_response
@@ -852,6 +854,21 @@ assert_hidden
 assert_count
 custom_code
 ```
+
+### C5-05 AST behavior
+
+Action extraction first parses the complete `final_script.py` with Python
+`ast`, walks Playwright calls in source order, and persists deterministic
+`RawAction` rows with `order_index`, `sourceLine`, selector, target, and value.
+This covers multi-line statements, `await` expressions, chained locators,
+simple locator aliases, and `expect(...).to_*` assertions. Unsupported
+Playwright calls are kept as
+`custom_code` for Mapping Review instead of being dropped.
+
+If the full script is syntactically invalid, extraction falls back to the older
+line parser so valid simple Playwright statements can still be indexed.
+
+The following MVP staging note is historical and superseded by C5-05.
 
 ### 주의점
 
@@ -1307,6 +1324,17 @@ results.json
 mappings/cases.yaml
 export target config
 ```
+
+### Preview and validation contract
+
+Before write-back, the service builds a deterministic preview payload and
+validates `results.json`, SQLite `ExecutionResult`, and generated
+`mappings/cases.yaml` identity metadata. The three sources must agree on
+`automationKey`, `sourceType`, and `sourceCaseId`.
+
+Preview mode returns the target payload plus validation results and must not
+mutate external systems, source files, backups, or `ExportLog`. Non-preview
+export rejects missing, duplicate, or mismatched rows before target mutation.
 
 ### source별 동작
 

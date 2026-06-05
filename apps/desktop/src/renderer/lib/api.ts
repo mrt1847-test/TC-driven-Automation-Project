@@ -86,6 +86,36 @@ export function getApiErrorMessage(error: unknown, fallback = 'Request failed.')
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+export type GenerationConflictDetail = {
+  message?: string
+  editedFiles?: string[]
+  staleFiles?: string[]
+  conflictFiles?: string[]
+  affectedFiles?: string[]
+  changedFiles?: string[]
+  preservedFiles?: string[]
+}
+
+export function getGenerationConflictDetail(error: unknown): GenerationConflictDetail | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null
+  const detail = error.detail
+  if (!detail || typeof detail !== 'object') return null
+  const record = detail as Record<string, unknown>
+  const editedFiles = Array.isArray(record.editedFiles) ? record.editedFiles as string[] : []
+  const staleFiles = Array.isArray(record.staleFiles) ? record.staleFiles as string[] : []
+  const conflictFiles = Array.isArray(record.conflictFiles) ? record.conflictFiles as string[] : []
+  if (!editedFiles.length && !staleFiles.length && !conflictFiles.length) return null
+  return {
+    message: typeof record.message === 'string' ? record.message : undefined,
+    editedFiles,
+    staleFiles,
+    conflictFiles,
+    affectedFiles: Array.isArray(record.affectedFiles) ? record.affectedFiles as string[] : [],
+    changedFiles: Array.isArray(record.changedFiles) ? record.changedFiles as string[] : [],
+    preservedFiles: Array.isArray(record.preservedFiles) ? record.preservedFiles as string[] : [],
+  }
+}
+
 export type ActionMutationRequest = {
   type?: string
   target?: string | null
@@ -191,6 +221,26 @@ export const api = {
   generation: {
     generate: (projectId: string, body?: unknown) =>
       request(`/projects/${projectId}/generate`, { method: 'POST', body: JSON.stringify(body || {}) }),
+    refreshWebwrightAndRegenerate: (projectId: string, caseId: string, body?: { modelConfig?: string }) =>
+      request(`/projects/${projectId}/cases/${caseId}/refresh-webwright-and-regenerate`, {
+        method: 'POST',
+        body: JSON.stringify(body || {})
+      }),
+    previewRefreshWebwrightAndRegenerate: (projectId: string, caseId: string) =>
+      request(`/projects/${projectId}/cases/${caseId}/refresh-webwright-and-regenerate/preview`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }),
+    generateSelected: (projectId: string, body: { caseIds: string[] }) =>
+      request(`/projects/${projectId}/generate/selected`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    previewSelected: (projectId: string, body: { caseIds: string[] }) =>
+      request(`/projects/${projectId}/generate/selected/preview`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
     files: (projectId: string) => request<{ path: string; type: string }[]>(`/projects/${projectId}/generated-files`),
     content: (projectId: string, path: string) =>
       request<{ content: string }>(`/projects/${projectId}/generated-files/content?path=${encodeURIComponent(path)}`),
@@ -207,6 +257,33 @@ export const api = {
     run: (projectId: string, body: unknown) =>
       request<JobResponse>(`/projects/${projectId}/executions`, { method: 'POST', body: JSON.stringify(body) }),
     get: (projectId: string, id: string) => request<ExecutionDetail>(`/projects/${projectId}/executions/${id}`),
+    diagnose: (projectId: string, id: string) =>
+      request<ExecutionDiagnosis>(`/projects/${projectId}/executions/${id}/diagnose`, { method: 'POST' }),
+    createHealingProposal: (projectId: string, id: string, executionResultId: string) =>
+      request<HealingProposalActionResponse>(`/projects/${projectId}/executions/${id}/healing-proposals`, {
+        method: 'POST',
+        body: JSON.stringify({ executionResultId })
+      }),
+    retireResult: (
+      projectId: string,
+      id: string,
+      resultId: string,
+      body: { action?: 'retire' | 'delete'; caseId: string; confirmed: boolean }
+    ) =>
+      request(`/projects/${projectId}/executions/${id}/results/${resultId}/retire`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    previewRetireResult: (
+      projectId: string,
+      id: string,
+      resultId: string,
+      body: { action?: 'retire' | 'delete'; caseId: string }
+    ) =>
+      request(`/projects/${projectId}/executions/${id}/results/${resultId}/retire/preview`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
     rerunFailed: (projectId: string, id: string) =>
       request<JobResponse>(`/projects/${projectId}/executions/${id}/rerun-failed`, { method: 'POST' }),
     export: (projectId: string, id: string, target: string, preview = false) =>
@@ -214,6 +291,20 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ preview })
       })
+  },
+  healing: {
+    list: (projectId: string, automationKey?: string) =>
+      request<HealingProposal[]>(
+        `/projects/${projectId}/healing-proposals${automationKey ? `?automation_key=${encodeURIComponent(automationKey)}` : ''}`
+      ),
+    get: (projectId: string, proposalId: string) =>
+      request<HealingProposal>(`/projects/${projectId}/healing-proposals/${proposalId}`),
+    accept: (projectId: string, proposalId: string) =>
+      request<HealingProposal>(`/projects/${projectId}/healing-proposals/${proposalId}/accept`, { method: 'POST' }),
+    reject: (projectId: string, proposalId: string) =>
+      request<HealingProposal>(`/projects/${projectId}/healing-proposals/${proposalId}/reject`, { method: 'POST' }),
+    apply: (projectId: string, proposalId: string) =>
+      request(`/projects/${projectId}/healing-proposals/${proposalId}/apply`, { method: 'POST' })
   },
   projectHealth: (projectId: string, generatedPath: string) =>
     request(`/projects/${projectId}/health?generated_path=${encodeURIComponent(generatedPath)}`, { method: 'POST' }),
@@ -304,10 +395,21 @@ export interface ExecutionResult {
   trace_path?: string | null
 }
 
+export interface ExecutionBootstrapSummary {
+  ok?: boolean
+  allOk?: boolean
+  message?: string
+  checks?: Record<string, boolean>
+  pipError?: string
+  playwrightError?: string
+  playwrightBrowser?: { ok?: boolean; message?: string }
+}
+
 export interface ExecutionDetail {
   run: ExecutionRun
   results: ExecutionResult[]
   summary?: {
+    bootstrap?: ExecutionBootstrapSummary
     cases?: Array<{
       automationKey?: string
       automation_key?: string
@@ -321,6 +423,73 @@ export interface ExecutionDetail {
     }>
     summary?: Record<string, number>
   } | null
+}
+
+export type FailureDisposition = 'selector_changed' | 'raw_refresh_required' | 'feature_removed_retire_tc' | 'unknown'
+
+export interface FailureTargetResolution {
+  status: 'resolved' | 'missing' | 'ambiguous'
+  reason: string
+  execution_result_id?: string | null
+  execution_run_id?: string | null
+  project_id?: string | null
+  automation_key?: string | null
+  source_type?: string | null
+  source_case_id?: string | null
+  structured_step_id?: string | null
+  page_object_method_id?: string | null
+  test_case_ids: string[]
+  generated_file_ids: string[]
+  structured_flow_ids: string[]
+  structured_step_ids: string[]
+  page_object_method_ids: string[]
+  mapping_ids: string[]
+  raw_action_ids: string[]
+  webwright_run_ids: string[]
+  artifact_ids: string[]
+}
+
+export interface FailureDispositionDiagnosis {
+  execution_result_id: string
+  automation_key?: string | null
+  disposition: FailureDisposition
+  reason: string
+  confidence: number
+  evidence_artifact_ids: string[]
+  selector_candidate_ids: string[]
+  target: FailureTargetResolution
+}
+
+export interface ExecutionDiagnosis {
+  project_id: string
+  execution_id: string
+  diagnoses: FailureDispositionDiagnosis[]
+}
+
+export interface HealingProposal {
+  id: string
+  project_id: string
+  automation_key: string
+  execution_result_id?: string | null
+  page_object_method_id?: string | null
+  structured_step_id?: string | null
+  kind: string
+  old_value?: string | null
+  new_value: string
+  confidence: number
+  status: 'proposed' | 'accepted' | 'rejected' | 'applied' | 'superseded'
+  evidence: unknown[]
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface HealingProposalActionResponse {
+  status: string
+  reason?: string
+  proposal?: HealingProposal | null
+  diagnosis?: FailureDispositionDiagnosis
+  autoApply?: Record<string, unknown>
+  apply?: unknown
 }
 
 export type LogStreamStatus = 'connecting' | 'open' | 'closed' | 'error'

@@ -119,10 +119,20 @@ class RuntimeProfile:
         if not self.webwright_root or not Path(self.webwright_root).exists():
             return RuntimeCheck(False, "Webwright root is required before CLI validation")
 
+        root = str(Path(self.webwright_root).resolve())
         script = (
             "import importlib.util\n"
+            "from pathlib import Path\n"
+            f"root = Path({root!r})\n"
             "spec = importlib.util.find_spec('webwright.run.cli')\n"
-            "raise SystemExit(0 if spec else 1)\n"
+            "if not spec or not spec.origin:\n"
+            "    raise SystemExit(1)\n"
+            "origin = Path(spec.origin).resolve()\n"
+            "try:\n"
+            "    origin.relative_to(root)\n"
+            "except ValueError:\n"
+            "    raise SystemExit(1)\n"
+            "raise SystemExit(0)\n"
         )
         return _check_command(
             [self.webwright_python, "-c", script],

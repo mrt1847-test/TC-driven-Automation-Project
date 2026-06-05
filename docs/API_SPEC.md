@@ -139,6 +139,12 @@ must prove the configured Python can import or execute `webwright.run.cli`.
 
 `bundled` 모드에서는 `runtime.*` 경로가 installer `resources/runtime`에서 시드된다. `custom` 모드에서는 Setup/Settings에서 사용자가 지정한다.
 
+G-01 secret persistence rule: `GET /settings` and `PUT /settings` must never
+return or persist plaintext secret fields. Secret-looking keys such as
+`apiKey`, `token`, `password`, `credential`, and `secret` are stripped
+recursively before `settings.json` is written or returned. Non-secret provider
+and model config values remain persistable.
+
 ## Projects
 
 | Method | Path | Status | Purpose | Checklist |
@@ -184,6 +190,16 @@ must prove the configured Python can import or execute `webwright.run.cli`.
 | POST | `/projects/{project_id}/webwright-runs/{run_id}/cancel` | Partial | DB status만 `cancelled`. subprocess kill 미구현 | C4-04 |
 
 Live run requires the full Webwright readiness probe from [RUNTIME_SPEC.md](./RUNTIME_SPEC.md), not just `RuntimeProfile.has_webwright_cli == true`. If mock mode is used, the API/logs must make that visible.
+
+Completed Webwright runs index `final_script.py` into ordered `RawAction` rows.
+C5-05 extraction parses the complete Python AST first so multi-line
+Playwright calls, `await` expressions, chained locators, simple locator
+aliases, `with`/`async with` contexts, and `expect(...).to_*` assertions keep
+stable `order_index`,
+`source_line`, selector, value, and action type metadata. If the script cannot
+be parsed as a whole, the Worker falls back to the legacy line parser; supported
+simple statements are still indexed and unsupported Playwright calls remain
+reviewable as `custom_code`.
 
 ### WebwrightRunRequest
 
@@ -642,6 +658,34 @@ of launching `runner.cli`.
 C9-07 adds per-project runtime install-state reuse before `runner.cli`: cache
 hits skip redundant pip/Playwright install commands, while stale or missing
 cache entries fall back to the same fail-fast bootstrap path.
+
+### Export Preview And Validation
+
+`POST /projects/{project_id}/executions/{execution_id}/export/{target}` accepts
+`{"preview": true}` for testrail-clone, TestRail, Excel, and Google Sheets.
+Preview responses keep the target-specific shape (`payload` for
+testrail-clone, `updates` for the other targets) and include:
+
+```json
+{
+  "validation": {
+    "ok": true,
+    "checked": 1,
+    "issues": []
+  }
+}
+```
+
+Preview mode must not call external targets, write source files, create Excel
+backups, or insert `ExportLog` rows.
+
+Before non-preview export, the Worker compares each `results.json` row with the
+persisted `ExecutionResult` row and generated `mappings/cases.yaml` row by
+`automationKey`, `sourceType`, and `sourceCaseId`. Missing rows, duplicate
+automation keys, or mismatched source metadata return HTTP 400 before any
+target mutation. Excel target file I/O failures after validation remain visible
+as target-specific failed entries, preserving the existing non-corrupting
+write-back behavior.
 
 ## Artifacts And Self-Healing
 

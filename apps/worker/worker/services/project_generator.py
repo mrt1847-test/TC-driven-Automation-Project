@@ -53,6 +53,12 @@ htmlcov/
 .env
 .env.*
 !.env.example
+config/*.local.json
+config/*.secret.json
+config/*.secrets.json
+config/secrets*.json
+config/storage-state*.json
+config/auth-state*.json
 .venv/
 venv/
 env/
@@ -79,6 +85,14 @@ TEMPLATE_COPY_IGNORE = shutil.ignore_patterns(
     ".ruff_cache",
     "*.pyc",
     "artifacts",
+    ".env",
+    ".env.*",
+    "*.local.json",
+    "*.secret.json",
+    "*.secrets.json",
+    "secrets*.json",
+    "storage-state*.json",
+    "auth-state*.json",
 )
 
 
@@ -329,6 +343,19 @@ def _changed_files_from_hashes(root: Path, before_hashes: dict[str, str], after_
         relative_path
         for relative_path in after_files
         if before_hashes.get(relative_path) != after_hashes.get(relative_path)
+    )
+
+
+def _changed_files_from_planned(
+    before_hashes: dict[str, str],
+    planned_contents: dict[str, str],
+    relative_paths: set[str],
+) -> list[str]:
+    return sorted(
+        relative_path
+        for relative_path in relative_paths
+        if hashlib.sha256(planned_contents[relative_path].encode("utf-8")).hexdigest()
+        != before_hashes.get(relative_path)
     )
 
 
@@ -683,6 +710,7 @@ def generate_project(
     case_ids: list[str] | None = None,
     *,
     mode: str | None = None,
+    dry_run: bool = False,
 ) -> GenerationResult:
     settings = load_settings()
     profile = resolve_runtime(settings)
@@ -893,7 +921,10 @@ def generate_project(
             if not manifest_matches_plan:
                 edited_files.append(RUNTIME_MANIFEST_PATH)
         if conflict_files or edited_files:
-            session.commit()
+            if dry_run:
+                session.rollback()
+            else:
+                session.commit()
             blocked = conflict_files or edited_files
             raise GenerationConflictError(
                 "Generated files require review before regeneration: " + ", ".join(blocked),
@@ -903,6 +934,24 @@ def generate_project(
                 affected_files=sorted(guard_paths),
                 preserved_files=sorted(before_files - guard_paths),
             )
+
+    if dry_run:
+        changed_files = (
+            sorted(planned_rewritten_files)
+            if initialized
+            else _changed_files_from_planned(before_hashes, planned_contents, planned_rewritten_files)
+        )
+        return GenerationResult(
+            output=output,
+            mode=generation_mode,
+            selected_case_ids=selected_case_ids,
+            affected_files=sorted(planned_rewritten_files),
+            changed_files=changed_files,
+            preserved_files=sorted(before_files - planned_rewritten_files),
+            edited_files=edited_files,
+            stale_files=stale_files,
+            conflict_files=conflict_files,
+        )
 
     if generation_mode == "full" or not output.exists():
         _reset_output_from_template(output, template_path)
@@ -979,6 +1028,7 @@ def retire_generated_case(
     *,
     action: str,
     reason: str | None = None,
+    preview: bool = False,
 ) -> dict:
     if action not in {"retire", "delete"}:
         raise ValueError("Retire cleanup action must be retire or delete")
@@ -1131,15 +1181,9 @@ def retire_generated_case(
         )
 
     if conflict_files:
-        for relative_path in sorted(conflict_files):
-            row = latest_by_path.get(relative_path)
-            if row and row.status != GeneratedFileStatus.edited.value:
-                row.status = GeneratedFileStatus.conflict.value
-                row.updated_at = datetime.utcnow()
-                session.add(row)
-        session.commit()
-        return {
+        conflict_summary = {
             "status": "conflict",
+            "preview": preview,
             "action": action,
             "reason": reason,
             "caseId": case.id,
@@ -1152,6 +1196,41 @@ def retire_generated_case(
             "preservedSharedFiles": sorted(control_paths & impacted_files),
             "preservedFiles": sorted(before_files),
             "conflictFiles": sorted(conflict_files),
+            "unaffectedCaseIds": sorted(active_case_ids),
+        }
+        if preview:
+            return conflict_summary
+        for relative_path in sorted(conflict_files):
+            row = latest_by_path.get(relative_path)
+            if row and row.status != GeneratedFileStatus.edited.value:
+                row.status = GeneratedFileStatus.conflict.value
+                row.updated_at = datetime.utcnow()
+                session.add(row)
+        session.commit()
+        return conflict_summary
+
+    obsolete_files = impacted_files - set(control_plans)
+    if preview:
+        return {
+            "status": "preview",
+            "preview": True,
+            "action": action,
+            "reason": reason,
+            "caseId": case.id,
+            "automationKey": case.automation_key,
+            "caseStatus": case_status,
+            "affectedFiles": sorted(impacted_files),
+            "removedFiles": sorted(
+                relative_path
+                for relative_path in obsolete_files
+                if (output / relative_path).is_file()
+            ),
+            "updatedFiles": sorted(control_plans),
+            "obsoleteFiles": sorted(obsolete_files),
+            "preservedSharedFiles": sorted(control_plans),
+            "preservedFiles": sorted(before_files - obsolete_files - set(control_plans)),
+            "conflictFiles": [],
+            "unaffectedCaseIds": sorted(active_case_ids),
         }
 
     case.status = case_status
@@ -1171,7 +1250,6 @@ def retire_generated_case(
             origins=origins,
         )
 
-    obsolete_files = impacted_files - set(control_plans)
     removed_files: set[str] = set()
     for relative_path in sorted(obsolete_files):
         target = output / relative_path

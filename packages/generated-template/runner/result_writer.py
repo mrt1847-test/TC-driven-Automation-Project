@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from runner.secret_redaction import redact_json, redact_text
+
 
 def write_results(
     run_id: str,
@@ -41,7 +43,7 @@ def write_results(
         "cases": cases,
     }
     path = out_dir / "results.json"
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(redact_json(payload), indent=2), encoding="utf-8")
     return path
 
 
@@ -60,6 +62,6 @@ def parse_pytest_output(
         "title": case_meta.get("title"),
         "status": status,
         "durationMs": duration_ms,
-        "error": error,
+        "error": redact_text(error) if error else None,
         "artifacts": artifacts or {"screenshot": None, "trace": None, "video": None},
     }

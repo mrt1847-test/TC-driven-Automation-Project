@@ -15,10 +15,19 @@ from worker.models.schemas import (
     HealingProposalCreateRequest,
 )
 from worker.services.healing_proposals import create_selector_healing_proposal
-from worker.services.retire_disposition import retire_from_failure_disposition
+from worker.services.retire_disposition import (
+    preview_retire_from_failure_disposition,
+    retire_from_failure_disposition,
+)
 from worker.services.project_runner import rerun_failed, run_project
 from worker.services.failure_disposition import diagnose_execution_failures
-from worker.services.result_export import export_excel, export_google_sheets, export_testrail, export_testrail_clone
+from worker.services.result_export import (
+    ExportValidationError,
+    export_excel,
+    export_google_sheets,
+    export_testrail,
+    export_testrail_clone,
+)
 
 router = APIRouter(prefix="/projects/{project_id}/executions", tags=["executions"])
 
@@ -101,6 +110,30 @@ def create_healing_proposal(
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/{execution_id}/results/{result_id}/retire/preview")
+def preview_retire_execution_result(
+    project_id: str,
+    execution_id: str,
+    result_id: str,
+    request: DispositionRetireRequest,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    run = _get_execution_run(session, project_id, execution_id)
+    result = session.get(ExecutionResult, result_id)
+    if not result or result.execution_run_id != execution_id:
+        raise HTTPException(404, "Execution result not found")
+    case = session.get(TestCase, request.case_id)
+    if not case or case.project_id != project_id:
+        raise HTTPException(404, "Case not found")
+    try:
+        return preview_retire_from_failure_disposition(session, project, run, result, case, request)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/{execution_id}/results/{result_id}/retire")
 def retire_execution_result(
     project_id: str,
@@ -148,25 +181,41 @@ def cancel_execution(project_id: str, execution_id: str, session: Session = Depe
 export_router = APIRouter(prefix="/projects/{project_id}/executions/{execution_id}/export", tags=["export"])
 
 
+def _raise_export_error(exc: Exception) -> None:
+    raise HTTPException(400, str(exc)) from exc
+
+
 @export_router.post("/testrail-clone")
 async def export_tc(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
-    return await export_testrail_clone(session, run, request.preview)
+    try:
+        return await export_testrail_clone(session, run, request.preview)
+    except (ExportValidationError, FileNotFoundError) as exc:
+        _raise_export_error(exc)
 
 
 @export_router.post("/testrail")
 async def export_tr(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
-    return await export_testrail(session, run, request.preview)
+    try:
+        return await export_testrail(session, run, request.preview)
+    except (ExportValidationError, FileNotFoundError) as exc:
+        _raise_export_error(exc)
 
 
 @export_router.post("/excel")
 def export_xl(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
-    return export_excel(session, run, request.preview)
+    try:
+        return export_excel(session, run, request.preview)
+    except (ExportValidationError, FileNotFoundError) as exc:
+        _raise_export_error(exc)
 
 
 @export_router.post("/google-sheets")
 async def export_gs(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
-    return await export_google_sheets(session, run, request.preview)
+    try:
+        return await export_google_sheets(session, run, request.preview)
+    except (ExportValidationError, FileNotFoundError) as exc:
+        _raise_export_error(exc)

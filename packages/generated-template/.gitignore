@@ -15,6 +15,12 @@ htmlcov/
 .env
 .env.*
 !.env.example
+config/*.local.json
+config/*.secret.json
+config/*.secrets.json
+config/secrets*.json
+config/storage-state*.json
+config/auth-state*.json
 .venv/
 venv/
 env/

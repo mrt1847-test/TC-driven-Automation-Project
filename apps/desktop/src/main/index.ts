@@ -202,7 +202,7 @@ ipcMain.handle('credential-set', async (_e, service: string, account: string, pa
 ipcMain.handle('credential-get', async (_e, service: string, account: string) => {
   const result = await getCredential(service, account)
   if (result.ok) {
-    return { ok: true as const, password: result.password }
+    return { ok: true as const, hasCredential: true as const }
   }
   return { ok: false as const, message: result.message }
 })

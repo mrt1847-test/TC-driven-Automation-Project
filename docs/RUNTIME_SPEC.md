@@ -1,6 +1,6 @@
 # Runtime Spec
 
-Last aligned: 2026-06-05
+Last aligned: 2026-06-06
 
 This document defines the runtime contract for three execution contexts:
 
@@ -106,6 +106,29 @@ runtime contract produced during generation. It records the generated
 environment, fixture policy, and supported standalone/Studio runner commands.
 The manifest is informational and traceable; it does not replace bootstrap
 checks.
+
+The manifest and generated runner artifacts must be secret-separated:
+RuntimeProfile paths and non-secret defaults are allowed, but provider API key
+values and secret-bearing env var names are not written. Generated runner logs,
+bootstrap logs, and `results.json` redact known secret environment values before
+they are stored or streamed back through Studio.
+
+G-01 extends this to Studio settings and renderer credential checks:
+`settings.json` and Worker settings responses strip secret-looking keys
+recursively, while provider/model config remains persistable. Electron
+credential lookup exposed to the renderer returns only credential presence;
+model discovery may use the secret inside the main process without returning it
+to the renderer.
+
+G-02 extends this to log/output masking across Worker and generated-template
+runner surfaces: known secret env values, provider key prefixes, bearer tokens,
+password assignments, and session cookie headers are replaced with `***MASKED***`
+before WebSocket log buffers, persisted runner/bootstrap artifacts, execution
+result errors, and export log payloads are stored or streamed.
+
+I-09 keeps runtime-related docs/checklist metadata aligned: Korean spec files
+under `docs/` stay UTF-8 readable, duplicate checklist IDs are removed, and
+progress summaries reflect closed runtime/bootstrap/installer follow-ups.
 
 Bootstrap must be fail-fast:
 

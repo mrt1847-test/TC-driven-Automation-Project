@@ -1,6 +1,6 @@
 # Workflow Spec
 
-Last aligned: 2026-06-03
+Last aligned: 2026-06-06
 
 This document turns the architecture into workflow-sized acceptance contracts.
 All workflows follow the two-workspace model in
@@ -225,6 +225,18 @@ Done when:
 - Selected regeneration preserves unrelated generated cases in the same project.
 - Feature removal requires human confirmation before retiring/deleting a TC.
 - Generated artifact cleanup respects shared origins and edited-file conflicts.
+
+D6-09 implementation behavior:
+
+- Automation IDE shows the Worker-classified disposition, confidence, reason,
+  target status, and evidence for failed execution results;
+- selector failures can create, accept/apply, or reject selector healing
+  proposals through existing Worker APIs;
+- raw refresh failures invoke selected TC Webwright refresh/regeneration without
+  full-project regeneration;
+- retire/delete recommendations require explicit confirmation and use the
+  diagnosis-bound execution-result endpoint;
+- unknown failures keep the user in manual evidence review without mutation.
 
 ## MVP Gates
 

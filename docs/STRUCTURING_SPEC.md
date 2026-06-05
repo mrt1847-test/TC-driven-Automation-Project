@@ -74,6 +74,21 @@ Minimum action coverage:
 - waiting: `wait_for_*`, locator wait, network/load state wait;
 - custom/unsupported: preserve raw text and require review.
 
+C5-05 implementation behavior:
+
+- parse the complete `final_script.py` with Python `ast` before falling back to
+  the legacy line parser;
+- walk Playwright calls in source order, including calls inside functions,
+  multi-line statements, `await` expressions, `with`/`async with` contexts,
+  and chained locators;
+- resolve simple locator aliases assigned from Playwright locator expressions
+  before action, assertion, wait, and unsupported-call extraction;
+- extract supported `expect(...).to_*` assertions with selector/value metadata;
+- preserve unsupported Playwright calls as `custom_code` with focused raw text
+  so Mapping Review can inspect them;
+- keep deterministic `order_index`, `source_line`, selector, value, and
+  action-type metadata compatible with mapping and trajectory enrichment.
+
 ## Step 2: TC Mapping
 
 Reviewed mapping connects TC steps to one or more raw actions.
@@ -464,6 +479,10 @@ Done:
 - C5-03 action extraction covers the core 17 action types plus file upload and
   drag interactions, preserving unsupported Playwright calls as reviewable
   `custom_code`.
+- C5-05 action extraction parses complete Python ASTs for multi-line,
+  async/await, chained locator, locator-alias, context-manager, and assertion
+  shapes, while retaining the legacy line parser as a syntax-error fallback and
+  preserving unsupported Playwright calls as reviewable `custom_code`.
 - C6-07 Mapping GET/PUT round-trips ordered multi-action joins, atomically
   replaces/removes stale links, validates selected-case action ownership, and
   keeps the legacy first-action field aligned.
@@ -504,9 +523,9 @@ Done:
   without cleanup on edited or unproven shared conflicts.
 - C12-10 diagnosis-bound retire/delete invokes cleanup only for the resolved
   selected TC and preserves diagnosis evidence in the maintenance response.
-
-Open:
-
-- E-11: selected TC Webwright refresh incremental regeneration E2E.
-- E-12: feature-removed TC retire cleanup E2E.
-- E-10: generated pytest/browser contract E2E.
+- E-11 selected raw refresh incremental regeneration E2E proves many-case
+  projects preserve unrelated generated artifacts while only selected-case files
+  change after safe merge and incremental regeneration.
+- E-12 feature-removed TC retire cleanup E2E proves diagnosis-bound retire
+  preview/apply removes only the selected TC artifacts while preserving unrelated
+  generated cases and execution evidence.

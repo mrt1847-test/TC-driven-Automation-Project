@@ -5,7 +5,34 @@ import { useNavigate } from 'react-router-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { api, connectLogStream, type ExecutionResult, type ExecutionRun } from '@/lib/api'
+import {
+  api,
+  connectLogStream,
+  getApiErrorMessage,
+  type ExecutionResult,
+  type ExecutionRun,
+  type FailureDispositionDiagnosis,
+  type HealingProposal
+} from '@/lib/api'
+import {
+  MaintenanceImpactReview,
+  maintenanceSummaryFromRefreshPreview,
+  maintenanceSummaryFromRetirePreview,
+  type MaintenanceImpactSummary
+} from '@/components/MaintenanceImpactReview'
+import {
+  buildGenerationConflictSummary,
+  generationConflictGuidance,
+  maintenanceSummaryFromGenerationPreview
+} from '@/lib/generationConflict'
+import { describeExecutionError } from '@/lib/executionErrors'
+import { ExecutionRunErrorPanel } from '@/components/ExecutionRunErrorPanel'
+import {
+  buildExportOutcomeGuide,
+  describeExportApiError,
+  type ExportErrorGuide
+} from '@/lib/exportErrors'
+import { ExportErrorPanel } from '@/components/ExportErrorPanel'
 import { useAppStore } from '@/store/appStore'
 
 type GeneratedFileItem = {
@@ -36,21 +63,27 @@ type ExecutionSummaryCase = {
 }
 
 type DiagnosisRow = {
+  caseId: string
+  diagnosis: FailureDispositionDiagnosis
   automationKey: string
   error: string
+  executionResultId: string
+  sourceCaseId: string
+  sourceType: string
   screenshotPath: string
   status: string
   title: string
   tracePath: string
 }
 
-type HealingProposalStatus = 'proposed' | 'accepted' | 'rejected'
+type HealingProposalStatus = HealingProposal['status'] | 'not_applicable'
 
 export function IdePage() {
   const navigate = useNavigate()
   const project = useAppStore((s) => s.currentProject)
   const selectedCase = useAppStore((s) => s.selectedCase)
   const appendLog = useAppStore((s) => s.appendLog)
+  const clearLogs = useAppStore((s) => s.clearLogs)
   const logs = useAppStore((s) => s.logs)
   const [selectedPath, setSelectedPath] = useState('')
   const [content, setContent] = useState('')
@@ -58,6 +91,7 @@ export function IdePage() {
   const [loadingPath, setLoadingPath] = useState('')
   const [editorStatus, setEditorStatus] = useState('Select a generated file.')
   const [runStatus, setRunStatus] = useState('No IDE run started.')
+  const [runtimeActionStatus, setRuntimeActionStatus] = useState('')
   const [searchQ, setSearchQ] = useState('')
   const [activePanel, setActivePanel] = useState<IdePanel>('runner')
   const [runnerEnv, setRunnerEnv] = useState(project?.default_env || 'stg')
@@ -70,6 +104,12 @@ export function IdePage() {
   const [selectedExecutionId, setSelectedExecutionId] = useState('')
   const [exportTarget, setExportTarget] = useState('testrail-clone')
   const [exportPreview, setExportPreview] = useState<unknown>(null)
+  const [exportErrorGuide, setExportErrorGuide] = useState<ExportErrorGuide | null>(null)
+  const [generationConflict, setGenerationConflict] = useState<MaintenanceImpactSummary | null>(null)
+  const [generationReview, setGenerationReview] = useState<{
+    pending: { caseIds: string[] }
+    summary: MaintenanceImpactSummary
+  } | null>(null)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const termRef = useRef<HTMLDivElement>(null)
   const termInstanceRef = useRef<Terminal | null>(null)
@@ -136,9 +176,66 @@ export function IdePage() {
     }
   })
 
+  function showGenerationConflict(error: unknown, actionLabel: string) {
+    const summary = buildGenerationConflictSummary(error, actionLabel)
+    if (!summary) return false
+    setGenerationConflict(summary)
+    setGenerationReview(null)
+    return true
+  }
+
   const generateMut = useMutation({
     mutationFn: () => api.generation.generate(project!.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['generated-files', project?.id] })
+    onMutate: () => {
+      setGenerationConflict(null)
+      setGenerationReview(null)
+    },
+    onSuccess: () => {
+      setGenerationConflict(null)
+      setGenerationReview(null)
+      setEditorStatus('Project generated.')
+      qc.invalidateQueries({ queryKey: ['generated-files', project?.id] })
+    },
+    onError: (error) => {
+      if (!showGenerationConflict(error, 'Full project generation')) {
+        setEditorStatus(getApiErrorMessage(error, 'Generation failed.'))
+      }
+    }
+  })
+
+  const previewGenerateMut = useMutation({
+    mutationFn: (caseIds: string[]) => api.generation.previewSelected(project!.id, { caseIds }),
+    onSuccess: (res, caseIds) => {
+      const summary = maintenanceSummaryFromGenerationPreview(
+        res as Record<string, unknown>,
+        caseIds.length === 1 ? 'Selected TC regeneration' : 'Selected regeneration'
+      )
+      summary.guidance = generationConflictGuidance(summary)
+      setGenerationReview({ pending: { caseIds }, summary })
+      setGenerationConflict(null)
+      setEditorStatus('Review regeneration impact before applying.')
+    },
+    onError: (error) => {
+      if (!showGenerationConflict(error, 'Selected regeneration preview')) {
+        setEditorStatus(getApiErrorMessage(error, 'Regeneration preview failed.'))
+      }
+    }
+  })
+
+  const generateSelectedMut = useMutation({
+    mutationFn: (caseIds: string[]) => api.generation.generateSelected(project!.id, { caseIds }),
+    onMutate: () => setGenerationConflict(null),
+    onSuccess: () => {
+      setGenerationConflict(null)
+      setGenerationReview(null)
+      setEditorStatus('Selected regeneration completed.')
+      qc.invalidateQueries({ queryKey: ['generated-files', project?.id] })
+    },
+    onError: (error) => {
+      if (!showGenerationConflict(error, 'Selected regeneration')) {
+        setEditorStatus(getApiErrorMessage(error, 'Selected regeneration failed.'))
+      }
+    }
   })
 
   const runMut = useMutation({
@@ -204,14 +301,78 @@ export function IdePage() {
     }
   })
 
+  const installRuntimeMut = useMutation({
+    mutationFn: async () => {
+      if (!project?.generated_project_path) throw new Error('Generate a project first.')
+      return api.installDeps(project.id, project.generated_project_path)
+    },
+    onMutate: () => setRuntimeActionStatus('Installing Python deps and browser...'),
+    onSuccess: (res) => {
+      setRuntimeActionStatus(
+        res.ok || res.allOk
+          ? 'Runtime ready.'
+          : `Install failed: ${res.message || res.pipError || 'unknown'}`
+      )
+    },
+    onError: (error) => {
+      setRuntimeActionStatus(error instanceof Error ? error.message : 'Install failed.')
+    }
+  })
+
+  const healthCheckMut = useMutation({
+    mutationFn: async () => {
+      if (!project?.generated_project_path) return api.health()
+      return api.projectHealth(project.id, project.generated_project_path)
+    },
+    onMutate: () => setRuntimeActionStatus('Running health check...'),
+    onSuccess: (res) => {
+      setRuntimeActionStatus(
+        res.allOk || res.ok
+          ? 'Health check passed.'
+          : `Health check failed: ${res.message || 'see runtime checks'}`
+      )
+    },
+    onError: (error) => {
+      setRuntimeActionStatus(error instanceof Error ? error.message : 'Health check failed.')
+    }
+  })
+
+  const rerunFailedMut = useMutation({
+    mutationFn: async () => {
+      if (!project || !selectedExecution?.id) throw new Error('Select an execution first.')
+      clearLogs()
+      const res = await api.executions.rerunFailed(project.id, selectedExecution.id)
+      connectLogStream(res.jobId, appendLog)
+      return res
+    },
+    onSuccess: (res) => {
+      setRunStatus(`Rerun-failed queued (${res.jobId})`)
+      qc.invalidateQueries({ queryKey: ['executions', project?.id] })
+    },
+    onError: (error) => {
+      setRunStatus(error instanceof Error ? error.message : 'Rerun-failed failed.')
+    }
+  })
+
   const exportMut = useMutation({
     mutationFn: (preview: boolean) => {
       if (!project || !selectedExecution?.id) throw new Error('Select an execution first.')
       return api.executions.export(project.id, selectedExecution.id, exportTarget, preview)
     },
-    onSuccess: (result) => setExportPreview(result),
-    onError: (error) => setExportPreview(error instanceof Error ? { error: error.message } : { error: 'Export failed.' })
+    onSuccess: (result, preview) => {
+      setExportPreview(result)
+      setExportErrorGuide(buildExportOutcomeGuide(result, preview, exportTarget))
+    },
+    onError: (error) => {
+      setExportPreview({ error: getApiErrorMessage(error, 'Export failed.') })
+      setExportErrorGuide(describeExportApiError(error, exportTarget))
+    }
   })
+
+  useEffect(() => {
+    setExportPreview(null)
+    setExportErrorGuide(null)
+  }, [selectedExecution?.id, exportTarget])
 
   useEffect(() => {
     if (!termRef.current) return
@@ -259,14 +420,28 @@ export function IdePage() {
   const tracePath = latestResult?.trace_path || summaryResult?.artifacts?.trace || ''
   const resolvedScreenshotPath = resolveArtifactPath(executionDetail?.run.result_path, screenshotPath)
   const resolvedTracePath = resolveArtifactPath(executionDetail?.run.result_path, tracePath)
-  const diagnosisRows = buildDiagnosisRows(
-    executionDetail?.results,
-    executionDetail?.summary?.cases,
-    executionDetail?.run.result_path
-  )
-  const selectedDiagnosisRows = selectedCaseInProject
-    ? diagnosisRows.filter((row) => row.automationKey === selectedCaseInProject.automation_key)
-    : diagnosisRows
+  const failedResultError = executionDetail?.results?.find((result) => result.status === 'failed')?.error ||
+    executionDetail?.summary?.cases?.find((item) => item.status === 'failed')?.error ||
+    executionDetail?.summary?.bootstrap?.message
+  const executionErrorGuide = describeExecutionError({
+    bootstrap: executionDetail?.summary?.bootstrap,
+    runStatus: selectedExecution?.status,
+    primaryError: failedResultError,
+    failedCount: executionDetail?.summary?.summary?.failed ??
+      executionDetail?.results?.filter((result) => result.status === 'failed').length
+  })
+
+  function retryRunner() {
+    runMut.mutate({
+      automationKey: runnerAutomationKey || selectedCaseInProject?.automation_key,
+      browser: runnerBrowser,
+      caseIds: parseCaseIds(runnerCaseIds),
+      env: runnerEnv,
+      headed: runnerHeaded,
+      resultTarget: runnerResultTarget,
+      target: runnerTarget
+    })
+  }
 
   return (
     <div className="space-y-3 h-[calc(100vh-6rem)] flex flex-col">
@@ -277,7 +452,31 @@ export function IdePage() {
             Rerun Raw
           </button>
         )}
-        <button className="px-3 py-1 bg-purple-600 rounded" onClick={() => generateMut.mutate()}>Generate Project</button>
+        <button
+          className="px-3 py-1 bg-purple-600 rounded disabled:opacity-50"
+          disabled={generateMut.isPending || previewGenerateMut.isPending || generateSelectedMut.isPending}
+          onClick={() => generateMut.mutate()}
+        >
+          {generateMut.isPending ? 'Generating...' : 'Generate Project'}
+        </button>
+        {selectedCaseInProject && (
+          <>
+            <button
+              className="px-3 py-1 bg-slate-700 rounded disabled:opacity-50"
+              disabled={previewGenerateMut.isPending || generateMut.isPending || generateSelectedMut.isPending}
+              onClick={() => previewGenerateMut.mutate([selectedCaseInProject.id])}
+            >
+              {previewGenerateMut.isPending ? 'Previewing...' : 'Preview Regenerate'}
+            </button>
+            <button
+              className="px-3 py-1 bg-indigo-700 rounded disabled:opacity-50"
+              disabled={generateSelectedMut.isPending || generateMut.isPending || previewGenerateMut.isPending}
+              onClick={() => generateSelectedMut.mutate([selectedCaseInProject.id])}
+            >
+              {generateSelectedMut.isPending ? 'Regenerating...' : 'Regenerate Linked TC'}
+            </button>
+          </>
+        )}
         <button
           className="px-3 py-1 bg-green-600 rounded disabled:opacity-50"
           disabled={!selectedPath || !isDirty || saveMut.isPending}
@@ -300,6 +499,23 @@ export function IdePage() {
           Run All
         </button>
       </div>
+
+      {generationConflict && (
+        <MaintenanceImpactReview
+          summary={generationConflict}
+          pending={false}
+          onDismiss={() => setGenerationConflict(null)}
+          onApply={() => setGenerationConflict(null)}
+        />
+      )}
+      {generationReview && (
+        <MaintenanceImpactReview
+          summary={generationReview.summary}
+          pending={generateMut.isPending || generateSelectedMut.isPending}
+          onDismiss={() => setGenerationReview(null)}
+          onApply={() => generateSelectedMut.mutate(generationReview.pending.caseIds)}
+        />
+      )}
 
       <input className="p-2 rounded bg-slate-800" placeholder="Search automationKey / selector" value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
 
@@ -435,32 +651,75 @@ export function IdePage() {
                       onChange={(e) => setRunnerCaseIds(e.target.value)}
                     />
                   )}
-                  <button
-                    className="rounded bg-green-600 px-3 py-2 text-sm disabled:opacity-50"
-                    disabled={
-                      runMut.isPending ||
-                      (runnerTarget === 'linked' && !runnerAutomationKey && !selectedCaseInProject) ||
-                      (runnerTarget === 'selected' && parseCaseIds(runnerCaseIds).length === 0)
-                    }
-                    type="button"
-                    onClick={() => runMut.mutate({
-                      automationKey: runnerAutomationKey || selectedCaseInProject?.automation_key,
-                      browser: runnerBrowser,
-                      caseIds: parseCaseIds(runnerCaseIds),
-                      env: runnerEnv,
-                      headed: runnerHeaded,
-                      resultTarget: runnerResultTarget,
-                      target: runnerTarget
-                    })}
-                  >
-                    {runMut.isPending ? 'Running...' : 'Run'}
-                  </button>
+                  <div className="text-xs text-slate-500">{runStatus}</div>
+                  {runtimeActionStatus && <div className="text-xs text-slate-400">{runtimeActionStatus}</div>}
+                  {executionErrorGuide && (
+                    <ExecutionRunErrorPanel
+                      guide={executionErrorGuide}
+                      healthPending={healthCheckMut.isPending}
+                      installPending={installRuntimeMut.isPending}
+                      onHealthCheck={() => healthCheckMut.mutate()}
+                      onInstallDeps={() => installRuntimeMut.mutate()}
+                      onOpenDiagnosis={() => setActivePanel('diagnosis')}
+                      onRetry={retryRunner}
+                      onRerunFailed={() => rerunFailedMut.mutate()}
+                      rerunPending={rerunFailedMut.isPending}
+                      resultPath={executionDetail?.run.result_path}
+                      retryPending={runMut.isPending}
+                    />
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded bg-slate-700 px-3 py-2 text-sm disabled:opacity-50"
+                      disabled={!project.generated_project_path || installRuntimeMut.isPending}
+                      type="button"
+                      onClick={() => installRuntimeMut.mutate()}
+                    >
+                      {installRuntimeMut.isPending ? 'Installing...' : 'Install Dependencies'}
+                    </button>
+                    <button
+                      className="rounded bg-slate-700 px-3 py-2 text-sm disabled:opacity-50"
+                      disabled={healthCheckMut.isPending}
+                      type="button"
+                      onClick={() => healthCheckMut.mutate()}
+                    >
+                      {healthCheckMut.isPending ? 'Checking...' : 'Health Check'}
+                    </button>
+                    <button
+                      className="rounded bg-green-600 px-3 py-2 text-sm disabled:opacity-50"
+                      disabled={
+                        runMut.isPending ||
+                        (runnerTarget === 'linked' && !runnerAutomationKey && !selectedCaseInProject) ||
+                        (runnerTarget === 'selected' && parseCaseIds(runnerCaseIds).length === 0)
+                      }
+                      type="button"
+                      onClick={retryRunner}
+                    >
+                      {runMut.isPending ? 'Running...' : 'Run'}
+                    </button>
+                  </div>
                 </div>
               )}
 
               {activePanel === 'results' && (
                 <div className="space-y-3">
                   <ExecutionSelect executions={executions} selectedId={selectedExecution?.id || ''} onChange={setSelectedExecutionId} />
+                  {executionErrorGuide && (
+                    <ExecutionRunErrorPanel
+                      compact
+                      guide={executionErrorGuide}
+                      healthPending={healthCheckMut.isPending}
+                      installPending={installRuntimeMut.isPending}
+                      onHealthCheck={() => healthCheckMut.mutate()}
+                      onInstallDeps={() => installRuntimeMut.mutate()}
+                      onOpenDiagnosis={() => setActivePanel('diagnosis')}
+                      onRetry={retryRunner}
+                      onRerunFailed={() => rerunFailedMut.mutate()}
+                      rerunPending={rerunFailedMut.isPending}
+                      resultPath={executionDetail?.run.result_path}
+                      retryPending={runMut.isPending}
+                    />
+                  )}
                   {executionDetail?.summary?.summary && <SummaryGrid summary={executionDetail.summary.summary} />}
                   <ResultTable rows={executionDetail?.summary?.cases || executionDetail?.results || []} />
                 </div>
@@ -479,6 +738,21 @@ export function IdePage() {
                     <button className="rounded bg-slate-700 px-3 py-2 text-sm disabled:opacity-50" disabled={!selectedExecution?.id || exportMut.isPending} onClick={() => exportMut.mutate(true)}>Preview</button>
                     <button className="rounded bg-green-600 px-3 py-2 text-sm disabled:opacity-50" disabled={!selectedExecution?.id || exportMut.isPending} onClick={() => exportMut.mutate(false)}>Export</button>
                   </div>
+                  {exportErrorGuide && (
+                    <ExportErrorPanel
+                      guide={exportErrorGuide}
+                      exportPending={exportMut.isPending}
+                      onOpenMapping={() => loadFile('mappings/cases.yaml')}
+                      onOpenResults={() => {
+                        const resultPath = executionDetail?.run.result_path
+                        if (resultPath) window.electronAPI?.openPath(resultPath)
+                      }}
+                      onOpenSettings={() => navigate('/settings')}
+                      onRetryExport={() => exportMut.mutate(false)}
+                      onRetryPreview={() => exportMut.mutate(true)}
+                      previewPending={exportMut.isPending}
+                    />
+                  )}
                   {exportPreview ? (
                     <pre className="max-h-40 overflow-auto rounded bg-slate-900 p-3 text-xs">{JSON.stringify(exportPreview, null, 2)}</pre>
                   ) : (
@@ -492,8 +766,11 @@ export function IdePage() {
                   execution={executionDetail?.run}
                   executionId={selectedExecution?.id || ''}
                   projectId={project.id}
-                  rows={selectedDiagnosisRows}
+                  resultPath={executionDetail?.run.result_path}
+                  results={executionDetail?.results}
                   selectedAutomationKey={selectedCaseInProject?.automation_key || ''}
+                  selectedCaseId={selectedCaseInProject?.id || ''}
+                  summaryCases={executionDetail?.summary?.cases}
                 />
               )}
             </div>
@@ -714,75 +991,277 @@ function FailureDiagnosisPanel({
   execution,
   executionId,
   projectId,
-  rows,
-  selectedAutomationKey
+  resultPath,
+  results,
+  selectedAutomationKey,
+  selectedCaseId,
+  summaryCases
 }: {
   execution?: ExecutionRun
   executionId: string
   projectId: string
-  rows: DiagnosisRow[]
+  resultPath?: string
+  results?: ExecutionResult[]
   selectedAutomationKey: string
+  selectedCaseId: string
+  summaryCases?: ExecutionSummaryCase[]
 }) {
+  const navigate = useNavigate()
   const appendLog = useAppStore((s) => s.appendLog)
   const clearLogs = useAppStore((s) => s.clearLogs)
   const qc = useQueryClient()
-  const [proposalStates, setProposalStates] = useState<Record<string, HealingProposalStatus>>({})
   const [actionMessage, setActionMessage] = useState('')
+  const [actionOutput, setActionOutput] = useState<unknown>(null)
+  const [retireConfirmations, setRetireConfirmations] = useState<Record<string, boolean>>({})
+  const [generationConflict, setGenerationConflict] = useState<MaintenanceImpactSummary | null>(null)
+  const [maintenanceReview, setMaintenanceReview] = useState<{
+    pending:
+      | { action: 'retire' | 'delete'; kind: 'retire'; row: DiagnosisRow }
+      | { kind: 'raw_refresh'; row: DiagnosisRow }
+    rowKey: string
+    summary: MaintenanceImpactSummary
+  } | null>(null)
+
+  const diagnosisQuery = useQuery({
+    queryKey: ['execution-diagnosis', projectId, executionId],
+    queryFn: () => api.executions.diagnose(projectId, executionId),
+    enabled: !!projectId && !!executionId,
+    refetchInterval: 5000
+  })
+
+  const proposalsQuery = useQuery({
+    queryKey: ['healing-proposals', projectId, selectedAutomationKey],
+    queryFn: () => api.healing.list(projectId, selectedAutomationKey || undefined),
+    enabled: !!projectId && !!executionId,
+    refetchInterval: 5000
+  })
 
   useEffect(() => {
-    setProposalStates({})
     setActionMessage('')
+    setActionOutput(null)
+    setRetireConfirmations({})
+    setMaintenanceReview(null)
+    setGenerationConflict(null)
   }, [executionId])
+
+  function showPanelGenerationConflict(error: unknown, actionLabel: string) {
+    const summary = buildGenerationConflictSummary(error, actionLabel)
+    if (!summary) return false
+    setGenerationConflict(summary)
+    setMaintenanceReview(null)
+    setActionMessage(`${actionLabel} blocked by edited/conflict generated files.`)
+    return true
+  }
+
+  function refreshMaintenanceState() {
+    qc.invalidateQueries({ queryKey: ['executions', projectId] })
+    qc.invalidateQueries({ queryKey: ['execution-detail', projectId, executionId] })
+    qc.invalidateQueries({ queryKey: ['execution-diagnosis', projectId, executionId] })
+    qc.invalidateQueries({ queryKey: ['healing-proposals', projectId] })
+    qc.invalidateQueries({ queryKey: ['generated-files', projectId] })
+  }
 
   const rerunMut = useMutation({
     mutationFn: async () => {
       clearLogs()
       setActionMessage('Queueing rerun-failed job...')
+      setActionOutput(null)
       const res = await api.executions.rerunFailed(projectId, executionId)
       connectLogStream(res.jobId, appendLog)
       return res
     },
     onSuccess: (res) => {
       setActionMessage(`Rerun-failed queued (${res.jobId}). Watch logs in the terminal below.`)
-      qc.invalidateQueries({ queryKey: ['executions', projectId] })
-      qc.invalidateQueries({ queryKey: ['execution-detail', projectId, executionId] })
+      setActionOutput(res)
+      refreshMaintenanceState()
     },
     onError: (error) => {
-      setActionMessage(error instanceof Error ? error.message : 'Rerun-failed failed.')
+      setActionMessage(getApiErrorMessage(error, 'Rerun-failed failed.'))
     }
   })
 
-  function proposalKey(row: DiagnosisRow) {
-    return `${executionId}:${row.automationKey}`
-  }
+  const createProposalMut = useMutation({
+    mutationFn: (row: DiagnosisRow) =>
+      api.executions.createHealingProposal(projectId, executionId, row.executionResultId),
+    onSuccess: (res, row) => {
+      setActionMessage(selectorProposalMessage(row, res.status, res.reason))
+      setActionOutput(res)
+      refreshMaintenanceState()
+    },
+    onError: (error, row) => {
+      setActionMessage(`${row.automationKey}: ${getApiErrorMessage(error, 'Selector proposal failed.')}`)
+    }
+  })
 
-  function proposalStatus(row: DiagnosisRow): HealingProposalStatus {
-    return proposalStates[proposalKey(row)] || 'proposed'
-  }
+  const acceptApplyMut = useMutation({
+    mutationFn: async ({ proposalId }: { proposalId: string; row: DiagnosisRow }) => {
+      const accepted = await api.healing.accept(projectId, proposalId)
+      const applied = await api.healing.apply(projectId, proposalId)
+      return { accepted, applied }
+    },
+    onSuccess: (res, variables) => {
+      setActionMessage(`${variables.row.automationKey}: selector proposal accepted and applied through guarded regeneration.`)
+      setActionOutput(res)
+      refreshMaintenanceState()
+    },
+    onError: (error, variables) => {
+      if (!showPanelGenerationConflict(error, `${variables.row.automationKey} guarded regeneration`)) {
+        setActionMessage(`${variables.row.automationKey}: ${getApiErrorMessage(error, 'Apply failed.')}`)
+      }
+    }
+  })
 
-  function acceptProposal(row: DiagnosisRow) {
-    setProposalStates((current) => ({ ...current, [proposalKey(row)]: 'accepted' }))
-    setActionMessage(`${row.automationKey}: proposal accepted locally. Structured apply/regenerate will use worker healing APIs when C12-06 lands.`)
-  }
+  const rejectProposalMut = useMutation({
+    mutationFn: ({ proposalId }: { proposalId: string; row: DiagnosisRow }) =>
+      api.healing.reject(projectId, proposalId),
+    onSuccess: (res, variables) => {
+      setActionMessage(`${variables.row.automationKey}: selector proposal rejected.`)
+      setActionOutput(res)
+      refreshMaintenanceState()
+    },
+    onError: (error, variables) => {
+      setActionMessage(`${variables.row.automationKey}: ${getApiErrorMessage(error, 'Reject failed.')}`)
+    }
+  })
 
-  function rejectProposal(row: DiagnosisRow) {
-    setProposalStates((current) => ({ ...current, [proposalKey(row)]: 'rejected' }))
-    setActionMessage(`${row.automationKey}: proposal rejected.`)
-  }
+  const rawRefreshMut = useMutation({
+    mutationFn: (row: DiagnosisRow) => {
+      if (!row.caseId) throw new Error('Resolved case ID is required for selected raw refresh.')
+      return api.generation.refreshWebwrightAndRegenerate(projectId, row.caseId)
+    },
+    onSuccess: (res, row) => {
+      setActionMessage(`${row.automationKey}: selected Webwright refresh/regeneration finished.`)
+      setActionOutput(res)
+      setMaintenanceReview(null)
+      refreshMaintenanceState()
+    },
+    onError: (error, row) => {
+      if (!showPanelGenerationConflict(error, `${row.automationKey} raw refresh regeneration`)) {
+        setActionMessage(`${row.automationKey}: ${getApiErrorMessage(error, 'Selected raw refresh failed.')}`)
+      }
+    }
+  })
+
+  const previewRawRefreshMut = useMutation({
+    mutationFn: (row: DiagnosisRow) => {
+      if (!row.caseId) throw new Error('Resolved case ID is required for maintenance preview.')
+      return api.generation.previewRefreshWebwrightAndRegenerate(projectId, row.caseId)
+    },
+    onSuccess: (res, row) => {
+      const summary = maintenanceSummaryFromRefreshPreview(res as {
+        automationKey?: string
+        generation?: Record<string, unknown>
+        note?: string
+      })
+      summary.guidance = generationConflictGuidance(summary)
+      setMaintenanceReview({
+        rowKey: dispositionRowKey(row),
+        summary,
+        pending: { kind: 'raw_refresh', row }
+      })
+      setGenerationConflict(null)
+      setActionMessage(`${row.automationKey}: review regeneration impact before applying raw refresh.`)
+    },
+    onError: (error, row) => {
+      if (!showPanelGenerationConflict(error, `${row.automationKey} raw refresh preview`)) {
+        setActionMessage(`${row.automationKey}: ${getApiErrorMessage(error, 'Maintenance preview failed.')}`)
+      }
+    }
+  })
+
+  const previewRetireMut = useMutation({
+    mutationFn: ({ action, row }: { action: 'retire' | 'delete'; row: DiagnosisRow }) => {
+      if (!row.caseId) throw new Error('Resolved case ID is required for maintenance preview.')
+      return api.executions.previewRetireResult(projectId, executionId, row.executionResultId, {
+        action,
+        caseId: row.caseId
+      })
+    },
+    onSuccess: (res, variables) => {
+      setMaintenanceReview({
+        rowKey: dispositionRowKey(variables.row),
+        summary: maintenanceSummaryFromRetirePreview(res as {
+          action?: string
+          automationKey?: string
+          cleanup?: Record<string, unknown>
+        }),
+        pending: { action: variables.action, kind: 'retire', row: variables.row }
+      })
+      setActionMessage(`${variables.row.automationKey}: review retire cleanup impact before applying.`)
+    },
+    onError: (error, variables) => {
+      setActionMessage(`${variables.row.automationKey}: ${getApiErrorMessage(error, 'Maintenance preview failed.')}`)
+    }
+  })
+
+  const retireMut = useMutation({
+    mutationFn: ({ action, row }: { action: 'retire' | 'delete'; row: DiagnosisRow }) => {
+      if (!row.caseId) throw new Error('Resolved case ID is required for retire/delete.')
+      return api.executions.retireResult(projectId, executionId, row.executionResultId, {
+        action,
+        caseId: row.caseId,
+        confirmed: true
+      })
+    },
+    onSuccess: (res, variables) => {
+      setActionMessage(`${variables.row.automationKey}: ${variables.action} cleanup completed.`)
+      setActionOutput(res)
+      setMaintenanceReview(null)
+      refreshMaintenanceState()
+    },
+    onError: (error, variables) => {
+      setActionMessage(`${variables.row.automationKey}: ${getApiErrorMessage(error, 'Retire/delete failed.')}`)
+    }
+  })
 
   if (!execution) {
     return <div className="text-xs text-slate-500">No execution result loaded for diagnosis.</div>
+  }
+
+  const rows = buildDispositionRows(
+    diagnosisQuery.data?.diagnoses,
+    results,
+    summaryCases,
+    resultPath,
+    selectedAutomationKey,
+    selectedCaseId
+  )
+  const proposalByRow = latestProposalsByResult(proposalsQuery.data || [])
+  const actionPending = (
+    createProposalMut.isPending ||
+    acceptApplyMut.isPending ||
+    rejectProposalMut.isPending ||
+    previewRawRefreshMut.isPending ||
+    previewRetireMut.isPending ||
+    rawRefreshMut.isPending ||
+    retireMut.isPending
+  )
+
+  function applyMaintenanceReview() {
+    if (!maintenanceReview) return
+    if (maintenanceReview.pending.kind === 'raw_refresh') {
+      rawRefreshMut.mutate(maintenanceReview.pending.row)
+      return
+    }
+    retireMut.mutate({
+      action: maintenanceReview.pending.action,
+      row: maintenanceReview.pending.row
+    })
   }
 
   if (!rows.length) {
     return (
       <div className="space-y-2 text-xs">
         <div className="rounded border border-slate-800 bg-slate-900 p-3">
-          <div className="font-medium text-slate-200">No failures found</div>
+          <div className="font-medium text-slate-200">
+            {diagnosisQuery.isError ? 'Diagnosis unavailable' : 'No classified failures found'}
+          </div>
           <div className="mt-1 text-slate-500">
-            {selectedAutomationKey
-              ? `No failed result is captured for ${selectedAutomationKey} in ${execution.run_id}.`
-              : `No failed result is captured in ${execution.run_id}.`}
+            {diagnosisQuery.isError
+              ? getApiErrorMessage(diagnosisQuery.error, 'The Worker diagnosis endpoint did not return a result.')
+              : selectedAutomationKey
+                ? `No failed diagnosis is captured for ${selectedAutomationKey} in ${execution.run_id}.`
+                : `No failed diagnosis is captured in ${execution.run_id}.`}
           </div>
         </div>
       </div>
@@ -795,35 +1274,89 @@ function FailureDiagnosisPanel({
         <div className="text-xs text-slate-500">
           {execution.run_id} · {rows.length} diagnosable failure(s)
         </div>
-        <button
-          className="rounded bg-yellow-600 px-3 py-1.5 text-xs disabled:opacity-50"
-          disabled={!executionId || rerunMut.isPending}
-          type="button"
-          onClick={() => rerunMut.mutate()}
-        >
-          {rerunMut.isPending ? 'Queueing...' : 'Rerun Failed'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded bg-slate-700 px-3 py-1.5 text-xs disabled:opacity-50"
+            disabled={!executionId || diagnosisQuery.isFetching}
+            type="button"
+            onClick={() => diagnosisQuery.refetch()}
+          >
+            {diagnosisQuery.isFetching ? 'Refreshing...' : 'Refresh Diagnosis'}
+          </button>
+          <button
+            className="rounded bg-yellow-600 px-3 py-1.5 text-xs disabled:opacity-50"
+            disabled={!executionId || rerunMut.isPending}
+            type="button"
+            onClick={() => rerunMut.mutate()}
+          >
+            {rerunMut.isPending ? 'Queueing...' : 'Rerun Failed'}
+          </button>
+        </div>
       </div>
       {actionMessage && (
         <div className="rounded border border-slate-800 bg-slate-950 p-2 text-xs text-slate-400">{actionMessage}</div>
       )}
+      {generationConflict && (
+        <MaintenanceImpactReview
+          summary={generationConflict}
+          onDismiss={() => setGenerationConflict(null)}
+          onApply={() => setGenerationConflict(null)}
+        />
+      )}
+      {maintenanceReview && (
+        <MaintenanceImpactReview
+          pending={rawRefreshMut.isPending || retireMut.isPending}
+          summary={maintenanceReview.summary}
+          onApply={applyMaintenanceReview}
+          onDismiss={() => setMaintenanceReview(null)}
+        />
+      )}
+      {actionOutput !== null && (
+        <pre className="max-h-32 overflow-auto rounded border border-slate-800 bg-slate-950 p-2 text-xs text-slate-400">
+          {JSON.stringify(actionOutput, null, 2)}
+        </pre>
+      )}
       {rows.map((row) => {
-        const status = proposalStatus(row)
-        const kind = proposalKind(row)
+        const proposal = proposalForRow(proposalByRow, row)
+        const status = proposal?.status || 'not_applicable'
+        const target = row.diagnosis.target
+        const rowKey = dispositionRowKey(row)
+        const retireConfirmed = Boolean(retireConfirmations[rowKey])
         return (
-          <div key={`${row.automationKey}-${row.title}`} className="rounded border border-slate-800 bg-slate-900 p-3">
+          <div key={rowKey} className="rounded border border-slate-800 bg-slate-900 p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <div className="font-medium text-slate-200">{row.automationKey}</div>
                 <div className="text-xs text-slate-500">{row.title || 'Untitled TC'}</div>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Result {row.executionResultId} 쨌 Case {row.caseId || 'unresolved'}
+                </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">{kind}</span>
-                <span className={`rounded px-2 py-1 text-xs ${proposalStatusClass(status)}`}>{status}</span>
+                <span className={`rounded px-2 py-1 text-xs ${dispositionClass(row.diagnosis.disposition)}`}>
+                  {dispositionLabel(row.diagnosis.disposition)}
+                </span>
+                <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">
+                  {Math.round(row.diagnosis.confidence * 100)}%
+                </span>
+                {proposal && <span className={`rounded px-2 py-1 text-xs ${proposalStatusClass(status)}`}>{status}</span>}
                 <span className="rounded bg-red-900/40 px-2 py-1 text-xs text-red-200">{row.status}</span>
               </div>
             </div>
             <div className="mt-2 rounded bg-slate-950 p-2 text-xs text-red-200">{row.error || 'No error message captured.'}</div>
+            <div className="mt-2 grid gap-2 text-xs md:grid-cols-2">
+              <div className="rounded border border-slate-800 bg-slate-950 p-2">
+                <div className="font-medium text-slate-300">Diagnosis</div>
+                <div className="mt-1 text-slate-500">{row.diagnosis.reason}</div>
+                <div className="mt-2 text-slate-500">Target: {target.status} ({target.reason})</div>
+              </div>
+              <div className="rounded border border-slate-800 bg-slate-950 p-2">
+                <div className="font-medium text-slate-300">Evidence</div>
+                <CompactList label="Artifacts" values={row.diagnosis.evidence_artifact_ids} />
+                <CompactList label="Selector candidates" values={row.diagnosis.selector_candidate_ids} />
+                <CompactList label="Raw actions" values={target.raw_action_ids} />
+              </div>
+            </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {row.screenshotPath && <ArtifactButton label="Screenshot" path={row.screenshotPath} />}
               {row.tracePath && <ArtifactButton label="Trace" path={row.tracePath} />}
@@ -832,26 +1365,96 @@ function FailureDiagnosisPanel({
               )}
             </div>
             <div className="mt-3 rounded border border-slate-800 bg-slate-950 p-2 text-xs">
-              <div className="font-medium text-slate-300">Healing proposal</div>
-              <div className="mt-1 text-slate-500">{diagnosisProposal(row)}</div>
+              <div className="font-medium text-slate-300">Recommended action</div>
+              <div className="mt-1 text-slate-500">{dispositionGuidance(row.diagnosis.disposition)}</div>
+              {proposal && (
+                <div className="mt-2 rounded bg-slate-900 p-2">
+                  <div className="text-slate-400">Proposal {proposal.id} 쨌 {proposal.kind} 쨌 {proposal.status}</div>
+                  <div className="mt-1 break-all text-slate-500">Old: {proposal.old_value || '-'}</div>
+                  <div className="mt-1 break-all text-slate-300">New: {proposal.new_value}</div>
+                </div>
+              )}
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                className="rounded bg-green-700 px-3 py-1.5 text-xs disabled:opacity-50"
-                disabled={status !== 'proposed'}
-                type="button"
-                onClick={() => acceptProposal(row)}
-              >
-                Accept
-              </button>
-              <button
-                className="rounded bg-slate-700 px-3 py-1.5 text-xs disabled:opacity-50"
-                disabled={status !== 'proposed'}
-                type="button"
-                onClick={() => rejectProposal(row)}
-              >
-                Reject
-              </button>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {row.diagnosis.disposition === 'selector_changed' && (
+                <>
+                  <button
+                    className="rounded bg-blue-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                    disabled={actionPending || target.status !== 'resolved'}
+                    type="button"
+                    onClick={() => createProposalMut.mutate(row)}
+                  >
+                    {proposal ? 'Refresh Proposal' : 'Create Proposal'}
+                  </button>
+                  <button
+                    className="rounded bg-green-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                    disabled={actionPending || !proposal || !['proposed', 'accepted'].includes(proposal.status)}
+                    type="button"
+                    onClick={() => proposal && acceptApplyMut.mutate({ proposalId: proposal.id, row })}
+                  >
+                    Accept & Apply
+                  </button>
+                  <button
+                    className="rounded bg-slate-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                    disabled={actionPending || !proposal || proposal.status !== 'proposed'}
+                    type="button"
+                    onClick={() => proposal && rejectProposalMut.mutate({ proposalId: proposal.id, row })}
+                  >
+                    Reject
+                  </button>
+                </>
+              )}
+              {row.diagnosis.disposition === 'raw_refresh_required' && (
+                <button
+                  className="rounded bg-purple-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                  disabled={actionPending || !row.caseId || target.status !== 'resolved'}
+                  type="button"
+                  onClick={() => previewRawRefreshMut.mutate(row)}
+                >
+                  {previewRawRefreshMut.isPending && maintenanceReview?.rowKey === rowKey
+                    ? 'Loading preview...'
+                    : 'Review Refresh Impact'}
+                </button>
+              )}
+              {row.diagnosis.disposition === 'feature_removed_retire_tc' && (
+                <>
+                  <label className="flex items-center gap-2 rounded border border-amber-800/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-100">
+                    <input
+                      checked={retireConfirmed}
+                      type="checkbox"
+                      onChange={(event) => setRetireConfirmations((current) => ({
+                        ...current,
+                        [rowKey]: event.target.checked
+                      }))}
+                    />
+                    Confirm obsolete selected TC
+                  </label>
+                  <button
+                    className="rounded bg-amber-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                    disabled={actionPending || !retireConfirmed || !row.caseId || target.status !== 'resolved'}
+                    type="button"
+                    onClick={() => previewRetireMut.mutate({ action: 'retire', row })}
+                  >
+                    Review Retire Impact
+                  </button>
+                  <button
+                    className="rounded bg-red-700 px-3 py-1.5 text-xs disabled:opacity-50"
+                    disabled={actionPending || !retireConfirmed || !row.caseId || target.status !== 'resolved'}
+                    type="button"
+                    onClick={() => previewRetireMut.mutate({ action: 'delete', row })}
+                  >
+                    Review Delete Impact
+                  </button>
+                </>
+              )}
+              {row.diagnosis.disposition === 'unknown' && (
+                <>
+                  <button className="rounded bg-slate-700 px-3 py-1.5 text-xs" type="button" onClick={() => navigate('/mapping')}>
+                    Open Mapping Review
+                  </button>
+                  <span className="text-xs text-slate-500">Manual diagnosis only; no mutation is available for unknown failures.</span>
+                </>
+              )}
             </div>
           </div>
         )
@@ -1008,73 +1611,115 @@ function isAbsolutePath(path: string) {
   return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('/') || path.startsWith('\\\\')
 }
 
-function buildDiagnosisRows(
+function buildDispositionRows(
+  diagnoses: FailureDispositionDiagnosis[] | undefined,
   results: ExecutionResult[] | undefined,
   summaryCases: ExecutionSummaryCase[] | undefined,
-  resultPath: string | undefined
+  resultPath: string | undefined,
+  selectedAutomationKey: string,
+  selectedCaseId: string
 ) {
-  const rows = new Map<string, DiagnosisRow>()
+  const resultById = new Map((results || []).map((result) => [result.id, result]))
+  const resultByKey = new Map((results || []).map((result) => [result.automation_key, result]))
+  const summaryByKey = new Map(
+    (summaryCases || [])
+      .map((item) => [item.automationKey || item.automation_key || '', item] as const)
+      .filter(([automationKey]) => Boolean(automationKey))
+  )
 
-  for (const result of results || []) {
-    if (!isFailureStatus(result.status)) continue
-    rows.set(result.automation_key, {
-      automationKey: result.automation_key,
-      error: result.error || '',
-      screenshotPath: resolveArtifactPath(resultPath, result.screenshot_path || ''),
-      status: result.status,
-      title: result.title || '',
-      tracePath: resolveArtifactPath(resultPath, result.trace_path || '')
+  return (diagnoses || [])
+    .map((diagnosis): DiagnosisRow => {
+      const result = resultById.get(diagnosis.execution_result_id) ||
+        (diagnosis.automation_key ? resultByKey.get(diagnosis.automation_key) : undefined)
+      const automationKey = diagnosis.automation_key || diagnosis.target.automation_key || result?.automation_key || ''
+      const summary = summaryByKey.get(automationKey)
+      const caseId = diagnosis.target.test_case_ids[0] ||
+        (selectedAutomationKey && automationKey === selectedAutomationKey ? selectedCaseId : '')
+      return {
+        automationKey,
+        caseId,
+        diagnosis,
+        error: result?.error || summary?.error || '',
+        executionResultId: diagnosis.execution_result_id,
+        screenshotPath: resolveArtifactPath(resultPath, result?.screenshot_path || summary?.artifacts?.screenshot || ''),
+        sourceCaseId: diagnosis.target.source_case_id || result?.source_case_id || '',
+        sourceType: diagnosis.target.source_type || result?.source_type || '',
+        status: result?.status || summary?.status || 'failed',
+        title: result?.title || summary?.title || '',
+        tracePath: resolveArtifactPath(resultPath, result?.trace_path || summary?.artifacts?.trace || '')
+      }
     })
-  }
-
-  for (const item of summaryCases || []) {
-    if (!isFailureStatus(item.status)) continue
-    const automationKey = item.automationKey || item.automation_key || ''
-    if (!automationKey) continue
-    const existing = rows.get(automationKey)
-    rows.set(automationKey, {
-      automationKey,
-      error: existing?.error || item.error || '',
-      screenshotPath: existing?.screenshotPath || resolveArtifactPath(resultPath, item.artifacts?.screenshot || ''),
-      status: existing?.status || item.status,
-      title: existing?.title || item.title || '',
-      tracePath: existing?.tracePath || resolveArtifactPath(resultPath, item.artifacts?.trace || '')
-    })
-  }
-
-  return [...rows.values()]
+    .filter((row) => !selectedAutomationKey || row.automationKey === selectedAutomationKey)
 }
 
-function isFailureStatus(status: string) {
-  const normalized = status.toLowerCase()
-  return normalized.includes('fail') || normalized.includes('error')
+function latestProposalsByResult(proposals: HealingProposal[]) {
+  const map = new Map<string, HealingProposal>()
+  const sorted = [...proposals].sort((a, b) => Date.parse(a.created_at || '') - Date.parse(b.created_at || ''))
+  for (const proposal of sorted) {
+    if (proposal.execution_result_id) map.set(`result:${proposal.execution_result_id}`, proposal)
+    map.set(`key:${proposal.automation_key}`, proposal)
+  }
+  return map
 }
 
-function diagnosisProposal(row: DiagnosisRow) {
-  const lowerError = row.error.toLowerCase()
-  if (lowerError.includes('timeout')) {
-    return 'Inspect the trace timing and screenshot state, then consider a more stable wait or selector in the generated step.'
-  }
-  if (lowerError.includes('selector') || lowerError.includes('locator')) {
-    return 'Compare the failed locator against the screenshot/trace evidence and prepare a selector replacement before regeneration.'
-  }
-  if (lowerError.includes('assert') || lowerError.includes('expect')) {
-    return 'Check whether the generated assertion still matches the TC expected result and captured page state.'
-  }
-  return 'Review the captured error with available screenshot/trace evidence and prepare a focused generated-code or selector fix.'
+function proposalForRow(proposals: Map<string, HealingProposal>, row: DiagnosisRow) {
+  return proposals.get(`result:${row.executionResultId}`) || proposals.get(`key:${row.automationKey}`)
 }
 
-function proposalKind(row: DiagnosisRow) {
-  const lowerError = row.error.toLowerCase()
-  if (lowerError.includes('selector') || lowerError.includes('locator')) return 'selector_replace'
-  if (lowerError.includes('timeout')) return 'wait_adjustment'
-  if (lowerError.includes('assert') || lowerError.includes('expect')) return 'assertion_review'
-  return 'manual_review'
+function dispositionRowKey(row: DiagnosisRow) {
+  return `${row.executionResultId}:${row.automationKey}`
+}
+
+function dispositionLabel(disposition: FailureDispositionDiagnosis['disposition']) {
+  if (disposition === 'selector_changed') return 'Selector changed'
+  if (disposition === 'raw_refresh_required') return 'Raw refresh'
+  if (disposition === 'feature_removed_retire_tc') return 'Retire TC'
+  return 'Manual diagnosis'
+}
+
+function dispositionClass(disposition: FailureDispositionDiagnosis['disposition']) {
+  if (disposition === 'selector_changed') return 'bg-blue-900/40 text-blue-200'
+  if (disposition === 'raw_refresh_required') return 'bg-purple-900/40 text-purple-200'
+  if (disposition === 'feature_removed_retire_tc') return 'bg-amber-900/40 text-amber-200'
+  return 'bg-slate-800 text-slate-300'
+}
+
+function dispositionGuidance(disposition: FailureDispositionDiagnosis['disposition']) {
+  if (disposition === 'selector_changed') {
+    return 'Create a selector healing proposal, then accept and apply it through guarded selected regeneration.'
+  }
+  if (disposition === 'raw_refresh_required') {
+    return 'Refresh Webwright raw only for this TC, merge the new raw actions into existing structure, then regenerate affected files.'
+  }
+  if (disposition === 'feature_removed_retire_tc') {
+    return 'Confirm the obsolete TC before retiring or deleting it. The Worker revalidates the failed result before cleanup.'
+  }
+  return 'Inspect evidence manually. No code, raw, or TC mutation is offered for unknown or mixed failures.'
+}
+
+function selectorProposalMessage(row: DiagnosisRow, status: string, reason?: string) {
+  if (status === 'auto_applied') return `${row.automationKey}: selector proposal auto-applied.`
+  if (status === 'existing') return `${row.automationKey}: existing selector proposal loaded.`
+  if (status === 'blocked') return `${row.automationKey}: selector proposal created but auto-apply was blocked (${reason || 'review required'}).`
+  if (status === 'not_applicable') return `${row.automationKey}: selector proposal not applicable (${reason || 'diagnosis did not qualify'}).`
+  return `${row.automationKey}: selector proposal created.`
+}
+
+function CompactList({ label, values }: { label: string; values: string[] }) {
+  return (
+    <div className="mt-1">
+      <span className="text-slate-500">{label}: </span>
+      <span className="break-all text-slate-300">{values.length ? values.join(', ') : '-'}</span>
+    </div>
+  )
 }
 
 function proposalStatusClass(status: HealingProposalStatus) {
   if (status === 'accepted') return 'bg-green-900/40 text-green-200'
+  if (status === 'applied') return 'bg-emerald-900/40 text-emerald-200'
   if (status === 'rejected') return 'bg-slate-800 text-slate-400'
+  if (status === 'superseded') return 'bg-amber-900/40 text-amber-200'
+  if (status === 'not_applicable') return 'bg-slate-800 text-slate-500'
   return 'bg-blue-900/40 text-blue-200'
 }
 

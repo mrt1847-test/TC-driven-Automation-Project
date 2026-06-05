@@ -10,6 +10,7 @@ from typing import Any
 
 from runner.mapping_loader import load_cases, load_env_config, project_root
 from runner.result_writer import parse_pytest_output, write_results
+from runner.secret_redaction import redact_text
 
 
 def _subprocess_env(env: str, run_id: str, browser: str) -> dict[str, str]:
@@ -91,8 +92,8 @@ def _find_single_artifact(out_dir: Path, safe_name: str, suffix: str) -> Path | 
 
 def _write_pytest_logs(run_id: str, stdout: str, stderr: str) -> None:
     out_dir = _artifact_dir(run_id)
-    (out_dir / "stdout.log").write_text(stdout, encoding="utf-8")
-    (out_dir / "stderr.log").write_text(stderr, encoding="utf-8")
+    (out_dir / "stdout.log").write_text(redact_text(stdout), encoding="utf-8")
+    (out_dir / "stderr.log").write_text(redact_text(stderr), encoding="utf-8")
 
 
 def run_pytest(case_keys: list[str], env: str, browser: str, headed: bool, run_id: str) -> Path:
@@ -130,8 +131,10 @@ def run_pytest(case_keys: list[str], env: str, browser: str, headed: bool, run_i
         cwd=str(project_root()),
         env=env_vars,
     )
-    combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
-    _write_pytest_logs(run_id, proc.stdout or "", proc.stderr or "")
+    stdout_text = redact_text(proc.stdout or "", env_vars)
+    stderr_text = redact_text(proc.stderr or "", env_vars)
+    combined = stdout_text + "\n" + stderr_text
+    _write_pytest_logs(run_id, stdout_text, stderr_text)
 
     results: list[dict[str, Any]] = []
     for case in cases:
@@ -143,10 +146,10 @@ def run_pytest(case_keys: list[str], env: str, browser: str, headed: bool, run_i
             match = re.search(rf"{re.escape(test_file)}::{re.escape(test_fn)}.*?(\\n=+.*)", combined, re.DOTALL)
             error = match.group(0).strip() if match else combined.strip() or "pytest failed"
         results.append(parse_pytest_output(
-            proc.stdout,
+            stdout_text,
             case,
             status,
-            error,
+            redact_text(error, env_vars) if error else None,
             artifacts=_case_artifacts(run_id, test_file, test_fn),
         ))
 

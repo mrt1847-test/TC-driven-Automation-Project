@@ -175,6 +175,39 @@ def _retire_url(project_id: str, seeded: dict) -> str:
     )
 
 
+def _retire_preview_url(project_id: str, seeded: dict) -> str:
+    return (
+        f"/projects/{project_id}/executions/{seeded['execution_id']}"
+        f"/results/{seeded['result_id']}/retire/preview"
+    )
+
+
+def test_feature_removed_disposition_preview_reports_cleanup_without_mutation(
+    client,
+    project_id: str,
+) -> None:
+    import worker.core.database as database
+
+    with Session(database.engine) as session:
+        seeded = _seed_failure(session, project_id, "preview_retire")
+
+    response = client.post(
+        _retire_preview_url(project_id, seeded),
+        json={"caseId": seeded["case_id"], "action": "retire"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview"] is True
+    assert body["cleanup"]["preview"] is True
+    assert body["cleanup"]["status"] == "preview"
+    assert body["cleanup"]["removedFiles"] == ["tests/test_preview_retire.py"]
+    assert seeded["generated_path"].exists()
+
+    with Session(database.engine) as session:
+        assert session.get(DbTestCase, seeded["case_id"]).status == "generated"
+
+
 def test_feature_removed_disposition_invokes_confirmed_cleanup(
     client,
     project_id: str,

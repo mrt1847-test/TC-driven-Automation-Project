@@ -1,6 +1,6 @@
 # Screen Inventory
 
-Last aligned: 2026-06-02
+Last aligned: 2026-06-06
 
 이 문서는 Electron + React GUI 화면의 책임, 주요 상태, 연결 API, 체크리스트 항목을 정리한다. GUI는 자동화 로직을 소유하지 않고 Local Worker와 generated automation project를 오케스트레이션한다.
 
@@ -106,6 +106,8 @@ PRODUCT_PILLARS handoff contract를 GUI에서 지원한다.
 - Long-running jobs surface `jobId` and stream logs from `/ws/logs/{job_id}`.
 - File/directory picking and OS path opening go through Electron preload APIs.
 - API keys are stored through OS credential store, not rendered back into settings JSON.
+- Renderer credential checks return presence/status only; plaintext keys are
+  not echoed from Electron main back into renderer state.
 - Core screens should share an IDE-like shell: workspace activity bar, primary work area, optional right context panel, and bottom logs/terminal.
 - Case selection should carry through Generate Raw and Automation IDE where possible.
 
@@ -384,16 +386,22 @@ Show execution status and per-case results with artifact links inside the Automa
 - Screenshot/trace/artifact links.
 - Jump back to case, mapping, or IDE.
 - Failure diagnosis panel when a result can be linked to a structured step or POM method.
-- Healing proposal panel with evidence, selector candidates, accept/reject, and rerun actions.
+- Failure disposition action panel with evidence, confidence, target context,
+  selector self-heal, selected raw refresh/regenerate, confirmed retire/delete,
+  manual diagnosis, and rerun actions.
 
 ### APIs
 
 - `GET /projects/{project_id}/executions`
 - `GET /projects/{project_id}/executions/{execution_id}`
+- `POST /projects/{project_id}/executions/{execution_id}/diagnose`
 - `POST /projects/{project_id}/executions/{execution_id}/healing-proposals`
 - `GET /projects/{project_id}/healing-proposals`
 - `POST /projects/{project_id}/healing-proposals/{proposal_id}/accept`
 - `POST /projects/{project_id}/healing-proposals/{proposal_id}/reject`
+- `POST /projects/{project_id}/healing-proposals/{proposal_id}/apply`
+- `POST /projects/{project_id}/cases/{case_id}/refresh-webwright-and-regenerate`
+- `POST /projects/{project_id}/executions/{execution_id}/results/{result_id}/retire`
 
 ## Automation IDE - Result Export Panel
 

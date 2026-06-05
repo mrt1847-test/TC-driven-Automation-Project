@@ -18,7 +18,12 @@ from worker.models.schemas import (
 )
 from worker.services.generated_runtime import ensure_generated_runtime
 from worker.services.generated_file_status import refresh_generated_file_statuses
-from worker.services.project_generator import GenerationConflictError, generate_project, retire_generated_case
+from worker.services.project_generator import (
+    GenerationConflictError,
+    GenerationResult,
+    generate_project,
+    retire_generated_case,
+)
 from worker.services.project_ide import (
     create_file,
     delete_file,
@@ -32,6 +37,20 @@ from worker.services.raw_refresh_regeneration import refresh_and_regenerate_case
 from worker.services.structuring_service import get_latest_flow
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["generation"])
+
+
+def _generation_summary(result: GenerationResult, *, preview: bool = False) -> dict:
+    return {
+        "preview": preview,
+        "generationMode": result.mode,
+        "selectedCaseIds": result.selected_case_ids,
+        "affectedFiles": result.affected_files,
+        "changedFiles": result.changed_files,
+        "preservedFiles": result.preserved_files,
+        "editedFiles": result.edited_files,
+        "staleFiles": result.stale_files,
+        "conflictFiles": result.conflict_files,
+    }
 
 
 def _generate(
@@ -102,6 +121,35 @@ def generate_selected(
     return _generate(project_id, request, session, selected_only=True)
 
 
+@router.post("/generate/selected/preview")
+def preview_generate_selected(
+    project_id: str,
+    request: GenerationRequest,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not request.case_ids:
+        raise HTTPException(400, "Selected generation preview requires caseIds")
+    if request.mode == "full":
+        raise HTTPException(400, "Selected generation preview does not support full mode")
+    try:
+        result = generate_project(
+            session,
+            project_id,
+            Path(project.root_path),
+            request.case_ids,
+            mode="incremental",
+            dry_run=True,
+        )
+    except GenerationConflictError as exc:
+        raise HTTPException(409, {"message": str(exc), **exc.summary()}) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return _generation_summary(result, preview=True)
+
+
 @router.post("/cases/{case_id}/refresh-webwright-and-regenerate")
 async def refresh_webwright_and_regenerate(
     project_id: str,
@@ -130,6 +178,46 @@ async def refresh_webwright_and_regenerate(
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/cases/{case_id}/refresh-webwright-and-regenerate/preview")
+def preview_refresh_webwright_and_regenerate(
+    project_id: str,
+    case_id: str,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    case = session.get(TestCase, case_id)
+    if not case or case.project_id != project_id:
+        raise HTTPException(404, "Case not found")
+    if not get_latest_flow(session, case_id):
+        raise HTTPException(409, "Existing structured flow required for refresh regeneration preview")
+    try:
+        result = generate_project(
+            session,
+            project_id,
+            Path(project.root_path),
+            [case_id],
+            mode="incremental",
+            dry_run=True,
+        )
+    except GenerationConflictError as exc:
+        raise HTTPException(409, {"message": str(exc), **exc.summary()}) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "preview": True,
+        "action": "raw_refresh_regenerate",
+        "caseId": case.id,
+        "automationKey": case.automation_key,
+        "note": (
+            "Preview covers post-merge incremental regeneration from the current structured state. "
+            "Webwright re-run and raw merge are not simulated."
+        ),
+        "generation": _generation_summary(result, preview=True),
+    }
+
+
 @router.post("/cases/{case_id}/retire")
 def retire_case(
     project_id: str,
@@ -154,6 +242,35 @@ def retire_case(
             case_id,
             action=request.action,
             reason=request.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/cases/{case_id}/retire/preview")
+def preview_retire_case(
+    project_id: str,
+    case_id: str,
+    request: RetireCaseRequest | None = None,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    case = session.get(TestCase, case_id)
+    if not case or case.project_id != project_id:
+        raise HTTPException(404, "Case not found")
+    body = request or RetireCaseRequest()
+    output = Path(project.generated_project_path or Path(project.root_path) / "generated")
+    try:
+        return retire_generated_case(
+            session,
+            project_id,
+            output,
+            case_id,
+            action=body.action,
+            reason=body.reason,
+            preview=True,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

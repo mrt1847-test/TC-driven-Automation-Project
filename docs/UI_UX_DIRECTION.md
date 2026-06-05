@@ -164,6 +164,8 @@ Surface readiness using PRODUCT_PILLARS completion signals, not only HTTP succes
 - Long-running actions immediately return visible status and stream logs.
 - Generated file edits should show saved/dirty/stale state.
 - Regeneration should warn if generated files have manual edits or conflicts.
+  Automation IDE surfaces Worker 409 conflict summaries with edited/stale/conflict
+  file lists, recovery guidance, preview-before-apply, and guarded maintenance actions.
 
 ## Key Work Surfaces
 
@@ -179,6 +181,9 @@ Surface readiness using PRODUCT_PILLARS completion signals, not only HTTP succes
 - Keep LLM/API key and prompt controls close to Webwright run controls.
 - Show the exact prompt payload that will be sent to Webwright.
 - Treat raw script and trajectory as generated artifacts for review, not as final automation code.
+- Failed Webwright runs should show the Worker-classified error category with an actionable
+  summary, recovery steps, retry control, and quick links to the run folder/stderr logs.
+  Mapping Review should reuse the same classified failure panel for the latest run evidence.
 
 ### Automation IDE Mapping Review
 
@@ -218,6 +223,14 @@ The IDE is scoped to generated automation projects and structure review. It shou
 - Logs are searchable and copyable.
 - The active job status is visible across screens.
 - Failed execution should link directly to result detail, mapping review, and generated source.
+- Bootstrap/runtime failures in Runner and Results should map Worker `bootstrap.message`,
+  pip/Playwright status, and failed case errors to titled recovery guidance with
+  Health Check, Install Dependencies, retry, rerun-failed, Diagnosis, and run-folder/log
+  actions without clearing execution history.
+- Export preview/write-back failures should map Worker validation `issues`, API
+  `detail`, and Excel `failed` rows to titled recovery guidance with per-item
+  listings, retry preview/export, Settings/mapping/results links, and an explicit
+  note that local `results.json` is preserved on validation failures.
 
 ## Component Guidelines
 

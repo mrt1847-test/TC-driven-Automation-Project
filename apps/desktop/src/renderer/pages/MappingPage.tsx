@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { WebwrightRunErrorPanel } from '@/components/WebwrightRunErrorPanel'
 import { api, getApiErrorMessage, type TestCase, type WebwrightRun } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
@@ -501,7 +502,11 @@ function RawEvidence({ run }: { run?: WebwrightRun }) {
         <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">{run.status}</span>
       </div>
       <div className="mt-1 text-xs text-slate-500">{runTime(run)}</div>
-      {run.error_message && <div className="mt-2 text-xs text-red-300">{run.error_message}</div>}
+      {run.status === 'failed' && (
+        <div className="mt-2">
+          <WebwrightRunErrorPanel run={run} compact />
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap gap-2">
         {run.output_path && <ArtifactButton label="Folder" path={run.output_path} />}
         {run.final_script_path && <ArtifactButton label="Script" path={run.final_script_path} />}

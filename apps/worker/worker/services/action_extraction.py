@@ -83,10 +83,53 @@ class _ExtractedAction:
     value: str | None = None
 
 
+@dataclass(frozen=True)
+class _CallCandidate:
+    call: ast.Call
+    source: str
+    line_no: int
+    aliases: dict[str, str] | None = None
+
+
 def _node_source(node: ast.AST | None) -> str | None:
     if node is None:
         return None
     return ast.unparse(node)
+
+
+def _root_name(node: ast.AST | None) -> str | None:
+    if node is None:
+        return None
+    if isinstance(node, ast.Await):
+        return _root_name(node.value)
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return _root_name(node.value)
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Attribute):
+            return _root_name(node.func.value)
+        return _root_name(node.func)
+    if isinstance(node, ast.Subscript):
+        return _root_name(node.value)
+    return None
+
+
+def _source_with_aliases(
+    node: ast.AST | None,
+    aliases: dict[str, str] | None = None,
+) -> str | None:
+    source = _node_source(node)
+    if source is None or not aliases:
+        return source
+    root = _root_name(node)
+    if not root or root not in aliases:
+        return source
+    if source == root:
+        return aliases[root]
+    if source.startswith(f"{root}.") or source.startswith(f"{root}["):
+        return f"{aliases[root]}{source[len(root):]}"
+    return source
 
 
 def _node_value(node: ast.AST | None) -> str | None:
@@ -132,36 +175,90 @@ def _expect_target(call: ast.Call) -> ast.AST | None:
     return expect_call.args[0]
 
 
-def _selector_for_wait(call: ast.Call, method: str) -> str | None:
+def _selector_for_wait(
+    call: ast.Call,
+    method: str,
+    aliases: dict[str, str] | None = None,
+) -> str | None:
     if not isinstance(call.func, ast.Attribute):
         return None
-    base = _node_source(call.func.value)
+    base = _source_with_aliases(call.func.value, aliases)
     if method == "wait_for_selector" and call.args:
         return f"page.locator({_node_source(call.args[0])})"
-    if method == "wait_for" and base != "page":
+    if method == "wait_for" and base not in {"page", "self.page"}:
         return base
     return None
 
 
-def _looks_like_playwright_call(call: ast.Call) -> bool:
+def _looks_like_playwright_source(source: str | None) -> bool:
+    if not source:
+        return False
+    return (
+        source == "page"
+        or source == "self.page"
+        or source.startswith("page.")
+        or source.startswith("self.page.")
+        or ".locator(" in source
+        or ".get_by_" in source
+        or ".frame_locator(" in source
+    )
+
+
+def _selector_alias_source(
+    node: ast.AST | None,
+    aliases: dict[str, str] | None = None,
+) -> str | None:
+    if isinstance(node, ast.Await):
+        node = node.value
+    if isinstance(node, ast.Name) and aliases:
+        return aliases.get(node.id)
+
+    source = _source_with_aliases(node, aliases)
+    if source is None:
+        return None
+
+    if isinstance(node, ast.Attribute):
+        if node.attr in _LOCATOR_BUILDERS and _looks_like_playwright_source(
+            _source_with_aliases(node.value, aliases)
+        ):
+            return source
+        return None
+
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return None
+
+    method = node.func.attr
+    base = _source_with_aliases(node.func.value, aliases)
+    if (method in _LOCATOR_BUILDERS or method.startswith("get_by_")) and (
+        _looks_like_playwright_source(base) or _looks_like_playwright_source(source)
+    ):
+        return source
+    return None
+
+
+def _looks_like_playwright_call(
+    call: ast.Call,
+    aliases: dict[str, str] | None = None,
+) -> bool:
     method = _call_method(call)
     if not method:
         return False
     if method in _LOCATOR_BUILDERS or method.startswith("get_by_"):
         return False
-    source = _node_source(call) or ""
-    base = _node_source(call.func.value) if isinstance(call.func, ast.Attribute) else ""
+    source = _source_with_aliases(call, aliases) or ""
+    base = _source_with_aliases(call.func.value, aliases) if isinstance(call.func, ast.Attribute) else ""
     return (
         "expect(" in source
         or "async_expect(" in source
-        or base == "page"
-        or (base or "").startswith("page.")
-        or ".locator(" in (base or "")
-        or ".get_by_" in (base or "")
+        or _looks_like_playwright_source(base)
     )
 
 
-def _extract_call(call: ast.Call, raw_line: str) -> _ExtractedAction | None:
+def _extract_call(
+    call: ast.Call,
+    raw_line: str,
+    aliases: dict[str, str] | None = None,
+) -> _ExtractedAction | None:
     method = _call_method(call)
     if not method:
         return None
@@ -171,8 +268,8 @@ def _extract_call(call: ast.Call, raw_line: str) -> _ExtractedAction | None:
         action_type = _ASSERTION_METHODS.get(method)
         if not action_type:
             return _ExtractedAction("custom_code", target=raw_line)
-        selector = _node_source(expect_target)
-        if selector == "page":
+        selector = _source_with_aliases(expect_target, aliases)
+        if selector in {"page", "self.page"}:
             selector = None
         value = _argument_value(call)
         return _ExtractedAction(
@@ -188,7 +285,7 @@ def _extract_call(call: ast.Call, raw_line: str) -> _ExtractedAction | None:
 
     if method in _INTERACTION_METHODS:
         action_type = _INTERACTION_METHODS[method]
-        selector = _node_source(call.func.value) if isinstance(call.func, ast.Attribute) else None
+        selector = _source_with_aliases(call.func.value, aliases) if isinstance(call.func, ast.Attribute) else None
         value_keywords = {
             "fill": ("value",),
             "select": ("value", "label", "index"),
@@ -210,11 +307,11 @@ def _extract_call(call: ast.Call, raw_line: str) -> _ExtractedAction | None:
         return _ExtractedAction(
             action_type,
             target=value or action_type,
-            selector=_selector_for_wait(call, method),
+            selector=_selector_for_wait(call, method, aliases),
             value=value,
         )
 
-    if _looks_like_playwright_call(call):
+    if _looks_like_playwright_call(call, aliases):
         return _ExtractedAction("custom_code", target=raw_line)
     return None
 
@@ -250,6 +347,122 @@ def _statement_calls(raw_line: str) -> list[ast.Call]:
         if isinstance(node, ast.Call):
             calls.append(node)
     return calls
+
+
+def _statement_source(source: str, statement: ast.stmt) -> str:
+    segment = ast.get_source_segment(source, statement)
+    if segment:
+        return segment.strip()
+    return ""
+
+
+def _candidate_source(source: str, statement: ast.stmt | None, call: ast.Call) -> str:
+    call_segment = (ast.get_source_segment(source, call) or "").strip()
+    if statement is None:
+        return call_segment
+    statement_segment = _statement_source(source, statement)
+    if isinstance(statement, (ast.Expr, ast.Assign, ast.AnnAssign)):
+        return statement_segment or call_segment
+    return call_segment or statement_segment
+
+
+class _ActionCallVisitor(ast.NodeVisitor):
+    def __init__(self, source: str) -> None:
+        self.source = source
+        self.statement_stack: list[ast.stmt] = []
+        self.aliases: dict[str, str] = {}
+        self.candidates: list[_CallCandidate] = []
+
+    def visit(self, node: ast.AST) -> None:
+        if isinstance(node, ast.stmt):
+            self.statement_stack.append(node)
+            try:
+                super().visit(node)
+            finally:
+                self.statement_stack.pop()
+            return
+        super().visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        statement = self.statement_stack[-1] if self.statement_stack else None
+        self.candidates.append(
+            _CallCandidate(
+                call=node,
+                source=_candidate_source(self.source, statement, node),
+                line_no=getattr(node, "lineno", 0) or 0,
+                aliases=dict(self.aliases),
+            )
+        )
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_scoped(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_scoped(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._visit_scoped(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        selector = _selector_alias_source(node.value, self.aliases)
+        for target in node.targets:
+            self._set_alias(target, selector)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        selector = _selector_alias_source(node.value, self.aliases)
+        self._set_alias(node.target, selector)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self._set_alias(node.target, None)
+        self.generic_visit(node)
+
+    def _set_alias(self, target: ast.AST, selector: str | None) -> None:
+        if isinstance(target, ast.Name):
+            if selector:
+                self.aliases[target.id] = selector
+            else:
+                self.aliases.pop(target.id, None)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            for item in target.elts:
+                self._set_alias(item, None)
+
+    def _visit_scoped(self, node: ast.AST) -> None:
+        aliases = dict(self.aliases)
+        try:
+            self.generic_visit(node)
+        finally:
+            self.aliases = aliases
+
+
+def _ast_call_candidates(source: str) -> list[_CallCandidate] | None:
+    try:
+        module = ast.parse(source)
+    except SyntaxError:
+        return None
+    visitor = _ActionCallVisitor(source)
+    visitor.visit(module)
+    return visitor.candidates
+
+
+def _line_call_candidates(source: str) -> list[_CallCandidate]:
+    candidates: list[_CallCandidate] = []
+    for line_no, line in enumerate(source.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        candidates.extend(
+            _CallCandidate(call=call, source=stripped, line_no=line_no)
+            for call in _statement_calls(stripped)
+        )
+    return candidates
+
+
+def _extract_candidates(source: str) -> list[_CallCandidate]:
+    return _ast_call_candidates(source) or _line_call_candidates(source)
 
 
 def _persist_action(
@@ -300,25 +513,22 @@ def extract_actions_from_script(
 
     actions: list[ActionItem] = []
     order = 1
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+    source = path.read_text(encoding="utf-8")
+    for candidate in _extract_candidates(source):
+        extracted = _extract_call(candidate.call, candidate.source, candidate.aliases)
+        if extracted is None:
             continue
-        for call in _statement_calls(stripped):
-            extracted = _extract_call(call, stripped)
-            if extracted is None:
-                continue
-            actions.append(
-                _persist_action(
-                    session,
-                    run_id,
-                    automation_key,
-                    extracted,
-                    line_no,
-                    order,
-                )
+        actions.append(
+            _persist_action(
+                session,
+                run_id,
+                automation_key,
+                extracted,
+                candidate.line_no,
+                order,
             )
-            order += 1
+        )
+        order += 1
 
     session.commit()
     return actions

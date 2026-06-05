@@ -1,6 +1,6 @@
 # Self-Healing And Failure Disposition Spec
 
-Last aligned: 2026-06-05
+Last aligned: 2026-06-06
 
 Webwright produces raw code, logs, screenshots, trajectory, and run metadata.
 Generated pytest runs produce logs, screenshots, traces, videos, and
@@ -228,6 +228,20 @@ Recommended panels:
 - proposed patch or affected-file diff before apply;
 - rerun selected/failed cases after apply.
 
+D6-09 implementation behavior:
+
+- Automation IDE diagnosis calls the Worker execution diagnosis API and renders
+  disposition, confidence, reason, target status, evidence IDs, selector
+  candidate IDs, screenshot, and trace context per failed result;
+- `selector_changed` actions create selector healing proposals, then accept,
+  reject, or accept-and-apply through the existing proposal APIs;
+- `raw_refresh_required` actions call selected TC Webwright refresh and
+  regeneration for the resolved case only;
+- `feature_removed_retire_tc` actions require an explicit UI confirmation
+  before invoking the diagnosis-bound retire/delete endpoint;
+- `unknown` provides evidence review and Mapping Review navigation only, with
+  no mutation action.
+
 ## Non-Goals
 
 - Do not silently rewrite generated code without traceability.
@@ -272,8 +286,16 @@ Done:
   default and allow project-enabled selector auto-apply only under conservative
   evidence, confidence, semantic, stale-target, and generation-conflict checks.
 - baseline GUI diagnosis panel exists.
+- D6-09 Automation IDE disposition actions are wired to existing diagnosis,
+  healing proposal, selected raw refresh/regeneration, and diagnosis-bound
+  retire/delete APIs without adding Worker endpoints; unknown failures stay
+  manual-only.
+- D6-10 maintenance impact review requires preview before apply for selected
+  raw refresh/regeneration and diagnosis-bound retire/delete; Worker preview
+  endpoints return affected, preserved, changed/removed, conflict, and
+  unaffected-case summaries without mutation.
 
-Open:
-
-- D6-09/D6-10: disposition actions and diff review UI.
-- E-11/E-12: E2E coverage for selected raw refresh and retire cleanup.
+- E-11 selected raw refresh incremental regeneration E2E covers preview plus
+  selected refresh/regenerate with safe merge and unrelated-case preservation.
+- E-12 feature-removed TC retire cleanup E2E covers diagnosis,
+  preview-without-mutation, confirmed retire, and unrelated-case preservation.

@@ -282,6 +282,34 @@ def test_retire_cleanup_requires_explicit_confirmation(
     ).json()["status"] == "imported"
 
 
+def test_retire_preview_reports_impact_without_mutation(
+    monkeypatch,
+    client,
+    tmp_path,
+    project_id: str,
+    imported_case: dict,
+) -> None:
+    _patch_generator(monkeypatch, tmp_path)
+    generate = client.post(f"/projects/{project_id}/generate", json={"mode": "full"})
+    assert generate.status_code == 200
+
+    preview = client.post(
+        f"/projects/{project_id}/cases/{imported_case['id']}/retire/preview",
+        json={"action": "retire"},
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["preview"] is True
+    assert body["status"] in {"preview", "conflict"}
+    assert body["automationKey"] == imported_case["automation_key"]
+    assert isinstance(body.get("affectedFiles"), list)
+    assert isinstance(body.get("preservedFiles"), list)
+
+    assert client.get(
+        f"/projects/{project_id}/cases/{imported_case['id']}"
+    ).json()["status"] == "imported"
+
+
 def test_edited_generated_file_stops_retire_cleanup_without_other_writes(
     monkeypatch,
     client,

@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parents[4]
 TEMPLATE = ROOT / "packages" / "generated-template"
 
 
-def run_cli(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def run_cli(project: Path, *args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         [sys.executable, "-m", "runner.cli", *args],
         cwd=project,
-        env={**os.environ, "PYTHONPATH": str(project)},
+        env={**os.environ, **(extra_env or {}), "PYTHONPATH": str(project)},
         capture_output=True,
         text=True,
     )
@@ -191,3 +191,64 @@ def test_generated_template_cli_standalone_e2e(tmp_path: Path) -> None:
     assert sheet["D2"].value == "cli-all-run"
     assert sheet["C3"].value == "failed"
     assert sheet["D3"].value == "cli-all-run"
+
+
+def test_generated_template_runner_redacts_secret_values_from_artifacts(tmp_path: Path) -> None:
+    project = tmp_path / "generated-project"
+    shutil.copytree(
+        TEMPLATE,
+        project,
+        ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
+    )
+    write_text(
+        project / "mappings" / "cases.yaml",
+        """
+cases:
+  - automationKey: cli_secret
+    sourceType: excel
+    sourceCaseId: TC-SECRET
+    title: CLI secret redaction case
+    testFile: tests/test_cli_secret.py
+    testFunction: test_cli_secret
+""".lstrip(),
+    )
+    write_text(
+        project / "tests" / "test_cli_secret.py",
+        """
+import os
+import sys
+
+
+def test_cli_secret():
+    secret = os.environ["OPENAI_API_KEY"]
+    print(f"stdout secret={secret}")
+    print(f"stderr secret={secret}", file=sys.stderr)
+    assert False, f"failure leaked {secret}"
+""".lstrip(),
+    )
+
+    secret = "value-visible-only-via-env-123456789"
+    run_cli(
+        project,
+        "run",
+        "--env",
+        "stg",
+        "--browser",
+        "chromium",
+        "--case-key",
+        "cli_secret",
+        "--run-id",
+        "cli-secret-run",
+        extra_env={"OPENAI_API_KEY": secret},
+    )
+
+    run_dir = project / "artifacts" / "runs" / "cli-secret-run"
+    stdout_text = (run_dir / "stdout.log").read_text(encoding="utf-8")
+    stderr_text = (run_dir / "stderr.log").read_text(encoding="utf-8")
+    results_text = (run_dir / "results.json").read_text(encoding="utf-8")
+
+    assert secret not in stdout_text
+    assert secret not in stderr_text
+    assert secret not in results_text
+    assert "***MASKED***" in stdout_text
+    assert "***MASKED***" in results_text

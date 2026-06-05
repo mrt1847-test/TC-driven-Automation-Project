@@ -27,7 +27,7 @@ def get_settings():
 @router.put("/settings")
 def update_settings(settings: AppSettings):
     save_settings(settings)
-    return settings
+    return load_settings()
 
 
 @router.post("/settings/validate")

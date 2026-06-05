@@ -26,6 +26,26 @@ Related specs:
 - Regeneration must be deterministic and must not silently overwrite user edits.
 - Selected TC regeneration must preserve unrelated generated cases and artifacts.
 
+## Secret Separation Contract
+
+Generated projects must never commit or regenerate plaintext provider API keys,
+passwords, auth cookies, bearer tokens, or local credential material. The
+tracked template and generated output may include placeholder variable names
+and non-secret runtime defaults only.
+
+Secrets are supplied outside generated source through CI/Studio environment
+variables, OS credential-backed Studio injection, ignored `.env*` files, or
+ignored local config overrides such as `config/*.secret.json`,
+`config/secrets*.json`, and `config/storage-state*.json`. Template copy and
+full regeneration must skip those local secret override files even when a
+custom template path contains them.
+
+The generated runner must redact known secret environment values before writing
+`artifacts/runs/{runId}/stdout.log`, `stderr.log`, and `results.json`.
+`config/runtime-manifest.json`, generated-file metadata, and runner result
+metadata must not include secret values or secret-bearing environment variable
+names.
+
 ## Directory Contract
 
 ```text
@@ -377,5 +397,5 @@ environment, not generated source files.
 
 ## Open Implementation Work
 
-- E-11: selected TC Webwright refresh incremental regeneration E2E.
-- E-12: feature-removed TC retire cleanup E2E.
+- None for generated-project maintenance E2E; see IMPLEMENTATION_CHECKLIST F/G
+  items for remaining product work.

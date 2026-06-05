@@ -98,3 +98,59 @@ def test_runner_bootstrap_failure_stops_before_runner_cli(monkeypatch, tmp_path:
         assert results[0].automation_key == "case_bootstrap"
         assert results[0].status == "failed"
         assert results[0].error == "requirements.txt missing"
+
+
+def test_runner_bootstrap_failure_redacts_secret_values(monkeypatch, tmp_path: Path) -> None:
+    secret = "value-visible-only-via-env-123456789"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.setattr(
+        "worker.services.project_runner.ensure_generated_runtime",
+        lambda *args, **kwargs: {
+            "ok": False,
+            "message": f"pip failed with {secret}",
+            "checks": {"requirements": True},
+            "pip": f"install stdout {secret}",
+            "pipError": f"install stderr {secret}",
+        },
+    )
+
+    async def fail_if_runner_starts(*args, **kwargs):  # pragma: no cover - failure path assertion
+        raise AssertionError("runner.cli subprocess should not start when bootstrap fails")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fail_if_runner_starts)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'studio.db'}")
+    SQLModel.metadata.create_all(engine)
+    generated = tmp_path / "generated"
+    generated.mkdir()
+    project = Project(
+        id="proj_bootstrap_secret",
+        name="Bootstrap Secret Project",
+        root_path=str(tmp_path),
+        generated_project_path=str(generated),
+    )
+    request = ExecutionRequest(
+        env="stg",
+        browser="chromium",
+        headed=False,
+        target_type="case",
+        automation_key="case_bootstrap_secret",
+        result_target="local",
+    )
+
+    with Session(engine) as session:
+        session.add(project)
+        session.commit()
+        execution = asyncio.run(run_project(session, project, request, "job_bootstrap_secret"))
+
+        run_dir = Path(execution.result_path).parent
+        stdout_text = (run_dir / "stdout.log").read_text(encoding="utf-8")
+        stderr_text = (run_dir / "stderr.log").read_text(encoding="utf-8")
+        results_text = Path(execution.result_path).read_text(encoding="utf-8")
+
+        assert secret not in stdout_text
+        assert secret not in stderr_text
+        assert secret not in results_text
+        assert "***MASKED***" in stdout_text
+        assert "***MASKED***" in stderr_text
+        assert "***MASKED***" in results_text

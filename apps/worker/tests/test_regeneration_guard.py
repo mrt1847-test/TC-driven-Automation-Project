@@ -170,6 +170,10 @@ def test_full_generation_writes_git_ready_ignore_and_skips_template_run_artifact
     (template / ".pytest_cache" / "README.md").write_text("cache\n", encoding="utf-8")
     (template / "__pycache__").mkdir()
     (template / "__pycache__" / "runtime.pyc").write_text("cache\n", encoding="utf-8")
+    (template / ".env").write_text("OPENAI_API_KEY=should_not_copy\n", encoding="utf-8")
+    (template / "config").mkdir()
+    (template / "config" / "env.stg.secret.json").write_text('{"apiKey": "should_not_copy"}\n', encoding="utf-8")
+    (template / "config" / "storage-state.json").write_text('{"cookies": []}\n', encoding="utf-8")
     (template / "artifacts" / "runs" / "stale").mkdir(parents=True)
     (template / "artifacts" / "runs" / "stale" / "results.json").write_text("{}\n", encoding="utf-8")
 
@@ -186,11 +190,16 @@ def test_full_generation_writes_git_ready_ignore_and_skips_template_run_artifact
         assert "!artifacts/runs/.gitkeep" in gitignore
         assert ".pytest_cache/" in gitignore
         assert ".venv/" in gitignore
+        assert "config/*.secret.json" in gitignore
+        assert "config/storage-state*.json" in gitignore
         assert "playwright-report/" in gitignore
         assert "*.log" in gitignore
         assert (generated.output / "artifacts" / "runs" / ".gitkeep").exists()
         assert not (generated.output / ".pytest_cache").exists()
         assert not (generated.output / "__pycache__").exists()
+        assert not (generated.output / ".env").exists()
+        assert not (generated.output / "config" / "env.stg.secret.json").exists()
+        assert not (generated.output / "config" / "storage-state.json").exists()
         assert not (generated.output / "artifacts" / "runs" / "stale" / "results.json").exists()
 
 
@@ -204,6 +213,7 @@ def test_generation_writes_runtime_manifest_contract_and_tracks_metadata(
     import worker.services.project_generator as project_generator
 
     template = _patch_template(monkeypatch, tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "value-visible-only-via-env-123456789")
     (template / "requirements.txt").write_text(
         "playwright>=1.49.0\n"
         "pytest>=8.3.0\n"
@@ -223,7 +233,8 @@ def test_generation_writes_runtime_manifest_contract_and_tracks_metadata(
         first = generate_project(session, project_id, tmp_path / "manifest-output", mode="full")
         manifest_path = first.output / "config" / "runtime-manifest.json"
         manifest_bytes = manifest_path.read_bytes()
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_text = manifest_path.read_text(encoding="utf-8")
+        manifest = json.loads(manifest_text)
 
         assert manifest["schema"] == "tc-studio.generated-runtime-manifest"
         assert manifest["manifestVersion"] == 1
@@ -241,6 +252,8 @@ def test_generation_writes_runtime_manifest_contract_and_tracks_metadata(
         assert "python -m runner.cli run --env qa --browser chromium --all" in manifest["commands"]["standalone"]
         assert manifest["commands"]["studio"]["runtimeProfilePython"] == "C:/Python311/python.exe"
         assert "generatedAt" not in manifest
+        assert "value-visible-only-via-env-123456789" not in manifest_text
+        assert "OPENAI_API_KEY" not in manifest_text
 
         row = session.exec(
             select(GeneratedFile).where(

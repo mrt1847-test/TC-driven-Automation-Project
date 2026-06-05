@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, connectLogStream, type TestCase, type WebwrightRun } from '@/lib/api'
+import { WebwrightRunErrorPanel } from '@/components/WebwrightRunErrorPanel'
+import { api, connectLogStream, getApiErrorMessage, type TestCase, type WebwrightRun } from '@/lib/api'
+import { describeWebwrightRunError } from '@/lib/webwrightErrors'
 import { useAppStore } from '@/store/appStore'
 
 type AppSettings = {
@@ -170,6 +172,7 @@ export function WebwrightPage() {
   const [casePromptOverrides, setCasePromptOverrides] = useState<Record<string, string>>({})
   const [promptPresetId, setPromptPresetId] = useState('general')
   const [promptStatus, setPromptStatus] = useState('Prompt changes not saved yet.')
+  const [runActionError, setRunActionError] = useState<string | null>(null)
   const seededCaseIdRef = useRef<string | null>(null)
   const qc = useQueryClient()
   const selectedCaseId = storeSelectedCase?.project_id === project?.id ? storeSelectedCase.id : null
@@ -214,9 +217,13 @@ export function WebwrightPage() {
       connectLogStream(res.jobId, appendLog)
       return res
     },
+    onMutate: () => setRunActionError(null),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cases', project?.id] })
       qc.invalidateQueries({ queryKey: ['webwright-runs', project?.id] })
+    },
+    onError: (error) => {
+      setRunActionError(getApiErrorMessage(error, 'Could not queue the Webwright run.'))
     }
   })
 
@@ -226,9 +233,13 @@ export function WebwrightPage() {
       connectLogStream(res.jobId, appendLog)
       return res
     },
+    onMutate: () => setRunActionError(null),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cases', project?.id] })
       qc.invalidateQueries({ queryKey: ['webwright-runs', project?.id] })
+    },
+    onError: (error) => {
+      setRunActionError(getApiErrorMessage(error, 'Could not retry the Webwright run.'))
     }
   })
 
@@ -550,6 +561,15 @@ export function WebwrightPage() {
         </div>
         <div className="text-xs text-slate-500">{promptStatus}</div>
       </section>
+      {runActionError && (
+        <div className="rounded border border-red-800 bg-red-950/30 p-3 text-sm text-red-100">
+          <div className="font-medium">Run request failed</div>
+          <div className="mt-1 whitespace-pre-wrap break-words text-xs">{runActionError}</div>
+          <div className="mt-2 text-xs text-red-200/80">
+            Selected TCs and saved prompt settings were not cleared. Fix the issue above, then retry Run or Retry.
+          </div>
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-slate-400">
@@ -566,38 +586,58 @@ export function WebwrightPage() {
           {cases.map((c) => {
             const run = latestRun(c.id)
             const runStatus = run?.status || 'pending'
+            const failedRun = runStatus === 'failed' ? run : undefined
+            const failureGuide = failedRun ? describeWebwrightRunError(failedRun.error_message) : null
             return (
-              <tr key={c.id} className="border-t border-slate-800">
-                <td><input type="checkbox" checked={selected.includes(c.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, c.id] : selected.filter((id) => id !== c.id))} /></td>
-                <td className="py-2">
-                  <button
-                    type="button"
-                    className={`text-left font-medium hover:text-blue-300 ${selectedCaseId === c.id ? 'text-blue-300' : ''}`}
-                    onClick={() => setSelectedCase(c)}
-                  >
-                    {c.source_case_id}
-                  </button>
-                  <div className="text-xs text-slate-500">{c.title}</div>
-                </td>
-                <td>{c.automation_key}</td>
-                <td><span className={`rounded px-2 py-1 text-xs ${statusClass(c.status)}`}>{c.status}</span></td>
-                <td className="text-xs text-slate-400">{runTime(run)}</td>
-                <td><span className={`rounded px-2 py-1 text-xs ${statusClass(runStatus)}`}>{runStatus}</span></td>
-                <td className="space-x-2">
-                  <button className="text-blue-400 disabled:text-slate-600" disabled={runMut.isPending} onClick={() => runForCase(c.id)}>Run</button>
-                  {run && canCancel(run.status) && (
-                    <button className="text-red-400 disabled:text-slate-600" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate(run.id)}>Stop</button>
-                  )}
-                  {run?.output_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(run.output_path!)}>Folder</button>}
-                  {run?.final_script_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(run.final_script_path!)}>Script</button>}
-                  {run?.trajectory_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(run.trajectory_path!)}>Trajectory</button>}
-                  {run?.output_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(artifactPath(run.output_path, 'stdout.log'))}>Stdout</button>}
-                  {run?.output_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(artifactPath(run.output_path, 'stderr.log'))}>Stderr</button>}
-                  {run?.status === 'failed' && run.id && (
-                    <button className="text-yellow-400 disabled:text-slate-600" disabled={retryMut.isPending} onClick={() => retryMut.mutate(run.id)}>Retry</button>
-                  )}
-                </td>
-              </tr>
+              <Fragment key={c.id}>
+                <tr className="border-t border-slate-800">
+                  <td><input type="checkbox" checked={selected.includes(c.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, c.id] : selected.filter((id) => id !== c.id))} /></td>
+                  <td className="py-2">
+                    <button
+                      type="button"
+                      className={`text-left font-medium hover:text-blue-300 ${selectedCaseId === c.id ? 'text-blue-300' : ''}`}
+                      onClick={() => setSelectedCase(c)}
+                    >
+                      {c.source_case_id}
+                    </button>
+                    <div className="text-xs text-slate-500">{c.title}</div>
+                  </td>
+                  <td>{c.automation_key}</td>
+                  <td><span className={`rounded px-2 py-1 text-xs ${statusClass(c.status)}`}>{c.status}</span></td>
+                  <td className="text-xs text-slate-400">{runTime(run)}</td>
+                  <td>
+                    <span className={`rounded px-2 py-1 text-xs ${statusClass(runStatus)}`}>{runStatus}</span>
+                    {failureGuide && (
+                      <div className="mt-1 text-[11px] text-red-300">{failureGuide.title}</div>
+                    )}
+                  </td>
+                  <td className="space-x-2">
+                    <button className="text-blue-400 disabled:text-slate-600" disabled={runMut.isPending} onClick={() => runForCase(c.id)}>Run</button>
+                    {run && canCancel(run.status) && (
+                      <button className="text-red-400 disabled:text-slate-600" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate(run.id)}>Stop</button>
+                    )}
+                    {run?.output_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(run.output_path!)}>Folder</button>}
+                    {run?.final_script_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(run.final_script_path!)}>Script</button>}
+                    {run?.trajectory_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(run.trajectory_path!)}>Trajectory</button>}
+                    {run?.output_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(artifactPath(run.output_path, 'stdout.log'))}>Stdout</button>}
+                    {run?.output_path && <button className="text-slate-400" onClick={() => window.electronAPI?.openPath(artifactPath(run.output_path, 'stderr.log'))}>Stderr</button>}
+                    {run?.status === 'failed' && run.id && (
+                      <button className="text-yellow-400 disabled:text-slate-600" disabled={retryMut.isPending} onClick={() => retryMut.mutate(run.id)}>Retry</button>
+                    )}
+                  </td>
+                </tr>
+                {failedRun && (
+                  <tr className="border-t border-slate-900">
+                    <td colSpan={7} className="py-2">
+                      <WebwrightRunErrorPanel
+                        run={failedRun}
+                        onRetry={failedRun.id ? () => retryMut.mutate(failedRun.id) : undefined}
+                        retryPending={retryMut.isPending}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             )
           })}
           {!cases.length && (

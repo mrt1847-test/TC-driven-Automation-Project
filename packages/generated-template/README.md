@@ -38,6 +38,16 @@ Artifacts are written to `artifacts/runs/{runId}/results.json`. Archive
 
 `runner.cli run` passes the selected environment to pytest as `TC_ENV`.
 
+## Secrets
+
+Do not write API keys, passwords, auth cookies, or provider tokens into tracked
+generated files. Supply secrets through CI/Studio environment variables, ignored
+`.env*` files, or ignored local config overrides such as
+`config/*.secret.json` and `config/storage-state*.json`.
+
+The runner redacts known secret environment values from `stdout.log`,
+`stderr.log`, and `results.json` before writing artifacts.
+
 ## Pytest Runtime Policy
 
 The template registers `fixtures.browser_fixture` and `fixtures.env_fixture`

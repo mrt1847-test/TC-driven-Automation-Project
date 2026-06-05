@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlmodel import Session
 
-from worker.core.config import new_id
+from worker.core.config import mask_secret_data, mask_secrets, new_id
 from worker.core.log_stream import log_streams
 from worker.models.db import ExecutionResult, ExecutionRun, Project
 from worker.models.schemas import ExecutionRequest
@@ -72,16 +72,17 @@ async def run_project(session: Session, project: Project, request: ExecutionRequ
 
     await log_streams.publish(job_id, f"[runner] {' '.join(cmd)}")
 
+    runner_env = profile.subprocess_env({"TC_HEADLESS": "false" if request.headed else "true"})
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(generated_path),
-        env=profile.subprocess_env({"TC_HEADLESS": "false" if request.headed else "true"}),
+        env=runner_env,
     )
     stdout, stderr = await process.communicate()
-    stdout_text = stdout.decode("utf-8", errors="replace")
-    stderr_text = stderr.decode("utf-8", errors="replace")
+    stdout_text = mask_secrets(stdout.decode("utf-8", errors="replace"), runner_env)
+    stderr_text = mask_secrets(stderr.decode("utf-8", errors="replace"), runner_env)
     _write_runner_logs(generated_path, run_id, stdout_text, stderr_text)
     if stdout_text:
         await log_streams.publish(job_id, stdout_text)
@@ -153,16 +154,17 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
 
     await log_streams.publish(job_id, f"[runner] {' '.join(cmd)}")
 
+    runner_env = profile.subprocess_env()
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(generated_path),
-        env=profile.subprocess_env(),
+        env=runner_env,
     )
     stdout, stderr = await process.communicate()
-    stdout_text = stdout.decode("utf-8", errors="replace")
-    stderr_text = stderr.decode("utf-8", errors="replace")
+    stdout_text = mask_secrets(stdout.decode("utf-8", errors="replace"), runner_env)
+    stderr_text = mask_secrets(stderr.decode("utf-8", errors="replace"), runner_env)
     _write_runner_logs(generated_path, run_id, stdout_text, stderr_text)
     if stdout_text:
         await log_streams.publish(job_id, stdout_text)
@@ -191,11 +193,12 @@ async def _finish_bootstrap_failure(
     bootstrap: dict,
     automation_key: str | None = None,
 ) -> None:
-    message = bootstrap.get("message") or "generated runtime bootstrap failed"
-    stdout_text = _bootstrap_log(bootstrap)
+    safe_bootstrap = mask_secret_data(bootstrap)
+    message = mask_secrets(safe_bootstrap.get("message") or "generated runtime bootstrap failed")
+    stdout_text = _bootstrap_log(safe_bootstrap)
     stderr_text = f"[bootstrap] {message}\n"
     _write_runner_logs(generated_path, run_id, stdout_text, stderr_text)
-    result_path = _write_bootstrap_results(generated_path, run_id, exec_run, message, bootstrap, automation_key)
+    result_path = _write_bootstrap_results(generated_path, run_id, exec_run, message, safe_bootstrap, automation_key)
 
     await log_streams.publish(job_id, stderr_text)
     if stdout_text:
@@ -257,7 +260,7 @@ def _write_bootstrap_results(
             },
         })
     result_path = artifact_dir / "results.json"
-    result_path.write_text(json.dumps({
+    payload = {
         "runId": run_id,
         "projectName": generated_path.name,
         "env": exec_run.env,
@@ -272,7 +275,8 @@ def _write_bootstrap_results(
         },
         "bootstrap": bootstrap,
         "cases": cases,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    }
+    result_path.write_text(json.dumps(mask_secret_data(payload), ensure_ascii=False, indent=2), encoding="utf-8")
     return result_path
 
 
@@ -310,7 +314,7 @@ def _persist_results(session: Session, exec_run: ExecutionRun, result_path: Path
             title=case.get("title"),
             status=case.get("status", "unknown"),
             duration_ms=case.get("durationMs"),
-            error=case.get("error"),
+            error=mask_secrets(case.get("error")) if case.get("error") else None,
             screenshot_path=(case.get("artifacts") or {}).get("screenshot"),
             trace_path=(case.get("artifacts") or {}).get("trace"),
         ))

@@ -13,7 +13,7 @@ export interface ElectronAPI {
   credentialGet: (
     service: string,
     account: string
-  ) => Promise<{ ok: true; password: string } | { ok: false; message: string }>
+  ) => Promise<{ ok: true; hasCredential: true } | { ok: false; message: string }>
   providerModels: (
     provider: string
   ) => Promise<{ ok: true; provider: string; models: string[] } | { ok: false; provider: string; message: string }>
