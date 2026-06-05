@@ -7,8 +7,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlmodel import Session, select
 
 from worker.core.database import get_session
-from worker.models.db import ExecutionResult, ExecutionRun, Project
-from worker.models.schemas import ExecutionRequest, ExportRequest
+from worker.models.db import ExecutionResult, ExecutionRun, Project, TestCase
+from worker.models.schemas import (
+    DispositionRetireRequest,
+    ExecutionRequest,
+    ExportRequest,
+    HealingProposalCreateRequest,
+)
+from worker.services.healing_proposals import create_selector_healing_proposal
+from worker.services.retire_disposition import retire_from_failure_disposition
 from worker.services.project_runner import rerun_failed, run_project
 from worker.services.failure_disposition import diagnose_execution_failures
 from worker.services.result_export import export_excel, export_google_sheets, export_testrail, export_testrail_clone
@@ -72,6 +79,50 @@ def get_execution(project_id: str, execution_id: str, session: Session = Depends
 def diagnose_execution(project_id: str, execution_id: str, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
     return diagnose_execution_failures(session, run)
+
+
+@router.post("/{execution_id}/healing-proposals")
+def create_healing_proposal(
+    project_id: str,
+    execution_id: str,
+    request: HealingProposalCreateRequest,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    run = _get_execution_run(session, project_id, execution_id)
+    result = session.get(ExecutionResult, request.execution_result_id)
+    if not result or result.execution_run_id != execution_id:
+        raise HTTPException(404, "Execution result not found")
+    try:
+        return create_selector_healing_proposal(session, project, run, result)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/{execution_id}/results/{result_id}/retire")
+def retire_execution_result(
+    project_id: str,
+    execution_id: str,
+    result_id: str,
+    request: DispositionRetireRequest,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    run = _get_execution_run(session, project_id, execution_id)
+    result = session.get(ExecutionResult, result_id)
+    if not result or result.execution_run_id != execution_id:
+        raise HTTPException(404, "Execution result not found")
+    case = session.get(TestCase, request.case_id)
+    if not case or case.project_id != project_id:
+        raise HTTPException(404, "Case not found")
+    try:
+        return retire_from_failure_disposition(session, project, run, result, case, request)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/{execution_id}/rerun-failed")

@@ -1,6 +1,6 @@
 # Runtime Spec
 
-Last aligned: 2026-06-04
+Last aligned: 2026-06-05
 
 This document defines the runtime contract for three execution contexts:
 
@@ -100,6 +100,13 @@ python -m pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
+Generated projects contain `config/runtime-manifest.json`, a deterministic
+runtime contract produced during generation. It records the generated
+`requirements.txt` expectation, Studio `RuntimeProfile` defaults, browser cache
+environment, fixture policy, and supported standalone/Studio runner commands.
+The manifest is informational and traceable; it does not replace bootstrap
+checks.
+
 Bootstrap must be fail-fast:
 
 - If `requirements.txt` is missing, stop before runner execution.
@@ -108,8 +115,24 @@ Bootstrap must be fail-fast:
 - If the browser executable cannot be resolved after install, stop before runner execution.
 - Runner API responses and logs must surface the actionable failure reason.
 
-Repeated installs should be avoided through a per-project/runtime readiness
-record keyed by generated project path/hash and `RuntimeProfile`.
+C9-07 implements a per-project/runtime readiness record to avoid repeated
+installs. A successful install/browser verification is cached in
+`generated_runtime_install_states` using a readiness key derived from:
+
+- generated project path;
+- generated project hash over `requirements.txt`, `config/runtime-manifest.json`,
+  `runner/cli.py`, and `mappings/cases.yaml`;
+- `requirements.txt` hash;
+- runtime manifest hash;
+- RuntimeProfile hash for mode, Python, template path, and browser cache path;
+- selected browser and browser cache path.
+
+When the readiness key matches a `ready` row, Studio skips `pip install` and
+`python -m playwright install <browser>` and still verifies the browser
+executable before launching `runner.cli`. Requirements, manifest,
+RuntimeProfile, browser, browser cache, or project path changes return a stale
+cache status and run the normal fail-fast bootstrap path. Failed pip,
+Playwright install, or browser checks are not stored as ready.
 
 ## Bundled Runtime Layout
 
@@ -329,7 +352,9 @@ Minimum runtime gates:
 
 - C3-07: live Webwright CLI readiness probe.
 - C3-08: vendored Webwright source/package decision.
+- C8-08: generated-project runtime manifest.
 - C9-06: generated runtime bootstrap fail-fast.
+- C9-07: per-project generated runtime install state/cache.
 - E-09: live Webwright runtime E2E.
 - E-10: generated pytest/browser contract E2E.
 - I-08: clean Windows `dist:win:full` validation.
@@ -355,6 +380,15 @@ Done:
 - generated project bootstrap is fail-fast before `runner.cli`: missing files,
   pip failures, Playwright install failures, and browser check failures return
   structured bootstrap status/logs and write run artifacts/results.
+- generated projects include `config/runtime-manifest.json` with deterministic
+  package, Python/runtime, Playwright browser/cache, fixture policy,
+  standalone command, Studio command, and RuntimeProfile-derived default
+  metadata. The manifest is tracked like generated content and selected
+  regeneration changes it only when runtime/template inputs change.
+- generated runtime bootstrap caches successful per-project readiness in
+  `generated_runtime_install_states`, skips redundant install commands on cache
+  hits, invalidates on generated project/runtime/browser input changes, and
+  never stores failed installs as ready.
 - E-09 live Webwright runtime E2E passes locally with a real Microsoft Webwright
   checkout/venv, OpenAI `gpt-5-mini`, Git Bash shell readiness, explicit
   `webwrightShell` health, nested `final_script.py` harvesting, indexed

@@ -41,7 +41,13 @@ async def run_project(session: Session, project: Project, request: ExecutionRequ
     session.commit()
     session.refresh(exec_run)
 
-    bootstrap = ensure_generated_runtime(generated_path, install=True)
+    bootstrap = ensure_generated_runtime(
+        generated_path,
+        install=True,
+        session=session,
+        project_id=project.id,
+        browser=request.browser,
+    )
     if not bootstrap.get("ok"):
         await _finish_bootstrap_failure(session, exec_run, generated_path, run_id, job_id, bootstrap, request.automation_key)
         return exec_run
@@ -103,7 +109,13 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
         raise ValueError("Execution not found")
     generated_path = Path(project.generated_project_path or (Path(project.root_path) / "generated"))
     run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    bootstrap = ensure_generated_runtime(generated_path, install=True)
+    bootstrap = ensure_generated_runtime(
+        generated_path,
+        install=True,
+        session=session,
+        project_id=project.id,
+        browser=prev.browser,
+    )
     if not bootstrap.get("ok"):
         exec_run = ExecutionRun(
             id=new_id("exec"),

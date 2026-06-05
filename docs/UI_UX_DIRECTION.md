@@ -193,6 +193,12 @@ Bottom: raw code, screenshot, logs
 
 The user should be able to inspect intent, raw action, and generated structure without losing position.
 
+Mapping API validation failures should appear inline in the Mapping Review
+surface, near the save/review controls. The message should preserve the Worker
+`detail` text when possible, explain that the local draft and selected TC remain
+intact, and point to the next recovery action such as fixing duplicate/foreign
+action IDs, adding a Webwright run, or rerunning Generate Raw.
+
 ### Project IDE
 
 Cursor-like file workspace:

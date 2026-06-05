@@ -125,6 +125,54 @@ class WebwrightRunRequest(BaseModel):
     mode: str = "sequential"
     ww_model_config: str = Field(default="model_openai.yaml", alias="modelConfig")
     start_url_override: Optional[str] = Field(default=None, alias="startUrlOverride")
+    preset_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("presetId", "preset_id"),
+    )
+    environment: str = "stg"
+
+
+class PromptComposerUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    batch_prompt: str = Field(
+        default="",
+        validation_alias=AliasChoices("batchPrompt", "batch_prompt"),
+    )
+    case_overrides: dict[str, str] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("caseOverrides", "case_overrides"),
+    )
+
+
+class PromptPresetInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: Optional[str] = None
+    category: str
+    name: str
+    guidance: str
+
+
+class PromptPresetUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    presets: list[PromptPresetInput] = Field(default_factory=list)
+
+
+class PromptPreviewRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    case_id: str = Field(validation_alias=AliasChoices("caseId", "case_id"))
+    preset_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("presetId", "preset_id"),
+    )
+    environment: str = "stg"
+    start_url_override: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("startUrlOverride", "start_url_override"),
+    )
 
 
 class ActionItem(BaseModel):
@@ -135,6 +183,48 @@ class ActionItem(BaseModel):
     value: Optional[str] = None
     source_line: Optional[int] = None
     order_index: int = 0
+
+
+class ActionCreateRequest(BaseModel):
+    type: str
+    target: Optional[str] = None
+    selector: Optional[str] = None
+    value: Optional[str] = None
+    source_line: Optional[int] = None
+    order_index: Optional[int] = None
+
+
+class ActionUpdateRequest(BaseModel):
+    type: Optional[str] = None
+    target: Optional[str] = None
+    selector: Optional[str] = None
+    value: Optional[str] = None
+    source_line: Optional[int] = None
+    order_index: Optional[int] = None
+
+
+class StepActionCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str
+    target: Optional[str] = None
+    selector: Optional[str] = None
+    value: Optional[str] = None
+    source_line: Optional[int] = None
+    order_index: Optional[int] = None
+    insert_after_action_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("insertAfterActionId", "insert_after_action_id"),
+    )
+
+
+class StepActionUpdateRequest(BaseModel):
+    type: Optional[str] = None
+    target: Optional[str] = None
+    selector: Optional[str] = None
+    value: Optional[str] = None
+    source_line: Optional[int] = None
+    order_index: Optional[int] = None
 
 
 class MappingItem(BaseModel):
@@ -150,6 +240,49 @@ class MappingItem(BaseModel):
 class MappingUpdateRequest(BaseModel):
     mappings: list[MappingItem]
     actions: Optional[list[ActionItem]] = None
+
+
+class GenerationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    case_ids: Optional[list[str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("caseIds", "case_ids"),
+    )
+    mode: Optional[Literal["incremental", "full"]] = None
+
+
+class RawRefreshRegenerationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    ww_model_config: str = Field(default="model_openai.yaml", alias="modelConfig")
+
+
+class RetireCaseRequest(BaseModel):
+    confirmed: bool = False
+    action: Literal["retire", "delete"] = "retire"
+    reason: Optional[str] = None
+
+
+class DispositionRetireRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    case_id: str = Field(validation_alias=AliasChoices("caseId", "case_id"))
+    confirmed: bool = False
+    action: Literal["retire", "delete"] = "retire"
+
+
+class HealingProposalCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    execution_result_id: str = Field(
+        validation_alias=AliasChoices(
+            "executionResultId",
+            "execution_result_id",
+            "resultId",
+            "result_id",
+        )
+    )
 
 
 class ExecutionRequest(BaseModel):
@@ -217,6 +350,12 @@ class AppSettings(BaseModel):
         "defaultEnv": "stg",
         "headless": True,
     })
+    self_healing: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "autoApplyProjectIds": [],
+        },
+        validation_alias=AliasChoices("self_healing", "selfHealing"),
+    )
     integrations: dict[str, Any] = Field(default_factory=lambda: {
         "testrailClone": {"baseUrl": "http://localhost:3000", "enabled": False},
         "testrail": {"baseUrl": "", "enabled": False},

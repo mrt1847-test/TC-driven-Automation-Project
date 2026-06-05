@@ -77,5 +77,11 @@ def project_health_check(generated_path: Path) -> dict:
     return checks
 
 
-def install_dependencies(generated_path: Path) -> dict:
-    return ensure_generated_runtime(generated_path, install=True)
+def install_dependencies(generated_path: Path, session=None, project_id: str | None = None, browser: str = "chromium") -> dict:
+    return ensure_generated_runtime(
+        generated_path,
+        install=True,
+        session=session,
+        project_id=project_id,
+        browser=browser,
+    )

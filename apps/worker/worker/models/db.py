@@ -38,6 +38,8 @@ class TestCaseStatus(str, Enum):
     mapped = "mapped"
     structured = "structured"
     generated = "generated"
+    retired = "retired"
+    deleted = "deleted"
 
 
 class TestCase(SQLModel, table=True):
@@ -82,6 +84,74 @@ class WebwrightRun(SQLModel, table=True):
     error_message: Optional[str] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProjectPromptContext(SQLModel, table=True):
+    __tablename__ = "project_prompt_contexts"
+
+    project_id: str = Field(foreign_key="project.id", primary_key=True)
+    batch_prompt: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CasePromptOverride(SQLModel, table=True):
+    __tablename__ = "case_prompt_overrides"
+    __table_args__ = (
+        Index("idx_case_prompt_overrides_key", "project_id", "automation_key"),
+    )
+
+    project_id: str = Field(foreign_key="project.id", primary_key=True)
+    case_id: str = Field(foreign_key="testcase.id", primary_key=True)
+    automation_key: str = Field(index=True)
+    prompt_override: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PromptPreset(SQLModel, table=True):
+    __tablename__ = "prompt_presets"
+    __table_args__ = (
+        Index("idx_prompt_presets_project_category", "project_id", "category"),
+        Index("idx_prompt_presets_builtin", "is_builtin", "category"),
+    )
+
+    id: Optional[str] = Field(default=None, primary_key=True)
+    project_id: Optional[str] = Field(default=None, foreign_key="project.id")
+    category: str
+    name: str
+    guidance: str
+    is_builtin: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WebwrightPromptPayload(SQLModel, table=True):
+    __tablename__ = "webwright_prompt_payloads"
+    __table_args__ = (
+        UniqueConstraint("webwright_run_id", name="uq_webwright_prompt_payloads_run"),
+        Index("idx_webwright_prompt_payloads_project_case", "project_id", "test_case_id"),
+        Index("idx_webwright_prompt_payloads_project_run", "project_id", "webwright_run_id"),
+        Index("idx_webwright_prompt_payloads_key", "project_id", "automation_key"),
+    )
+
+    id: Optional[str] = Field(default=None, primary_key=True)
+    project_id: str = Field(foreign_key="project.id", index=True)
+    test_case_id: str = Field(foreign_key="testcase.id", index=True)
+    webwright_run_id: str = Field(foreign_key="webwrightrun.id", index=True)
+    automation_key: str = Field(index=True)
+    final_prompt: str
+    base_prompt: str = ""
+    preset_id: Optional[str] = Field(default=None, index=True)
+    preset_category: Optional[str] = None
+    preset_name: Optional[str] = None
+    preset_guidance: str = ""
+    batch_prompt: str = ""
+    case_prompt_override: str = ""
+    environment: str = "stg"
+    start_url: str = ""
+    webwright_model_config: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -288,6 +358,7 @@ class GeneratedFileStatus(str, Enum):
     edited = "edited"
     stale = "stale"
     conflict = "conflict"
+    obsolete = "obsolete"
 
 
 class ExecutionRun(SQLModel, table=True):
@@ -316,6 +387,30 @@ class ExecutionResult(SQLModel, table=True):
     error: Optional[str] = None
     screenshot_path: Optional[str] = None
     trace_path: Optional[str] = None
+
+
+class GeneratedRuntimeInstallState(SQLModel, table=True):
+    __tablename__ = "generated_runtime_install_states"
+    __table_args__ = (
+        Index("idx_generated_runtime_install_project_key", "project_id", "readiness_key"),
+        Index("idx_generated_runtime_install_project_path", "project_id", "generated_project_path"),
+    )
+
+    id: Optional[str] = Field(default=None, primary_key=True)
+    project_id: str = Field(foreign_key="project.id", index=True)
+    generated_project_path: str
+    generated_project_hash: str
+    requirements_hash: str
+    runtime_manifest_hash: str
+    runtime_profile_hash: str
+    readiness_key: str = Field(index=True)
+    python_path: str
+    browser: str = "chromium"
+    browser_cache_path: str = ""
+    status: str = "ready"
+    message: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class HealingProposalKind(str, Enum):

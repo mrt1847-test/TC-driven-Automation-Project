@@ -11,8 +11,8 @@ The current code already has a baseline subset. The schema below is the intended
 | Layer | Tables | Workspace |
 |-------|--------|-----------|
 | Project shell | `schema_versions`, `projects` | Shared |
-| Generate Raw | `test_cases`, `webwright_runs`, `raw_actions`, artifact metadata | Generate Raw |
-| Automation IDE | `case_action_mappings`, `structured_flows`, `structured_steps`, `page_objects`, `page_object_methods`, `generated_files`, `execution_runs`, `execution_results`, `export_logs`, healing tables | Automation IDE |
+| Generate Raw | `test_cases`, `project_prompt_contexts`, `case_prompt_overrides`, `prompt_presets`, `webwright_prompt_payloads`, `webwright_runs`, `raw_actions`, artifact metadata | Generate Raw |
+| Automation IDE | `case_action_mappings`, `structured_flows`, `structured_steps`, `page_objects`, `page_object_methods`, `generated_files`, `generated_runtime_install_states`, `execution_runs`, `execution_results`, `export_logs`, healing tables | Automation IDE |
 
 ## Schema Principles
 
@@ -67,6 +67,93 @@ CREATE TABLE test_cases (
 CREATE INDEX idx_test_cases_project_status ON test_cases(project_id, status);
 CREATE INDEX idx_test_cases_source ON test_cases(project_id, source_type, source_case_id);
 ```
+
+Terminal maintenance states use soft status values so source intent and audit
+links remain queryable:
+
+- `retired`
+- `deleted`
+
+## Prompt Context Layer
+
+C2 prompt context is project-scoped and case-scoped. It stores the editable
+composer state, reusable preset definitions, and immutable per-run prompt
+payload history.
+
+```sql
+CREATE TABLE project_prompt_contexts (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  batch_prompt TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE case_prompt_overrides (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+  automation_key TEXT NOT NULL,
+  prompt_override TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, case_id)
+);
+
+CREATE INDEX idx_case_prompt_overrides_key
+  ON case_prompt_overrides(project_id, automation_key);
+
+CREATE TABLE prompt_presets (
+  id TEXT PRIMARY KEY,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  name TEXT NOT NULL,
+  guidance TEXT NOT NULL,
+  is_builtin INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_prompt_presets_project_category
+  ON prompt_presets(project_id, category);
+
+CREATE INDEX idx_prompt_presets_builtin
+  ON prompt_presets(is_builtin, category);
+
+CREATE TABLE webwright_prompt_payloads (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+  webwright_run_id TEXT NOT NULL REFERENCES webwright_runs(id) ON DELETE CASCADE,
+  automation_key TEXT NOT NULL,
+  final_prompt TEXT NOT NULL,
+  base_prompt TEXT NOT NULL DEFAULT '',
+  preset_id TEXT,
+  preset_category TEXT,
+  preset_name TEXT,
+  preset_guidance TEXT NOT NULL DEFAULT '',
+  batch_prompt TEXT NOT NULL DEFAULT '',
+  case_prompt_override TEXT NOT NULL DEFAULT '',
+  environment TEXT NOT NULL DEFAULT 'stg',
+  start_url TEXT NOT NULL DEFAULT '',
+  webwright_model_config TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  UNIQUE(webwright_run_id)
+);
+
+CREATE INDEX idx_webwright_prompt_payloads_project_case
+  ON webwright_prompt_payloads(project_id, test_case_id);
+
+CREATE INDEX idx_webwright_prompt_payloads_project_run
+  ON webwright_prompt_payloads(project_id, webwright_run_id);
+
+CREATE INDEX idx_webwright_prompt_payloads_key
+  ON webwright_prompt_payloads(project_id, automation_key);
+```
+
+Built-in presets use stable IDs and `project_id = NULL`. Project presets are
+scoped to one project and stay separate from selected batch/case prompt context.
+Prompt payload rows are append-only snapshots of the final prompt and selected
+components used for one `webwright_runs` row; they do not mutate composer or
+preset definitions.
 
 ## Webwright Raw Layer
 
@@ -199,6 +286,23 @@ Suggested `healing_proposals.status` values:
 ## Mapping Review Layer
 
 One TC step can map to multiple raw actions, so the mapping table should be many-to-many at the action level.
+
+Action CRUD persistence contract:
+
+- create attaches a reviewed `raw_actions` row to the selected case's latest
+  `webwright_runs` row and uses the case automation key;
+- update is allowed only for actions whose `webwright_run_id` belongs to the
+  selected project/case;
+- delete removes the `raw_actions` row only after verifying it is not referenced
+  by another case's mapping, removes selected-case `case_action_mapping_actions`
+  links to it, and realigns `case_action_mappings.raw_action_id`;
+- a mapping that loses all action links becomes `unmapped`, leaving the case in
+  `needs_review` until the reviewer supplies replacement action links.
+- assertion/wait insertion creates a selected-case `raw_actions` row and
+  updates the selected TC step's `case_action_mapping_actions` order in the
+  same transaction;
+- step-scoped assertion/wait updates are valid only when the action belongs to
+  the selected case and is already linked to the selected step mapping.
 
 Mapping API persistence contract:
 
@@ -370,6 +474,7 @@ Suggested `generated_files.status` values:
 - `edited`
 - `stale`
 - `conflict`
+- `obsolete`
 
 Suggested `generated_file_origins.origin_type` values:
 
@@ -392,6 +497,65 @@ Runtime persistence contract:
 - regeneration replaces origin rows deterministically so stale links and
   duplicate path metadata do not survive;
 - `source_type` and `source_id` remain as a backward-compatible primary origin.
+- generated-file status refresh compares stored `content_hash` with on-disk
+  file hashes to mark user edits, and planned incremental generation marks
+  source-changed files as `stale` or `conflict` before rewriting;
+- confirmed retire/delete cleanup marks removed private generated-file metadata
+  as `obsolete`, keeps its origin history for audit, and replaces shared
+  page/mapping origins with only the remaining active cases;
+- cleanup conflicts mark provably impacted metadata as `conflict` without
+  changing the selected TC's state or generated files.
+
+## Generated Runtime Install State
+
+C9-07 records successful generated-project dependency/browser readiness so the
+Worker can skip redundant install commands while preserving fail-fast bootstrap
+behavior.
+
+```sql
+CREATE TABLE generated_runtime_install_states (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  generated_project_path TEXT NOT NULL,
+  generated_project_hash TEXT NOT NULL,
+  requirements_hash TEXT NOT NULL,
+  runtime_manifest_hash TEXT NOT NULL,
+  runtime_profile_hash TEXT NOT NULL,
+  readiness_key TEXT NOT NULL,
+  python_path TEXT NOT NULL,
+  browser TEXT NOT NULL DEFAULT 'chromium',
+  browser_cache_path TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ready',
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_generated_runtime_install_project_key
+  ON generated_runtime_install_states(project_id, readiness_key);
+
+CREATE INDEX idx_generated_runtime_install_project_path
+  ON generated_runtime_install_states(project_id, generated_project_path);
+```
+
+Suggested `generated_runtime_install_states.status` values:
+
+- `ready`
+- `stale`
+
+Runtime install-state contract:
+
+- a `ready` row means pip install, Playwright install, and browser executable
+  verification previously succeeded for the exact readiness key;
+- the readiness key includes generated project path/hash, `requirements.txt`
+  hash, runtime manifest hash, RuntimeProfile hash, Python path, browser, and
+  browser cache path;
+- cache hits still verify the browser executable before runner launch;
+- requirements, manifest, generated project, RuntimeProfile, browser, browser
+  cache, or generated project path changes mark prior matching rows stale and
+  run the normal bootstrap path;
+- failed pip installs, Playwright installs, or browser checks must not be stored
+  as `ready`.
 
 ## Execution And Export
 
@@ -447,7 +611,9 @@ The current baseline can migrate incrementally:
 4. Add `structured_flows` and `structured_steps`.
 5. Add `page_objects` and `page_object_methods`.
 6. Add `generated_file_origins`, `content_hash`, and `status` to generated file tracking.
-7. Add `artifact_assets`, `selector_candidates`, and `healing_proposals` for artifact-backed self-healing.
+7. Add `generated_runtime_install_states` for per-project runtime install readiness caching.
+8. Add `artifact_assets`, `selector_candidates`, and `healing_proposals` for artifact-backed self-healing.
+9. Add `project_prompt_contexts`, `case_prompt_overrides`, `prompt_presets`, and `webwright_prompt_payloads` for C2 prompt persistence and per-run traceability.
 
 ## Minimum Schema For Next Structuring PR
 
@@ -461,6 +627,7 @@ For the next PR focused on structuring, implement at least:
 - `generated_file_origins`
 - `generated_files.content_hash`
 - `generated_files.status`
+- `generated_runtime_install_states`
 - `artifact_assets`
 - `selector_candidates`
 - `healing_proposals`

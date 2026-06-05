@@ -90,6 +90,18 @@ preserve ordered joins.
 
 Mapping review API requirements:
 
+- allow reviewed raw actions to be created, updated, and deleted only through a
+  selected project/case route;
+- allow reviewed assertion/wait actions to be inserted through a selected
+  project/case/TC-step route, with unsupported action types rejected before
+  mutation;
+- validate edited or deleted action ownership against the selected case's
+  Webwright runs before mutation;
+- validate step-scoped assertion/wait updates against both selected-case action
+  ownership and the selected TC step's ordered mapping links;
+- when deleting an action, remove selected-case ordered joins to it, keep
+  `CaseActionMapping.raw_action_id` aligned to the first remaining action, and
+  mark mappings with no remaining actions as `unmapped`/review-required;
 - persist and return each step's `action_ids` in submitted join order;
 - validate action ownership against the selected case's Webwright runs before
   replacing mappings;
@@ -305,6 +317,56 @@ without deleting the other generated tests.
 Full regeneration is allowed only when the user explicitly requests it. Full
 regeneration still must respect stale/conflict guards for edited files.
 
+C8-09 implementation behavior:
+
+- selected `caseIds` default to incremental mode and reuse the latest merged
+  structured flow instead of rebuilding structure;
+- selected test/flow files and origin-linked shared page/mapping files are
+  rewritten, while unrelated generated/runtime/artifact files and metadata
+  remain untouched;
+- `mappings/cases.yaml` replaces selected entries in place and preserves
+  unrelated entries;
+- only rewritten files receive replacement `GeneratedFileOrigin` sets;
+- the API returns deterministic affected, content-changed, and preserved file
+  lists;
+- selected structure in `needs_review` stops before file writes.
+
+C8-06 implementation behavior:
+
+- full and selected generation preflight tracked generated files before any
+  rewrite/delete, including tracked files scheduled to disappear in a full
+  rebuild;
+- edited or conflict files block generation with a deterministic conflict
+  summary before the output tree is modified;
+- source-changed but untouched files can be regenerated and return to
+  `generated` after metadata/hash replacement;
+- unchanged full regeneration is byte-stable and reports no changed files;
+- selected generation preserves unrelated generated/runtime/artifact files, and
+  full regeneration deletes/rebuilds only after the guard passes.
+
+C8-04 implementation behavior:
+
+- generated output always includes deterministic Git-ready ignore rules and an
+  `artifacts/runs/.gitkeep` placeholder;
+- full regeneration preserves existing `.git`, `.gitattributes`, and
+  `.gitmodules` metadata while rebuilding generated/template content;
+- template copy excludes local caches and stale run artifacts so generated
+  projects start clean for Git tracking.
+
+C7-10 implementation behavior:
+
+- generated-file status refresh compares each tracked file's stored
+  `content_hash` with the current on-disk hash and marks mismatches as
+  `edited`;
+- planned incremental generation compares the future generated content hash
+  with the stored hash to identify source-changed files;
+- source-changed and untouched files are reported as `stale` before rewrite,
+  then return to `generated` after successful regeneration updates metadata;
+- source-changed and edited files are marked `conflict` and block file writes
+  before any overwrite;
+- generated-file status is surfaced in `/generated-files` metadata and
+  `structure/validate` issues when `edited`, `stale`, or `conflict`.
+
 ## TC Retire / Delete Cleanup
 
 When failure disposition concludes that a product area was removed, the system
@@ -324,6 +386,34 @@ Retire/delete cleanup must:
 Shared page objects and helper methods must be reference-counted through origin
 links before deletion. If the impact cannot be proven, mark the generated file
 for manual review instead of deleting it.
+
+C8-10 implementation behavior:
+
+- requires explicit human confirmation and supports soft `retired` or `deleted`
+  TestCase terminal states so all source/raw/structured/execution/artifact
+  history remains queryable;
+- preflights every impacted generated file against stored status, hash, and
+  active-case origin links before changing TC state or files;
+- removes selected private test/flow files and marks their metadata `obsolete`
+  while retaining historical origins;
+- removes the selected mapping entry and rebuilds shared page/mapping files and
+  origins from remaining active cases, preserving methods still referenced by
+  another case;
+- returns deterministic affected/removed/updated/obsolete/preserved/conflict
+  summaries;
+- returns `conflict` without cleanup when edited/hash-mismatched files or
+  unproven shared references are present.
+
+C12-10 disposition binding behavior:
+
+- accepts retire/delete only for an explicitly confirmed failed execution
+  result classified as `feature_removed_retire_tc`;
+- verifies the resolved diagnosis project, execution, automation key, source
+  context, and sole target TC match the selected case before cleanup;
+- rejects unresolved, non-feature-removed, mismatched, or unconfirmed requests
+  without changing the TC or generated files;
+- delegates safe requests to C8-10 and returns diagnosis reason, confidence,
+  evidence, target, and deterministic cleanup details together.
 
 ## Structure Validation
 
@@ -377,22 +467,46 @@ Done:
 - C6-07 Mapping GET/PUT round-trips ordered multi-action joins, atomically
   replaces/removes stale links, validates selected-case action ownership, and
   keeps the legacy first-action field aligned.
+- C6-03 action CRUD creates reviewed actions on the selected case's latest run,
+  updates only selected-case actions, deletes selected-case actions while
+  repairing ordered joins and legacy first-action compatibility, and rejects
+  foreign action mutation before partial writes.
+- C6-04 assertion/wait insertion adds step-scoped review APIs that create or
+  update only supported assertion/wait actions, place them in the selected TC
+  step's ordered mapping joins, and preserve explicit assertion/wait body-plan
+  entries through structure sync.
 - C7-11 structuring compiles ordered mapping joins into deterministic,
   source-traceable PageObjectMethod body plans and preserves unsupported or
   hard-wait actions as explicit review-required entries.
 - C8-07 generation persists complete `GeneratedFileOrigin` sets, aggregates
   shared-file origins, and replaces stale origins and duplicate path metadata
   during regeneration.
+- C7-10 generated-file status refresh detects on-disk edits from stored hashes,
+  marks planned source changes as stale/conflict before incremental rewrites,
+  blocks source-changed edited files, and exposes generated-file status through
+  file metadata and structure validation.
+- C8-06 full/selected generation guard runs before rewrite/delete, blocks
+  edited/conflict tracked files with deterministic summaries, and keeps
+  unchanged regeneration byte-stable.
+- C7-12 selected raw refresh conservatively merges equivalent replacement
+  actions into existing reviewed mappings, flows, steps, and method body plans
+  in place, while preserving unrelated cases and routing count, order,
+  ambiguity, or shared-method conflicts to `needs_review`.
+- C8-09 selected incremental generation rewrites selected case files and
+  origin-linked shared files, merges mappings, replaces only rewritten-file
+  origins, preserves unrelated files/artifacts/metadata, and returns affected,
+  changed, and preserved file summaries.
+- C12-09 selected raw refresh regeneration chains a selected run and safe raw
+  merge into incremental generation, returns traceable outcomes, and stops
+  before generation on review-required changes.
+- C8-10 confirmed retire/delete cleanup removes only provably selected
+  generated artifacts, preserves shared content and audit history, and stops
+  without cleanup on edited or unproven shared conflicts.
+- C12-10 diagnosis-bound retire/delete invokes cleanup only for the resolved
+  selected TC and preserves diagnosis evidence in the maintenance response.
 
 Open:
 
-- C7-10: stale/conflict detection.
-- C7-12: selected raw refresh merge into existing structure.
-- C8-06: deterministic regeneration guard.
-- C8-09: selected TC incremental regeneration.
-- C8-10: TC retire/delete generated artifact cleanup.
-- C12-09: selected TC Webwright refresh regeneration flow.
-- C12-10: TC retire recommendation and cleanup flow.
 - E-11: selected TC Webwright refresh incremental regeneration E2E.
 - E-12: feature-removed TC retire cleanup E2E.
 - E-10: generated pytest/browser contract E2E.

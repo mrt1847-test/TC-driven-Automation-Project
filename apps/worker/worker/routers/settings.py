@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session
 
+from worker.core.database import get_session
 from worker.core.config import load_settings, save_settings
+from worker.models.db import Project
 from worker.models.schemas import AppSettings
 from worker.services.health import check_health, install_dependencies, project_health_check
 
@@ -41,5 +44,13 @@ def project_health(project_id: str, generated_path: str | None = None):
 
 
 @router.post("/projects/{project_id}/install-dependencies")
-def install_deps(project_id: str, generated_path: str):
-    return install_dependencies(Path(generated_path))
+def install_deps(
+    project_id: str,
+    generated_path: str,
+    browser: str = "chromium",
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return install_dependencies(Path(generated_path), session=session, project_id=project_id, browser=browser)

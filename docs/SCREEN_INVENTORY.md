@@ -284,10 +284,17 @@ Bottom: raw code, screenshot, logs
 - Rename normalized step and POM method.
 - Mark mapping as `mapped` or `needs_review`.
 - Save mappings.
+- Show Mapping API validation failures inline without clearing unsaved edits or
+  the selected TC.
 
 ### APIs
 
 - `GET /projects/{project_id}/cases/{case_id}/actions`
+- `POST /projects/{project_id}/cases/{case_id}/actions`
+- `PATCH /projects/{project_id}/cases/{case_id}/actions/{action_id}`
+- `DELETE /projects/{project_id}/cases/{case_id}/actions/{action_id}`
+- `POST /projects/{project_id}/cases/{case_id}/steps/{tc_step_index}/actions`
+- `PATCH /projects/{project_id}/cases/{case_id}/steps/{tc_step_index}/actions/{action_id}`
 - `GET /projects/{project_id}/cases/{case_id}/mappings`
 - `PUT /projects/{project_id}/cases/{case_id}/mappings`
 - `POST /projects/{project_id}/cases/{case_id}/normalize`

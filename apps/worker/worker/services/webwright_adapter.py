@@ -11,9 +11,8 @@ from typing import Any
 from worker.core.config import mask_secrets, new_id
 from worker.core.runtime import resolve_runtime
 from worker.core.log_stream import log_streams
-from worker.services.prompt_builder import build_webwright_prompt
-from worker.services.case_import import case_to_normalized
-from worker.models.db import TestCase, WebwrightRun, WebwrightRunStatus
+from worker.services.prompt_payloads import build_webwright_prompt_payload_components, record_webwright_prompt_payload
+from worker.models.db import Project, TestCase, WebwrightRun, WebwrightRunStatus
 from worker.services.artifact_indexing import index_webwright_run_artifacts
 from sqlmodel import Session
 
@@ -137,11 +136,31 @@ async def _finish_background_tasks(tasks: list[asyncio.Task[Any]], timeout: floa
     return not pending
 
 
-async def run_webwright_for_case(session: Session, project_id: str, case: TestCase, model_config: str, job_id: str) -> WebwrightRun:
+async def run_webwright_for_case(
+    session: Session,
+    project_id: str,
+    case: TestCase,
+    model_config: str,
+    job_id: str,
+    *,
+    preset_id: str | None = None,
+    environment: str = "stg",
+    start_url_override: str | None = None,
+) -> WebwrightRun:
     profile = resolve_runtime()
-    normalized = case_to_normalized(case)
-    start_url = case.start_url or "https://example.com"
-    prompt = build_webwright_prompt(normalized, start_url=start_url)
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Project not found")
+    prompt_components = build_webwright_prompt_payload_components(
+        session,
+        project,
+        case,
+        preset_id=preset_id,
+        environment=environment,
+        start_url_override=start_url_override,
+    )
+    start_url = prompt_components["startUrl"]
+    prompt = prompt_components["prompt"]
 
     run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_root = _resolve_output_root() / case.automation_key / f"run_{run_ts}"
@@ -176,6 +195,14 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
         config_args.append(f"agent.step_limit={profile.webwright_step_limit}")
     subprocess_env = profile.subprocess_env()
     subprocess_env.setdefault("PYTHONUNBUFFERED", "1")
+    record_webwright_prompt_payload(
+        session,
+        project=project,
+        case=case,
+        run=run,
+        components=prompt_components,
+        model_config=model_cfg,
+    )
 
     cmd = [
         python_path, "-m", "webwright.run.cli",
@@ -347,8 +374,31 @@ async def run_webwright_for_case(session: Session, project_id: str, case: TestCa
     return run
 
 
-async def create_mock_run(session: Session, project_id: str, case: TestCase, job_id: str) -> WebwrightRun:
+async def create_mock_run(
+    session: Session,
+    project_id: str,
+    case: TestCase,
+    job_id: str,
+    *,
+    model_config: str = "model_openai.yaml",
+    preset_id: str | None = None,
+    environment: str = "stg",
+    start_url_override: str | None = None,
+) -> WebwrightRun:
     """Create a mock Webwright run when CLI is unavailable (dev/demo)."""
+    project = session.get(Project, project_id)
+    prompt_components = (
+        build_webwright_prompt_payload_components(
+            session,
+            project,
+            case,
+            preset_id=preset_id,
+            environment=environment,
+            start_url_override=start_url_override or MOCK_START_URL,
+        )
+        if project
+        else None
+    )
     run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_root = _resolve_output_root() / case.automation_key / f"run_{run_ts}"
     output_root.mkdir(parents=True, exist_ok=True)
@@ -406,6 +456,15 @@ if __name__ == "__main__":
     session.add(case)
     session.commit()
     session.refresh(run)
+    if project and prompt_components:
+        record_webwright_prompt_payload(
+            session,
+            project=project,
+            case=case,
+            run=run,
+            components=prompt_components,
+            model_config=model_config,
+        )
     index_webwright_run_artifacts(session, run)
     await log_streams.publish(job_id, f"[mock] Created sample Webwright run for {case.automation_key}")
     return run

@@ -1,6 +1,34 @@
+# TC Automation Studio generated project
+
+# Python caches
 __pycache__/
+*.py[cod]
+*$py.class
 .pytest_cache/
-artifacts/
-*.pyc
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local environments and secrets
 .env
-.env.local
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Runner and Playwright artifacts
+artifacts/runs/*
+!artifacts/runs/.gitkeep
+test-results/
+playwright-report/
+blob-report/
+*.log
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

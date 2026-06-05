@@ -1,5 +1,17 @@
 let baseUrl = 'http://127.0.0.1:8765'
 
+export class ApiError extends Error {
+  readonly status: number
+  readonly detail: unknown
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
 export async function initApiBase(): Promise<string> {
   if (window.electronAPI) {
     baseUrl = await window.electronAPI.getWorkerUrl()
@@ -17,10 +29,72 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options
   })
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
+    throw await buildApiError(res)
   }
   return res.json()
+}
+
+async function buildApiError(res: Response): Promise<ApiError> {
+  const text = await res.text()
+  const detail = parseResponseDetail(text)
+  const message = formatApiErrorMessage(detail, res.statusText || `HTTP ${res.status}`)
+  return new ApiError(message, res.status, detail)
+}
+
+function parseResponseDetail(text: string): unknown {
+  if (!text) return null
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
+      return (parsed as { detail: unknown }).detail
+    }
+    return parsed
+  } catch {
+    return text
+  }
+}
+
+function formatApiErrorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail.trim()) return detail.trim()
+  if (Array.isArray(detail)) {
+    const messages = detail.map(formatValidationItem).filter(Boolean)
+    if (messages.length) return messages.join('; ')
+  }
+  if (detail && typeof detail === 'object') {
+    const record = detail as Record<string, unknown>
+    const message = record.message || record.error || record.reason
+    if (typeof message === 'string' && message.trim()) return message.trim()
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      return fallback
+    }
+  }
+  return fallback
+}
+
+function formatValidationItem(item: unknown): string {
+  if (!item || typeof item !== 'object') return typeof item === 'string' ? item : ''
+  const record = item as Record<string, unknown>
+  const loc = Array.isArray(record.loc) ? record.loc.join('.') : ''
+  const message = typeof record.msg === 'string' ? record.msg : ''
+  if (loc && message) return `${loc}: ${message}`
+  return message || loc
+}
+
+export function getApiErrorMessage(error: unknown, fallback = 'Request failed.'): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+export type ActionMutationRequest = {
+  type?: string
+  target?: string | null
+  selector?: string | null
+  value?: string | null
+  source_line?: number | null
+  order_index?: number | null
+  insertAfterActionId?: string | null
+  insert_after_action_id?: string | null
 }
 
 export const api = {
@@ -82,6 +156,31 @@ export const api = {
   mapping: {
     actions: (projectId: string, caseId: string) =>
       request(`/projects/${projectId}/cases/${caseId}/actions`),
+    createAction: (projectId: string, caseId: string, body: ActionMutationRequest) =>
+      request(`/projects/${projectId}/cases/${caseId}/actions`, { method: 'POST', body: JSON.stringify(body) }),
+    updateAction: (projectId: string, caseId: string, actionId: string, body: ActionMutationRequest) =>
+      request(`/projects/${projectId}/cases/${caseId}/actions/${actionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      }),
+    deleteAction: (projectId: string, caseId: string, actionId: string) =>
+      request(`/projects/${projectId}/cases/${caseId}/actions/${actionId}`, { method: 'DELETE' }),
+    insertStepAction: (projectId: string, caseId: string, stepIndex: number, body: ActionMutationRequest) =>
+      request(`/projects/${projectId}/cases/${caseId}/steps/${stepIndex}/actions`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    updateStepAction: (
+      projectId: string,
+      caseId: string,
+      stepIndex: number,
+      actionId: string,
+      body: ActionMutationRequest
+    ) =>
+      request(`/projects/${projectId}/cases/${caseId}/steps/${stepIndex}/actions/${actionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      }),
     get: (projectId: string, caseId: string) =>
       request(`/projects/${projectId}/cases/${caseId}/mappings`),
     save: (projectId: string, caseId: string, body: unknown) =>

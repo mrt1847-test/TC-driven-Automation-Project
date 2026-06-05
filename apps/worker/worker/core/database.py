@@ -7,8 +7,12 @@ from sqlmodel import SQLModel, create_engine, Session
 from worker.core.config import get_db_path
 from worker.models.db import (
     Project,
+    ProjectPromptContext,
+    PromptPreset,
     SchemaVersion,
     TestCase,
+    CasePromptOverride,
+    WebwrightPromptPayload,
     WebwrightRun,
     RawAction,
     ArtifactAsset,
@@ -21,6 +25,7 @@ from worker.models.db import (
     SelectorCandidate,
     ExecutionRun,
     ExecutionResult,
+    GeneratedRuntimeInstallState,
     HealingProposal,
     GeneratedFile,
     GeneratedFileOrigin,

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from worker.core.database import init_db
 from worker.core.log_stream import log_streams
-from worker.routers import cases, executions, generation, mapping, projects, settings, structuring, webwright_runs
+from worker.routers import cases, executions, generation, healing, mapping, projects, prompts, settings, structuring, webwright_runs
 
 
 @asynccontextmanager
@@ -27,6 +27,10 @@ app.add_middleware(
 )
 
 app.include_router(projects.router)
+app.include_router(prompts.router)
+app.include_router(prompts.preset_router)
+app.include_router(prompts.preview_router)
+app.include_router(prompts.payload_router)
 app.include_router(cases.router)
 app.include_router(webwright_runs.router)
 app.include_router(mapping.router)
@@ -34,6 +38,7 @@ app.include_router(generation.router)
 app.include_router(structuring.router)
 app.include_router(executions.router)
 app.include_router(executions.export_router)
+app.include_router(healing.router)
 app.include_router(settings.router)
 
 

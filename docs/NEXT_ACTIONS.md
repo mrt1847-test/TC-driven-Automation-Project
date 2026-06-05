@@ -1,4 +1,4 @@
-# Next Actions
+﻿# Next Actions
 
 Last aligned: 2026-06-05
 
@@ -29,12 +29,25 @@ When the user asks to work from NEXT ACTION, the AI must:
 5. Implement and verify the current batch as far as the local environment allows.
 6. When the batch is complete, update the relevant checklist line from `[ ]` to `[x]` with a short verification note.
 7. Update any directly affected source-of-truth spec, but do not create a new spec doc.
-8. Move the next item from **Next Batch Candidates** into **Current Batch**.
-9. Remove or reorder that item in **Next Batch Candidates**.
-10. Add a short note under **Completed Batch Notes**.
+8. Advance the queue:
+   - First, move the next still-open item from **Next Batch Candidates** into
+     **Current Batch** and remove/reorder that candidate list.
+   - If **Next Batch Candidates** is empty or all listed candidates are already
+     complete, scan [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md)
+     for the next unchecked checklist item whose dependencies are already
+     complete.
+   - Prefer items called out by the implementation audit/spec-gap notes, then
+     continue in checklist order within the same phase/layer.
+   - Populate **Current Batch** with the checklist item, owning specs, concise
+     scope, and acceptance evidence from the checklist and owning spec.
+9. Add a short note under **Completed Batch Notes**.
 
 If the current batch cannot be completed, do not advance the queue. Record the
 blocker in the final response and leave `Current Batch` unchanged.
+
+If no valid current batch, candidate, or dependency-satisfied unchecked
+checklist item remains, set **Current Batch** to no current batch and report
+that the queue is empty. Do not invent work outside the checklist.
 
 ## Rules For AI
 
@@ -47,35 +60,41 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 ## Current Batch
 
-**Checklist item:** C7-12 selected raw refresh merge into existing structure
+**Checklist item:** G-03 generated project secret separation
 
-**Why this is next:** C7-11 body plans and C8-07 complete generated-file origins
-now provide stable source relationships. Selected Webwright reruns can compare
-new raw evidence with the reviewed structure before incremental generation.
+**Why this is next:** F-02 is complete and there is no explicit queued
+candidate. The next dependency-satisfied unchecked Phase 1 item is G-03, whose
+dependency B1-03 is already complete and whose scope belongs to the generated
+project template contract.
 
-**Owning specs:** [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md),
-[SELF_HEALING_SPEC.md](./SELF_HEALING_SPEC.md)
+**Owning specs:** [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md),
+[RUNTIME_SPEC.md](./RUNTIME_SPEC.md)
 
 **Implementation scope:**
 
-- Compare each selected case's newest `RawAction` sequence with its reviewed
-  mappings, `StructuredStep` rows, and `PageObjectMethod` body plans.
-- Preserve reviewed names, ordering, human intent, and stable structured
-  entities where equivalent actions can be matched safely.
-- Remap equivalent or replaced actions and refresh affected method body plans.
-- Mark removed, new, or ambiguous unmatched changes as
-  `needs_review`/conflict instead of rebuilding or silently deleting structure.
-- Add focused Worker tests for equivalent replacement, changed sequences,
-  ambiguous preservation, and unrelated-case isolation.
+- Inspect the generated template config files, runner fixtures, runtime
+  manifest generation, project generator copy/write path, and `.gitignore`
+  before editing.
+- Ensure generated `config/env.*.json`, `config/automation.yaml`, README,
+  runtime manifest, runner outputs, and committed template files never contain
+  plaintext API keys or provider secrets.
+- Keep secrets supplied through environment variables, Studio/keytar-backed
+  runtime injection, or ignored local override files.
+- Preserve standalone runner behavior for environment selection, browser
+  options, base URL, storage state, and artifact policy.
+- Add focused template/generator tests for secret separation and run the
+  relevant generated-template and worker regression tests.
 
 **Acceptance evidence:**
 
-- Equivalent raw refresh updates source/action IDs and body plans while
-  preserving reviewed names and intent.
-- Ambiguous differences remain reviewable and do not silently delete existing
-  structured entities.
-- Unrelated cases remain unchanged.
-- Existing structuring and traceability tests pass.
+- Generated project outputs and tracked template files contain placeholders or
+  variable names only, not secret values.
+- Secret-bearing local override files are ignored by generated Git output and
+  are not included in runtime manifests, results, logs, or generated metadata.
+- Standalone and Studio runner paths still receive required non-secret runtime
+  settings.
+- Build and focused template/worker regression tests pass as far as the local
+  environment allows.
 
 ## Next Batch Candidates
 
@@ -83,9 +102,7 @@ Pick the next item from this list after Current Batch is done:
 
 | Order | Checklist item | Purpose |
 |-------|----------------|---------|
-| 1 | C8-09 | Add selected TC incremental regeneration without wiping unrelated generated cases |
-| 2 | C12-09 | Connect selected TC Webwright refresh to structured merge and incremental generation |
-| 3 | C12-10 | Add human-confirmed TC retire/delete cleanup flow |
+| - | - | No explicit queued candidate; after G-03, scan the checklist for the next dependency-satisfied open item. |
 
 ## Completed Batch Notes
 
@@ -145,3 +162,80 @@ in [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md).
 - 2026-06-05: Completed C8-07 GeneratedFileOrigin link persistence. Generation
   now records complete case and structured origins, aggregates shared-file
   origins, and replaces stale links and duplicate path metadata on regeneration.
+- 2026-06-05: Completed C7-12 selected raw refresh merge. Selected Webwright
+  reruns now preserve reviewed structure and unrelated cases, update safely
+  matched raw links/body plans in place, and route ambiguous changes to review.
+- 2026-06-05: Completed C8-09 selected TC incremental regeneration. Selected
+  generation now rewrites only selected and origin-linked shared files, merges
+  mappings, replaces rewritten-file origins, and preserves unrelated files,
+  metadata, runtime content, and artifacts.
+- 2026-06-05: Completed C12-09 selected TC Webwright refresh regeneration.
+  The maintenance API now safely chains selected rerun, raw merge, and
+  incremental generation, returning review-required results before generation.
+- 2026-06-05: Completed C8-10 TC retire/delete generated artifact cleanup.
+  Confirmed soft cleanup now preserves audit history and shared content while
+  removing only provably selected files and stopping on edit/shared conflicts.
+- 2026-06-05: Completed C12-10 TC retire recommendation and cleanup flow.
+  Diagnosis-bound retire/delete now validates the failed result and selected TC
+  before cleanup, rejects unsafe requests without mutation, and returns
+  diagnosis evidence with cleanup details.
+- 2026-06-05: Completed C12-05 healing proposal generation API. Selector
+  failures now create evidence-backed proposal rows, duplicate requests return
+  the existing proposal, and non-selector/unresolved diagnoses stay
+  proposal-free.
+- 2026-06-05: Completed C7-10 stale/conflict detection. Generated-file status
+  refresh now detects on-disk edits, marks planned source changes as stale or
+  conflict, blocks source-changed edited incremental rewrites, and surfaces
+  status through generated-file metadata and structure validation.
+- 2026-06-05: Completed C8-06 deterministic regeneration guard. Full and
+  selected generation now preflight tracked files before rewrite/delete, block
+  edited/conflict files with deterministic summaries, and prove unchanged full
+  regeneration is byte-stable.
+- 2026-06-05: Completed C12-06 accepted proposal apply/regenerate/rerun flow.
+  Proposal decisions now preserve evidence, accepted selector replacements
+  patch structured selectors through guarded selected regeneration, and
+  conflicts stop before persisted mutation or file rewrite.
+- 2026-06-05: Completed C12-07 safe auto-apply guardrails. Auto-apply is
+  project-enabled only, requires strict selector evidence and one
+  high-confidence semantic candidate, reuses the accepted apply path, and
+  blocks low-confidence, ambiguous, stale, or conflict cases without selector
+  or generated-file content mutation.
+- 2026-06-05: Completed C2-04 batch prompt and per-case override model. Worker
+  prompt composer state now round-trips through project-scoped storage,
+  rejects foreign case overrides, and appends effective context to Webwright
+  prompts while preserving no-context behavior.
+- 2026-06-05: Completed C2-05 prompt preset model. Worker preset APIs now seed
+  stable built-ins, round-trip project presets with deterministic ordering,
+  reject foreign/built-in collisions, and keep existing Webwright prompt
+  composition unchanged until preview/run payload features opt in.
+- 2026-06-05: Completed C2-06 prompt preview API. Worker preview now combines
+  base TC prompt, optional built-in/project preset guidance, saved batch
+  prompt, and per-case override without starting Webwright or creating
+  run/history rows.
+- 2026-06-05: Completed C2-07 prompt payload traceability. Webwright run
+  creation now records immutable prompt payload snapshots with final/base
+  prompt, selected preset, batch/case context, environment, start URL, and
+  effective model config; list/read APIs expose history by project, case, and
+  run.
+- 2026-06-05: Completed C8-04 Git repo-capable generated output. Generation
+  now writes deterministic Git-ready ignore rules, keeps
+  `artifacts/runs/.gitkeep`, excludes stale template caches/artifacts, and
+  preserves existing `.git`, `.gitattributes`, and `.gitmodules` metadata.
+- 2026-06-05: Completed C8-08 generated-project runtime manifest. Generation
+  now writes deterministic `config/runtime-manifest.json`, tracks it as
+  generated metadata, preserves selected-generation summaries unless runtime
+  inputs change, and blocks edited manifests before overwrite.
+- 2026-06-05: Completed C9-07 per-project runtime install state/cache.
+  Generated runtime bootstrap now caches successful project/runtime readiness,
+  skips redundant install commands on valid hits, invalidates stale runtime
+  inputs, and keeps failed installs out of ready cache state.
+- 2026-06-05: Completed C6-03 action CRUD. Mapping review now has
+  project/case-scoped action create/update/delete APIs with ownership
+  validation, ordered join repair on delete, and structure-sync handoff tests.
+- 2026-06-05: Completed C6-04 assertion/wait additions. Mapping review now has
+  step-scoped assertion/wait insertion/update APIs with ordered join placement,
+  ownership/type validation, and structure-sync body-plan coverage.
+- 2026-06-05: Completed F-02 Mapping error UX. Mapping Review now surfaces
+  Mapping API validation failures inline, preserves local edits and selected TC
+  on failed save/auto-map requests, and shares FastAPI detail extraction across
+  Mapping save/action/assertion-wait client calls.

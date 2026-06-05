@@ -5,11 +5,20 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from worker.core.config import new_id
 from worker.core.database import get_session
-from worker.models.db import GeneratedFile, Project
-from worker.models.schemas import FileContentUpdate, FileCreateRequest, FileRenameRequest
+from worker.models.db import GeneratedFile, Project, TestCase
+from worker.models.schemas import (
+    FileContentUpdate,
+    FileCreateRequest,
+    FileRenameRequest,
+    GenerationRequest,
+    RawRefreshRegenerationRequest,
+    RetireCaseRequest,
+)
 from worker.services.generated_runtime import ensure_generated_runtime
-from worker.services.project_generator import generate_project
+from worker.services.generated_file_status import refresh_generated_file_statuses
+from worker.services.project_generator import GenerationConflictError, generate_project, retire_generated_case
 from worker.services.project_ide import (
     create_file,
     delete_file,
@@ -19,22 +28,135 @@ from worker.services.project_ide import (
     search_project,
     write_file,
 )
+from worker.services.raw_refresh_regeneration import refresh_and_regenerate_case
+from worker.services.structuring_service import get_latest_flow
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["generation"])
 
 
-@router.post("/generate")
-def generate(project_id: str, payload: dict | None = None, session: Session = Depends(get_session)):
+def _generate(
+    project_id: str,
+    request: GenerationRequest,
+    session: Session,
+    *,
+    selected_only: bool = False,
+):
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    case_ids = (payload or {}).get("caseIds")
-    output = generate_project(session, project_id, Path(project.root_path), case_ids)
-    project.generated_project_path = str(output)
+    if selected_only and not request.case_ids:
+        raise HTTPException(400, "Selected generation requires caseIds")
+    if selected_only and request.mode == "full":
+        raise HTTPException(400, "Selected generation does not support full mode")
+    mode = "incremental" if selected_only else request.mode
+    try:
+        result = generate_project(
+            session,
+            project_id,
+            Path(project.root_path),
+            request.case_ids,
+            mode=mode,
+        )
+    except GenerationConflictError as exc:
+        raise HTTPException(409, {"message": str(exc), **exc.summary()}) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    project.generated_project_path = str(result.output)
     session.add(project)
     session.commit()
-    runtime_bootstrap = ensure_generated_runtime(output, install=True)
-    return {"generatedProjectPath": str(output), "runtimeBootstrap": runtime_bootstrap}
+    runtime_bootstrap = ensure_generated_runtime(
+        result.output,
+        install=True,
+        session=session,
+        project_id=project_id,
+    )
+    return {
+        "generatedProjectPath": str(result.output),
+        "runtimeBootstrap": runtime_bootstrap,
+        "generationMode": result.mode,
+        "selectedCaseIds": result.selected_case_ids,
+        "affectedFiles": result.affected_files,
+        "changedFiles": result.changed_files,
+        "preservedFiles": result.preserved_files,
+        "editedFiles": result.edited_files,
+        "staleFiles": result.stale_files,
+        "conflictFiles": result.conflict_files,
+    }
+
+
+@router.post("/generate")
+def generate(
+    project_id: str,
+    request: GenerationRequest | None = None,
+    session: Session = Depends(get_session),
+):
+    return _generate(project_id, request or GenerationRequest(), session)
+
+
+@router.post("/generate/selected")
+def generate_selected(
+    project_id: str,
+    request: GenerationRequest,
+    session: Session = Depends(get_session),
+):
+    return _generate(project_id, request, session, selected_only=True)
+
+
+@router.post("/cases/{case_id}/refresh-webwright-and-regenerate")
+async def refresh_webwright_and_regenerate(
+    project_id: str,
+    case_id: str,
+    request: RawRefreshRegenerationRequest | None = None,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    case = session.get(TestCase, case_id)
+    if not case or case.project_id != project_id:
+        raise HTTPException(404, "Case not found")
+    if not get_latest_flow(session, case_id):
+        raise HTTPException(409, "Existing structured flow required for refresh regeneration")
+    body = request or RawRefreshRegenerationRequest()
+    try:
+        return await refresh_and_regenerate_case(
+            session,
+            project,
+            case,
+            model_config=body.ww_model_config,
+            job_id=new_id("refresh"),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/cases/{case_id}/retire")
+def retire_case(
+    project_id: str,
+    case_id: str,
+    request: RetireCaseRequest,
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    case = session.get(TestCase, case_id)
+    if not case or case.project_id != project_id:
+        raise HTTPException(404, "Case not found")
+    if not request.confirmed:
+        raise HTTPException(400, "Retire cleanup requires confirmed=true")
+    output = Path(project.generated_project_path or Path(project.root_path) / "generated")
+    try:
+        return retire_generated_case(
+            session,
+            project_id,
+            output,
+            case_id,
+            action=request.action,
+            reason=request.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/generated-files")
@@ -43,7 +165,12 @@ def generated_files(project_id: str, session: Session = Depends(get_session)):
     if not project:
         raise HTTPException(404, "Project not found")
     root = Path(project.generated_project_path or Path(project.root_path) / "generated")
-    return list_file_tree(root)
+    metadata = refresh_generated_file_statuses(session, project_id, root, commit=True)
+    items = list_file_tree(root)
+    for item in items:
+        if item["type"] == "file" and item["path"] in metadata:
+            item.update(metadata[item["path"]])
+    return items
 
 
 @router.get("/generated-files/content")

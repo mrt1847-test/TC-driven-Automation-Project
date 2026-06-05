@@ -175,7 +175,8 @@ User in Automation IDE
   -> User: adjust prompt/config if needed, retry run
   -> Worker: refresh RawAction and mapping candidates for that TC
   -> Worker: merge refreshed raw actions into existing structured entities where safe
-  -> GUI: return to Automation IDE with merged structure or review-required changes
+  -> Worker: incrementally regenerate affected files only after a safe merge
+  -> GUI: return to Automation IDE with run/merge/generation result or review-required changes
 ```
 
 Done when:
@@ -184,8 +185,10 @@ Done when:
 - User can retry Webwright without re-importing TC.
 - Old and new raw artifacts remain available for comparison.
 - Refreshed raw actions merge into existing structured state when intent is clear.
+- Safe merges incrementally regenerate selected/shared affected files while
+  preserving unrelated generated files.
 - Ambiguous raw changes are marked for Mapping/Structure review instead of
-  silently rebuilding the TC.
+  silently rebuilding the TC, and generation is not invoked.
 
 ## Workflow 8: Failure Disposition And Maintenance
 

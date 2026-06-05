@@ -1,6 +1,6 @@
 # Self-Healing And Failure Disposition Spec
 
-Last aligned: 2026-06-04
+Last aligned: 2026-06-05
 
 Webwright produces raw code, logs, screenshots, trajectory, and run metadata.
 Generated pytest runs produce logs, screenshots, traces, videos, and
@@ -116,6 +116,48 @@ Automatic apply is allowed only when all are true:
 
 Otherwise, create a proposal and require user confirmation.
 
+C12-05 implementation behavior:
+
+- `POST /executions/{execution_id}/healing-proposals` creates
+  `selector_replace` proposals only after reusing the resolved
+  `selector_changed` diagnosis for the requested failed result;
+- proposals persist target execution result, POM method, structured step, old
+  selector, proposed selector, confidence, and evidence JSON;
+- non-selector, unresolved, or ambiguous diagnoses return a non-applicable
+  outcome without mutating structured data, regenerated files, or runner state;
+- repeated matching requests return the existing proposal instead of creating
+  confusing duplicates;
+- project/key proposal list and detail endpoints expose review state for the
+  apply flow.
+
+C12-06 implementation behavior:
+
+- accept/reject endpoints make proposal decisions idempotent where safe and
+  preserve the original evidence payload;
+- rejected proposals never mutate structured selectors or generated files;
+- applying an accepted `selector_replace` proposal updates the targeted
+  `PageObjectMethod` selector/body plan and marks the proposal `applied`;
+- apply uses selected incremental regeneration and the generated-file guard, so
+  edited/conflict files return a conflict summary before selector mutation or
+  file rewrite is persisted;
+- successful apply returns traceable proposal, mutation, generation, and rerun
+  next-step context.
+
+C12-07 implementation behavior:
+
+- auto-apply is disabled by default and is enabled only when
+  `settings.self_healing.autoApplyProjectIds` contains the project ID;
+- enabled auto-apply still creates a normal `selector_replace` proposal first,
+  then requires selector-not-found or strict-mode evidence, exactly one
+  candidate at or above the high-confidence threshold, supported
+  role/text/test-id semantics, and a current non-stale POM/step target;
+- eligible proposals reuse the C12-06 accept/apply path, so successful
+  auto-apply preserves the proposal status trail, audit evidence, guarded
+  selected regeneration, and rerun context;
+- low-confidence, ambiguous, stale, unsafe evidence, semantic mismatch, edited
+  file, or generation-conflict cases return a concrete `blocked` reason and do
+  not persist selector/body-plan changes or rewrite generated files.
+
 ## Selected TC Raw Refresh
 
 Use this path when the failure disposition is `raw_refresh_required`, or when
@@ -141,6 +183,8 @@ Requirements:
   actions still match the existing intent;
 - stop at `needs_review` or `conflict` when the new raw actions cannot be safely
   merged into the existing structured model;
+- return traceable run, merge, and generation outcomes; review-required
+  outcomes must return without invoking generation;
 - do not delete unrelated generated tests, flows, pages, or mappings;
 - mark generated files as `stale` or `conflict` when origin/hash checks cannot
   safely apply the update;
@@ -153,6 +197,12 @@ Use this path when the failure disposition is `feature_removed_retire_tc`.
 The system may recommend retire/delete, but the human must confirm it. The UI
 must explain why the TC appears obsolete, using execution failure evidence and
 source TC context.
+
+The disposition action must be tied to a specific failed execution result. It
+must reclassify that result and verify a resolved `feature_removed_retire_tc`
+target whose project, execution, automation key, source context, and sole
+target TC match the human-selected case. Unconfirmed, unresolved,
+non-feature-removed, or mismatched requests must stop without cleanup.
 
 After confirmation:
 
@@ -199,14 +249,31 @@ Done:
 - C12-08 failure disposition classifier and execution diagnosis API return one
   evidence-backed disposition per failed result, with conservative `unknown`
   fallback for unresolved, mixed, or unsupported evidence.
+- C7-12 selected raw refresh merge preserves reviewed structured identities and
+  intent for safely matched reruns, updates raw links/body plans in place, and
+  routes ambiguous or shared-method changes to review before regeneration.
+- C12-09 selected raw refresh regeneration API preserves prior raw evidence,
+  returns traceable run/merge/generation outcomes, incrementally regenerates
+  only after safe merges, and stops before generation on review-required
+  changes.
+- C8-10 human-confirmed cleanup foundation preserves audit history and shared
+  generated content while removing only provably selected files and stopping
+  on edited or unproven shared conflicts.
+- C12-10 diagnosis-bound retire/delete validates the failed result disposition
+  and selected TC identity before invoking C8-10, rejects unsafe requests
+  without mutation, and returns diagnosis evidence with the cleanup summary.
+- C12-05 healing proposal generation persists evidence-backed
+  `selector_replace` proposals for resolved selector failures and remains
+  proposal-only for non-selector or unresolved diagnoses.
+- C12-06 accepted proposal apply accepts or rejects review decisions, applies
+  accepted selector replacements through guarded selected regeneration, blocks
+  edited/conflict generated files before mutation, and returns rerun context.
+- C12-07 safe auto-apply guardrails keep proposal creation review-only by
+  default and allow project-enabled selector auto-apply only under conservative
+  evidence, confidence, semantic, stale-target, and generation-conflict checks.
 - baseline GUI diagnosis panel exists.
 
 Open:
 
-- C12-05: healing proposal API.
-- C12-06: accepted proposal apply/regenerate/rerun flow.
-- C12-07: safe auto-apply guardrails.
-- C12-09: selected TC Webwright refresh regeneration flow.
-- C12-10: TC retire recommendation and cleanup flow.
 - D6-09/D6-10: disposition actions and diff review UI.
 - E-11/E-12: E2E coverage for selected raw refresh and retire cleanup.

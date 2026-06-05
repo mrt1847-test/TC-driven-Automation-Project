@@ -1,6 +1,6 @@
 # Generated Project Spec
 
-Last aligned: 2026-06-04
+Last aligned: 2026-06-05
 
 The generated automation project is the final executable automation artifact.
 Webwright `final_script.py` is raw input material; it is not the final project.
@@ -35,6 +35,7 @@ generated-automation-project/
     env.local.json
     env.stg.json
     env.prod.json
+    runtime-manifest.json
   fixtures/
     browser_fixture.py
     env_fixture.py
@@ -61,24 +62,57 @@ generated-automation-project/
   artifacts/
     runs/
       {runId}/
+      .gitkeep
   conftest.py
+  .gitignore
   pytest.ini
   requirements.txt
   README.md
 ```
 
+## Git-Ready Output
+
+Generated projects must be safe to manage as a Git repository. Studio does not
+need to run `git init`, but every generated output must include a deterministic
+`.gitignore` covering:
+
+- Python caches and coverage output;
+- local virtual environments and `.env` files;
+- runner artifacts under `artifacts/runs/`, while keeping
+  `artifacts/runs/.gitkeep`;
+- Playwright reports, blob reports, test-results, logs, and common OS/editor
+  files.
+
+Full regeneration must preserve existing `.git`, `.gitattributes`, and
+`.gitmodules` metadata. Template copy must not bring stale local caches or
+historical run artifacts into a generated project.
+
 ## Runtime Manifest
 
-Generated projects should include a machine-readable runtime manifest, for
-example `config/runtime.json` or `config/automation.yaml`, containing:
+Generated projects include a deterministic machine-readable runtime manifest at
+`config/runtime-manifest.json`.
 
-- required Python package set or lock reference;
-- supported browsers;
-- default browser and headless setting;
-- expected Playwright browser cache behavior;
-- fixture policy version;
-- supported runner commands;
-- whether the project was generated for Studio-only or standalone-compatible use.
+The manifest contains:
+
+- `schema=tc-studio.generated-runtime-manifest` and `manifestVersion`;
+- required Python package expectations from `requirements.txt`, including the
+  file hash and normalized requirement lines;
+- Python runtime expectations for Studio (`RuntimeProfile.python`) and
+  standalone use (`python` from the active shell);
+- Playwright browser expectation, default browser, install command, supported
+  browser list, and `PLAYWRIGHT_BROWSERS_PATH` cache behavior;
+- fixture policy version, registered pytest plugins, `TC_*` environment
+  variables, auth/base URL/context/artifact policy, and artifact root;
+- supported standalone bootstrap/runner commands;
+- supported Studio runner entrypoint and RuntimeProfile-derived defaults;
+- `standalone=true` and `studio=true` compatibility flags.
+
+The manifest must not include timestamps, secrets, API keys, selected case IDs,
+or run-specific data. Full and selected generation must plan the manifest
+through the generated-file conflict guard. User-edited tracked manifests block
+regeneration before overwrite. Selected regeneration rewrites the manifest only
+when runtime/profile/template inputs change, keeping normal selected-case
+affected-file summaries stable.
 
 ## cases.yaml
 
@@ -220,6 +254,11 @@ when dependencies or browser assets are missing. Worker responses should include
 - browser executable check result;
 - suggested next action.
 
+Studio may cache successful bootstrap readiness outside the generated project,
+keyed by generated project/runtime-manifest/requirements/runtime inputs. Cache
+hits may skip redundant install commands, but must still verify browser
+readiness and must not change standalone project behavior.
+
 If bootstrap fails during an in-app run, Studio must still create deterministic
 run artifacts under `artifacts/runs/{runId}`:
 
@@ -302,6 +341,11 @@ TC retire/delete cleanup must:
 - remove shared flow/page code only when no active TC still references it;
 - preserve historical `artifacts/runs/` and result files for audit.
 
+C8-10 implements this as an explicit human-confirmed soft terminal state
+transition. It removes only hash-verified private files, marks their metadata
+`obsolete`, rebuilds shared page/mapping content and origins from active cases,
+and returns `conflict` without cleanup for edited or unproven shared files.
+
 ## Baseline Verification
 
 The generated project baseline is acceptable when:
@@ -333,11 +377,5 @@ environment, not generated source files.
 
 ## Open Implementation Work
 
-- C8-08: generated-project runtime manifest.
-- C8-09: selected TC incremental regeneration.
-- C8-10: TC retire/delete generated artifact cleanup.
-- C12-09: selected TC Webwright refresh regeneration flow.
-- C12-10: TC retire recommendation and cleanup flow.
-- E-10: generated pytest/browser contract E2E.
 - E-11: selected TC Webwright refresh incremental regeneration E2E.
 - E-12: feature-removed TC retire cleanup E2E.

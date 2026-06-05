@@ -121,7 +121,11 @@ def test_generation_persists_complete_origins_and_replaces_stale_shared_links(
             select(GeneratedFile).where(GeneratedFile.project_id == project_id)
         ).all()
         by_path = {row.relative_path: row for row in generated_files}
-        assert len(by_path) == len(generated_files) == 6
+        assert len(by_path) == len(generated_files) == 7
+        runtime_manifest = by_path["config/runtime-manifest.json"]
+        assert runtime_manifest.automation_key is None
+        assert runtime_manifest.source_type is None
+        assert _origins(session, runtime_manifest.id) == set()
 
         first_key = imported_case["automation_key"]
         first_test = by_path[f"tests/test_{first_key}.py"]

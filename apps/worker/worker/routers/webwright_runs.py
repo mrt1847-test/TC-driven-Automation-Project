@@ -7,11 +7,13 @@ from sqlmodel import Session, select
 
 from worker.core.runtime import resolve_runtime
 from worker.core.database import get_session
+from worker.core.log_stream import log_streams
 from worker.models.db import Project, TestCase, WebwrightRun
 from worker.models.schemas import WebwrightRunRequest
 from worker.services.action_extraction import enrich_from_trajectory, extract_actions_from_script
 from worker.services.mapping import auto_map_case
 from worker.services.selector_candidates import extract_selector_candidates_for_run
+from worker.services.structuring_service import get_latest_flow, merge_refreshed_raw_actions
 from worker.services.webwright_adapter import create_mock_run, run_webwright_for_case
 
 router = APIRouter(prefix="/projects/{project_id}/webwright-runs", tags=["webwright"])
@@ -30,14 +32,40 @@ async def _process_runs(project_id: str, request: WebwrightRunRequest, job_id: s
             if not case or case.project_id != project_id:
                 continue
             if use_mock:
-                run = await create_mock_run(session, project_id, case, job_id)
+                run = await create_mock_run(
+                    session,
+                    project_id,
+                    case,
+                    job_id,
+                    model_config=request.ww_model_config,
+                    preset_id=request.preset_id,
+                    environment=request.environment,
+                    start_url_override=request.start_url_override,
+                )
             else:
-                run = await run_webwright_for_case(session, project_id, case, request.ww_model_config, job_id)
+                run = await run_webwright_for_case(
+                    session,
+                    project_id,
+                    case,
+                    request.ww_model_config,
+                    job_id,
+                    preset_id=request.preset_id,
+                    environment=request.environment,
+                    start_url_override=request.start_url_override,
+                )
             if run.final_script_path:
                 actions = extract_actions_from_script(run.final_script_path, case.automation_key, run.id, session)
                 enrich_from_trajectory(actions, run.trajectory_path)
                 extract_selector_candidates_for_run(session, run.id)
-                auto_map_case(session, case, run.id)
+                if get_latest_flow(session, case.id):
+                    result = merge_refreshed_raw_actions(session, project_id, case, run)
+                    await log_streams.publish(
+                        job_id,
+                        f"[raw-refresh] {case.automation_key}: {result['status']}"
+                        + (f" ({result['reason']})" if result.get("reason") else ""),
+                    )
+                else:
+                    auto_map_case(session, case, run.id)
 
 
 @router.post("")

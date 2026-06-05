@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { api, type TestCase, type WebwrightRun } from '@/lib/api'
+import { api, getApiErrorMessage, type TestCase, type WebwrightRun } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 type TestStep = {
@@ -55,6 +55,8 @@ export function MappingPage() {
   const storeSelectedCase = useAppStore((s) => s.selectedCase)
   const setSelectedCase = useAppStore((s) => s.setSelectedCase)
   const [mappingDraft, setMappingDraft] = useState<MappingDraftRow[]>([])
+  const [mappingApiError, setMappingApiError] = useState<string | null>(null)
+  const [mappingApiNotice, setMappingApiNotice] = useState<string | null>(null)
   const qc = useQueryClient()
   const selectedCaseId = storeSelectedCase?.project_id === project?.id ? storeSelectedCase.id : ''
 
@@ -95,7 +97,20 @@ export function MappingPage() {
 
   const normalizeMut = useMutation({
     mutationFn: () => api.mapping.normalize(project!.id, selectedCase!.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mappings', project?.id, selectedCase?.id] })
+    onMutate: () => {
+      setMappingApiError(null)
+      setMappingApiNotice(null)
+    },
+    onSuccess: () => {
+      setMappingApiNotice('Auto Map refreshed mappings for the selected TC.')
+      qc.invalidateQueries({ queryKey: ['mappings', project?.id, selectedCase?.id] })
+      qc.invalidateQueries({ queryKey: ['actions', project?.id, selectedCase?.id] })
+      qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+    },
+    onError: (error) => {
+      setMappingApiNotice(null)
+      setMappingApiError(mappingApiFailureMessage('Auto Map', error))
+    }
   })
 
   const steps = parseSteps(selectedCase)
@@ -104,6 +119,11 @@ export function MappingPage() {
   useEffect(() => {
     setMappingDraft(buildMappingDraft(mappings as MappingRow[], steps))
   }, [mappings, selectedCase?.id])
+
+  useEffect(() => {
+    setMappingApiError(null)
+    setMappingApiNotice(null)
+  }, [selectedCase?.id])
 
   const saveMappingMut = useMutation({
     mutationFn: () => {
@@ -132,9 +152,19 @@ export function MappingPage() {
       }
       return api.mapping.save(project!.id, selectedCase!.id, body)
     },
+    onMutate: () => {
+      setMappingApiError(null)
+      setMappingApiNotice(null)
+    },
     onSuccess: () => {
+      setMappingApiNotice('Mapping edits saved and refreshed for the selected TC.')
       qc.invalidateQueries({ queryKey: ['mappings', project?.id, selectedCase?.id] })
+      qc.invalidateQueries({ queryKey: ['actions', project?.id, selectedCase?.id] })
       qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+    },
+    onError: (error) => {
+      setMappingApiNotice(null)
+      setMappingApiError(mappingApiFailureMessage('Save Edits', error))
     }
   })
 
@@ -338,6 +368,13 @@ export function MappingPage() {
                 {saveMappingMut.isPending ? 'Saving...' : 'Save Edits'}
               </button>
             </div>
+            {(mappingApiError || mappingApiNotice) && (
+              <MappingApiStatus
+                error={mappingApiError}
+                notice={mappingApiNotice}
+                selectedCaseLabel={selectedCase?.automation_key || 'selected TC'}
+              />
+            )}
             {mappingDraft.map((mapping) => (
               <div key={mapping.tc_step_index} className="mb-3 rounded border border-slate-800 bg-slate-950 p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
@@ -409,6 +446,38 @@ function PaneHeader({ title, meta }: { title: string; meta: string }) {
       <span className="text-xs text-slate-500">{meta}</span>
     </div>
   )
+}
+
+function MappingApiStatus({
+  error,
+  notice,
+  selectedCaseLabel
+}: {
+  error: string | null
+  notice: string | null
+  selectedCaseLabel: string
+}) {
+  if (error) {
+    return (
+      <div className="mb-3 rounded border border-red-800 bg-red-950/40 p-3 text-xs text-red-100">
+        <div className="font-semibold text-red-200">Mapping API failed for {selectedCaseLabel}</div>
+        <div className="mt-1 whitespace-pre-wrap break-words">{error}</div>
+        <div className="mt-2 text-red-200/80">
+          Your local mapping edits and selected TC were kept. Fix the highlighted issue or rerun Webwright, then try again.
+        </div>
+      </div>
+    )
+  }
+
+  if (notice) {
+    return (
+      <div className="mb-3 rounded border border-green-800 bg-green-950/30 p-3 text-xs text-green-100">
+        {notice}
+      </div>
+    )
+  }
+
+  return null
 }
 
 function EmptyPaneText({ children }: { children: string }) {
@@ -654,6 +723,11 @@ function validateStructureDraft(mappings: MappingDraftRow[], steps: TestStep[]):
   }
 
   return issues
+}
+
+function mappingApiFailureMessage(action: string, error: unknown) {
+  const message = getApiErrorMessage(error, 'Mapping request failed.')
+  return `${action}: ${message}`
 }
 
 function validationIssueClass(severity: ValidationIssue['severity']) {
