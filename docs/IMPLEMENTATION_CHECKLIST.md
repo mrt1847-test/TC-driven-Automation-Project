@@ -23,7 +23,7 @@
 |----------|------|-------|
 | A. Infra | 33 | 33 |
 | B. Template | 20 | 20 |
-| C. Worker | 90 | 108 |
+| C. Worker | 91 | 108 |
 | D. GUI | 49 | 53 |
 | E. E2E | 12 | 12 |
 | F. Errors | 4 | 4 |
@@ -64,7 +64,7 @@ Scope checked: `structuring_service.py`, `mapping.py`, `project_generator.py` ag
 - **Resolved:** generated `goto` can use runtime `base_url`, and `${env.dot.path}` placeholders render via env config lookup. Closed by **C8-12**.
 - **Resolved:** raw credential-like `fill` values are replaced with `${env.*}` placeholders before body-plan/codegen persistence and marked for review. Closed by **G-05**.
 - **Resolved:** POM methods are now scoped by case automation key and TC step index before the readable base name, and raw refresh repairs legacy shared POMs into selected-case scoped methods. Closed by **C7-15**; URL/route-based page segmentation remains optional **C7-17**.
-- **Auto-mapping is index-based 1:1:** `auto_map_case` pairs `steps[i] ↔ actions[i]`, but raw scripts almost always have more actions than TC steps, forcing manual remapping of nearly every case and starving the multi-action join model. Tracked as **C6-08**.
+- **Resolved:** `auto_map_case` now creates deterministic ordered RawAction chunks per TC step instead of index-only 1:1 pairs, using raw action order plus trajectory selector/target/value/accessibility/page evidence when available and marking only low-confidence chunks for review. Closed by **C6-08**.
 - **SelectorCandidate rows are unused at structuring time:** body plans copy raw selectors verbatim instead of preferring stable candidates (test-id > role > text > css), leaving selector stability entirely to after-the-fact self-healing. Tracked as **C7-16**.
 
 ## Fundamental risk audit (2026-06-11)
@@ -231,7 +231,7 @@ Scope checked: Worker API trust boundaries, Project IDE file APIs, import/genera
 - [x] **C6-05** normalized step / POM method 이름 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-03
 - [x] **C6-06** Mapping API — §7.4 | Phase 1 | Layer: Worker | Depends: C6-01
 - [x] **C6-07** TC step ↔ multiple raw actions join 저장 — Spec: DB_SCHEMA, STRUCTURING_SPEC | Phase 1 | Layer: Worker | Depends: A2-08, C6-06 (verified 2026-06-04: Mapping GET/PUT round-trips ordered `action_ids`, atomically replaces/removes join rows, aligns legacy `raw_action_id`, and rejects invalid/foreign action IDs before mutation; focused mapping tests passed)
-- [ ] **C6-08** trajectory 기반 multi-action 자동 매핑 — Spec: STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C5-02, C6-07 (replace index-based 1:1 `auto_map_case` with a deterministic grouping planner: load the selected run's `trajectory.json` and RawAction order, detect navigation/URL/page-title boundaries, group contiguous low-level actions into candidate TC-step chunks, score step text against action target/selector/value/accessibility text, preserve ordered `CaseActionMappingAction` links for multi-action matches, mark only ambiguous/low-confidence chunks as `needs_review`, and add tests for login-style `goto+fill+fill+click`, one TC step mapping to many actions, one raw action mapping to an assertion-only step, extra/missing actions, refresh merge interaction, and stable behavior when trajectory is missing or malformed)
+- [x] **C6-08** trajectory 기반 multi-action 자동 매핑 — Spec: STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C5-02, C6-07 (verified 2026-06-11: `auto_map_case` now groups contiguous selected-run RawAction chunks per TC step, scores step text against selector/target/value plus trajectory URL/page-title/accessibility evidence, persists ordered `CaseActionMappingAction` links for multi-action matches, leaves low-confidence/extra/missing chunks in `needs_review`, and falls back deterministically when trajectory is missing or malformed; focused auto-mapping tests passed, targeted structuring/codegen/raw-refresh/mapping-join tests passed, and `python -m pytest tests --ignore=tests/e2e -q` passed with 155 tests)
 
 ### C7. Structuring Service — §5.10
 

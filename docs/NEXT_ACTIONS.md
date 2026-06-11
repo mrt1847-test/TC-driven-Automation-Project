@@ -84,15 +84,14 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 
 
-**Checklist item:** C6-08 trajectory-based multi-action auto mapping
+**Checklist item:** C7-16 selector candidate ranking in body plans
 
 
 
-**Why this is next:** C7-15 closed the method identity overwrite risk. The next
-structuring gap is that `auto_map_case` still pairs TC steps and raw actions by
-index, while real Webwright scripts commonly emit `goto+fill+fill+click` or
-other multi-action chunks for one business step. This leaves many mappings
-manual and starves the ordered multi-action join/planner path.
+**Why this is next:** C6-08 now seeds ordered multi-action chunks, so the next
+structuring quality gap is selector choice inside body plans. The planner still
+copies raw selectors directly even when `SelectorCandidate` rows contain more
+stable alternatives.
 
 
 
@@ -104,17 +103,17 @@ manual and starves the ordered multi-action join/planner path.
 
 
 
-- Replace index-based 1:1 auto mapping with a deterministic grouping planner
-  that can map one TC step to ordered RawAction chunks.
+- Rank selector candidates while building PageObjectMethod body plans, preferring
+  stable selectors such as test id, role, and text over brittle CSS/XPath when
+  confidence and evidence support the replacement.
 
-- Use selected run RawAction order and `trajectory.json` evidence when
-  available: navigation/URL/page-title boundaries, selector/target/value text,
-  and surrounding accessibility text.
+- Preserve raw selector fallback when candidates are missing, low-confidence, or
+  ambiguous.
 
-- Persist ordered `CaseActionMappingAction` links for grouped matches and mark
-  only ambiguous/low-confidence groups as `needs_review`.
+- Keep source traceability from body-plan entries back to RawAction and
+  SelectorCandidate evidence.
 
-- Keep behavior stable when trajectory evidence is missing or malformed.
+- Reuse the same ranking path for selected raw refresh merge.
 
 
 
@@ -122,13 +121,12 @@ manual and starves the ordered multi-action join/planner path.
 
 
 
-- Focused pytest for login-style `goto+fill+fill+click`, one TC step mapping
-  to many actions, extra/missing actions, assertion-only action mapping,
-  refresh-merge interaction, and trajectory-missing fallback.
+- Focused pytest for selector priority ordering, low-confidence/ambiguous
+  fallback, body-plan traceability, and selected raw refresh merge.
 
 - Existing structuring/codegen/regeneration guard tests still pass.
 
-- Checklist C6-08 marked `[x]` with verification note.
+- Checklist C7-16 marked `[x]` with verification note.
 
 
 
@@ -144,31 +142,39 @@ Pick the next item from this list after Current Batch is done:
 
 |-------|----------------|---------|
 
-| 1 | C7-16 | Selector candidate ranking in body plans |
+| 1 | C3-09 | Webwright subprocess cancel |
 
-| 2 | C3-09 | Webwright subprocess cancel |
+| 2 | C9-08 | Execution `runner.cli` subprocess cancel |
 
-| 3 | C9-08 | Execution `runner.cli` subprocess cancel |
+| 3 | D4-07 | Generate Raw Worker C2 prompt API GUI wiring |
 
-| 4 | D4-07 | Generate Raw Worker C2 prompt API GUI wiring |
+| 4 | C12-11 | Artifact read API |
 
-| 5 | C12-11 | Artifact read API |
+| 5 | C12-12 | Selector-candidates read API |
 
-| 6 | C12-12 | Selector-candidates read API |
+| 6 | C7-13 | Project-level stale/conflict API |
 
-| 7 | C7-13 | Project-level stale/conflict API |
+| 7 | C1-08, C1-09, C10-07, C10-08, G-04 | Real TestRail/Sheets connector depth |
 
-| 8 | C1-08, C1-09, C10-07, C10-08, G-04 | Real TestRail/Sheets connector depth |
+| 8 | D5-08 | Worker structure validate in Mapping |
 
-| 9 | D5-08 | Worker structure validate in Mapping |
+| 9 | I-10 | Third-party legal packaging gate |
 
-| 10 | I-10 | Third-party legal packaging gate |
-
-| 11 | J.* | Optional Post-MVP extensions (`C7-17` page segmentation lives here) |
+| 10 | J.* | Optional Post-MVP extensions (`C7-17` page segmentation lives here) |
 
 
 
 ## Completed Batch Notes
+
+- **C6-08 (2026-06-11):** `auto_map_case` now plans contiguous ordered
+  RawAction chunks per TC step using selected-run order plus trajectory
+  URL/page-title/selector/target/value/accessibility evidence when available.
+  Multi-action matches persist ordered `CaseActionMappingAction` links, missing
+  or low-confidence chunks stay visible as `needs_review`, malformed/missing
+  trajectory files fall back deterministically, and auto-seeded multi-action
+  mappings feed selected raw refresh merge correctly. Focused auto-mapping tests
+  passed, targeted structuring/codegen/raw-refresh/mapping-join tests passed,
+  and the non-e2e Worker suite passed with 155 tests.
 
 
 

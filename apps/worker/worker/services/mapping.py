@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
+from typing import Any
+
 from slugify import slugify
 from sqlmodel import Session, select
 
@@ -27,6 +31,106 @@ REVIEW_INSERT_ACTION_TYPES = {
     "assert_hidden",
     "assert_count",
 }
+
+TOKEN_RE = re.compile(r"[a-z0-9]+")
+TEXTUAL_TRAJECTORY_KEYS = {
+    "accessibility",
+    "accessible_name",
+    "aria",
+    "aria_label",
+    "current_url",
+    "currenturl",
+    "label",
+    "name",
+    "page_title",
+    "pagetitle",
+    "placeholder",
+    "selector",
+    "snapshot",
+    "surrounding_text",
+    "target",
+    "text",
+    "title",
+    "url",
+    "value",
+}
+TRAJECTORY_COLLECTION_KEYS = (
+    "actions",
+    "events",
+    "steps",
+    "trace",
+    "items",
+    "entries",
+)
+ORDER_KEYS = (
+    "order_index",
+    "orderIndex",
+    "action_index",
+    "actionIndex",
+    "index",
+    "step",
+)
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "page",
+    "should",
+    "the",
+    "then",
+    "to",
+    "using",
+    "with",
+}
+TOKEN_SYNONYMS = {
+    "auth": {"authenticate", "authentication", "login", "signin"},
+    "authenticate": {"auth", "authentication", "login", "signin"},
+    "button": {"submit", "continue"},
+    "credential": {"credentials", "email", "password", "username"},
+    "credentials": {"credential", "email", "password", "username"},
+    "e": {"email"},
+    "email": {"e", "mail", "username", "user"},
+    "log": {"login", "signin"},
+    "login": {"log", "signin", "sign", "authenticate", "auth"},
+    "pass": {"password", "passwd", "pwd", "credential", "credentials"},
+    "password": {"pass", "passwd", "pwd", "credential", "credentials"},
+    "sign": {"login", "signin", "authenticate", "auth"},
+    "signin": {"login", "sign", "authenticate", "auth"},
+    "submit": {"button", "continue", "login"},
+    "user": {"username", "email"},
+    "username": {"user", "email"},
+    "verify": {"assert", "expect", "see", "visible"},
+    "visible": {"see", "shown", "displayed"},
+}
+ACTION_HINTS = {
+    "goto": {"go", "goto", "navigate", "open", "visit", "url", "page"},
+    "click": {"click", "tap", "press", "submit", "choose", "select"},
+    "fill": {"fill", "enter", "input", "provide", "set", "type"},
+    "press": {"press", "key", "keyboard", "type"},
+    "select": {"select", "choose", "dropdown", "option"},
+    "check": {"check", "tick", "enable"},
+    "uncheck": {"uncheck", "untick", "disable"},
+    "set_input_files": {"attach", "file", "upload"},
+    "drag_to": {"drag", "drop"},
+    "wait": {"wait", "load", "loaded"},
+}
+ASSERTION_HINTS = {"assert", "check", "confirm", "expect", "see", "should", "verify", "visible", "displayed"}
+LOGIN_HINTS = {"auth", "authenticate", "credential", "credentials", "log", "login", "signin"}
+FIELD_CREDENTIAL_HINTS = {"email", "mail", "password", "passwd", "pwd", "user", "username"}
+SUBMIT_HINTS = {"continue", "login", "signin", "submit"}
 
 
 class MappingValidationError(ValueError):
@@ -269,41 +373,424 @@ def _remaining_action_ids(session: Session, mapping: CaseActionMapping, deleted_
     ]
 
 
+def _safe_steps(case: TestCase) -> list[dict]:
+    try:
+        steps = json.loads(case.steps_json or "[]")
+    except json.JSONDecodeError:
+        return []
+    return [step for step in steps if isinstance(step, dict)]
+
+
+def _normalize_step_index(step: dict, fallback: int) -> int:
+    value = step.get("index", fallback)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _step_display_text(step: dict) -> str:
+    return " ".join(
+        str(value)
+        for value in (step.get("action"), step.get("expected"))
+        if value is not None
+    )
+
+
+def _step_slug(step: dict, step_index: int) -> str:
+    return slugify(step.get("action", f"step_{step_index}"), separator="_")[:40] or f"step_{step_index}"
+
+
+def _tokens(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    return {
+        token
+        for token in TOKEN_RE.findall(text.lower())
+        if token and token not in STOPWORDS
+    }
+
+
+def _expanded_tokens(text: str | None) -> set[str]:
+    tokens = _tokens(text)
+    expanded = set(tokens)
+    if "sign" in tokens and "in" in tokens:
+        expanded.add("login")
+        expanded.add("signin")
+    for token in list(tokens):
+        expanded.update(TOKEN_SYNONYMS.get(token, set()))
+    return expanded - STOPWORDS
+
+
+def _read_trajectory_items(path: str | None) -> list[dict]:
+    if not path:
+        return []
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    if isinstance(data, dict):
+        for key in TRAJECTORY_COLLECTION_KEYS:
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return [data]
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def _coerce_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trajectory_order(item: dict) -> int | None:
+    for key in ORDER_KEYS:
+        value = _coerce_int(item.get(key))
+        if value is not None:
+            return value
+    action = item.get("action")
+    if isinstance(action, dict):
+        for key in ORDER_KEYS:
+            value = _coerce_int(action.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _collect_trajectory_strings(value: Any, key: str | None = None) -> list[str]:
+    if isinstance(value, str):
+        if key is None or key.lower() in TEXTUAL_TRAJECTORY_KEYS:
+            return [value]
+        return []
+    if isinstance(value, (int, float, bool)) or value is None:
+        return []
+    if isinstance(value, list):
+        strings: list[str] = []
+        for item in value:
+            strings.extend(_collect_trajectory_strings(item, key))
+        return strings
+    if isinstance(value, dict):
+        strings: list[str] = []
+        for item_key, item_value in value.items():
+            normalized_key = str(item_key).replace("-", "_").lower()
+            strings.extend(_collect_trajectory_strings(item_value, normalized_key))
+        return strings
+    return []
+
+
+def _trajectory_text(item: dict | None) -> str:
+    if not item:
+        return ""
+    return " ".join(_collect_trajectory_strings(item))
+
+
+def _trajectory_by_action(actions: list[RawAction], items: list[dict]) -> dict[str, str]:
+    if not actions or not items:
+        return {}
+
+    explicit: dict[int, dict] = {}
+    sequential: list[dict] = []
+    for item in items:
+        order = _trajectory_order(item)
+        if order is None:
+            sequential.append(item)
+        else:
+            explicit[order] = item
+
+    by_id: dict[str, str] = {}
+    for position, action in enumerate(actions, start=1):
+        item = explicit.get(action.order_index) or explicit.get(position)
+        if item is None and position <= len(sequential):
+            item = sequential[position - 1]
+        if item is not None and action.id:
+            by_id[action.id] = _trajectory_text(item)
+    return by_id
+
+
+def _action_evidence_text(action: RawAction, trajectory_text: str = "") -> str:
+    return " ".join(
+        str(value)
+        for value in (
+            action.type,
+            action.selector,
+            action.target,
+            action.value,
+            trajectory_text,
+        )
+        if value is not None
+    )
+
+
+def _has_action_hint(action_type: str, step_tokens: set[str]) -> bool:
+    if action_type.startswith("assert_"):
+        return bool(step_tokens & ASSERTION_HINTS)
+    if action_type.startswith("wait_for_"):
+        return bool(step_tokens & ACTION_HINTS["wait"])
+    return bool(step_tokens & ACTION_HINTS.get(action_type, set()))
+
+
+def _is_login_step(step_tokens: set[str]) -> bool:
+    return bool(step_tokens & LOGIN_HINTS)
+
+
+def _action_score(step: dict, action: RawAction, evidence_text: str) -> float:
+    step_text = _step_display_text(step)
+    expected_text = str(step.get("expected") or "")
+    step_tokens = _expanded_tokens(step_text)
+    expected_tokens = _expanded_tokens(expected_text)
+    action_tokens = _expanded_tokens(evidence_text)
+    score = 0.0
+
+    overlap = step_tokens & action_tokens
+    if overlap:
+        score += min(len(overlap), 6) * 1.15
+
+    if _has_action_hint(action.type, step_tokens):
+        score += 1.75
+
+    if action.type.startswith("assert_"):
+        assertion_overlap = (expected_tokens or step_tokens) & action_tokens
+        if assertion_overlap:
+            score += min(len(assertion_overlap), 5) * 1.5
+        if step_tokens & ASSERTION_HINTS:
+            score += 2.0
+
+    if _is_login_step(step_tokens):
+        if action.type == "goto" and action_tokens & {"auth", "login", "signin"}:
+            score += 2.0
+        if action.type == "fill" and action_tokens & FIELD_CREDENTIAL_HINTS:
+            score += 2.5
+        if action.type in {"click", "press"} and action_tokens & SUBMIT_HINTS:
+            score += 2.25
+
+    if step_tokens & {"credential", "credentials"} and action.type == "fill" and action_tokens & FIELD_CREDENTIAL_HINTS:
+        score += 1.5
+
+    return score
+
+
+def _chunk_pattern_score(step: dict, actions: list[RawAction]) -> float:
+    if not actions:
+        return -3.0
+    step_tokens = _expanded_tokens(_step_display_text(step))
+    action_types = [action.type for action in actions]
+    score = 0.0
+
+    if _is_login_step(step_tokens):
+        has_fill = any(action_type == "fill" for action_type in action_types)
+        has_submit = any(action_type in {"click", "press"} for action_type in action_types)
+        if has_fill and has_submit:
+            score += 2.5
+        if action_types and action_types[0] == "goto" and has_fill:
+            score += 1.0
+
+    if step_tokens & ASSERTION_HINTS:
+        if all(action_type.startswith("assert_") for action_type in action_types):
+            score += 2.0
+        elif any(action_type.startswith("assert_") for action_type in action_types):
+            score += 0.75
+
+    if step_tokens & ACTION_HINTS["goto"] and action_types[0] == "goto":
+        score += 1.5
+
+    if sum(1 for action_type in action_types if action_type == "goto") > 1:
+        score -= 4.0
+    if any(action_type == "goto" for action_type in action_types[1:]):
+        score -= 2.0
+
+    return score
+
+
+def _chunk_score(
+    step: dict,
+    actions: list[RawAction],
+    scores: list[float],
+    *,
+    step_position: int,
+    step_count: int,
+    action_start: int,
+    action_end: int,
+    action_count: int,
+) -> float:
+    score = sum(scores) + _chunk_pattern_score(step, actions)
+    if actions:
+        ideal_start = round((step_position - 1) * action_count / step_count)
+        ideal_end = round(step_position * action_count / step_count)
+        score -= 0.05 * (abs(action_start - ideal_start) + abs(action_end - ideal_end))
+        score -= 0.03 * max(0, len(actions) - 1)
+    return score
+
+
+def _fallback_chunks(step_count: int, action_count: int) -> list[list[int]]:
+    chunks: list[list[int]] = []
+    if step_count <= 0:
+        return chunks
+    if action_count == 0:
+        return [[] for _ in range(step_count)]
+    if action_count < step_count:
+        for index in range(step_count):
+            chunks.append([index] if index < action_count else [])
+        return chunks
+
+    base = action_count // step_count
+    remainder = action_count % step_count
+    cursor = 0
+    for step_index in range(step_count):
+        size = base + (1 if step_index >= step_count - remainder else 0)
+        chunks.append(list(range(cursor, cursor + size)))
+        cursor += size
+    return chunks
+
+
+def _planned_chunks(steps: list[dict], actions: list[RawAction], score_matrix: list[list[float]]) -> list[list[int]]:
+    step_count = len(steps)
+    action_count = len(actions)
+    if step_count == 0:
+        return []
+    if action_count == 0:
+        return [[] for _ in steps]
+    if not any(score > 0 for row in score_matrix for score in row):
+        return _fallback_chunks(step_count, action_count)
+
+    best = [[float("-inf")] * (action_count + 1) for _ in range(step_count + 1)]
+    parent: list[list[int | None]] = [[None] * (action_count + 1) for _ in range(step_count + 1)]
+    best[0][0] = 0.0
+
+    for step_position in range(1, step_count + 1):
+        step = steps[step_position - 1]
+        for consumed in range(action_count + 1):
+            for previous in range(consumed + 1):
+                if best[step_position - 1][previous] == float("-inf"):
+                    continue
+                chunk_actions = actions[previous:consumed]
+                chunk_scores = score_matrix[step_position - 1][previous:consumed]
+                candidate = best[step_position - 1][previous] + _chunk_score(
+                    step,
+                    chunk_actions,
+                    chunk_scores,
+                    step_position=step_position,
+                    step_count=step_count,
+                    action_start=previous,
+                    action_end=consumed,
+                    action_count=action_count,
+                )
+                if candidate > best[step_position][consumed]:
+                    best[step_position][consumed] = candidate
+                    parent[step_position][consumed] = previous
+
+    chunks = [[] for _ in steps]
+    consumed = action_count
+    for step_position in range(step_count, 0, -1):
+        previous = parent[step_position][consumed]
+        if previous is None:
+            return _fallback_chunks(step_count, action_count)
+        chunks[step_position - 1] = list(range(previous, consumed))
+        consumed = previous
+    return chunks
+
+
+def _supported_action(
+    step: dict,
+    action: RawAction,
+    score: float,
+    chunk_scores: list[float],
+    action_position: int,
+) -> bool:
+    if score >= 1.0:
+        return True
+    if action.type == "goto" and action_position == 0 and any(item >= 1.5 for item in chunk_scores[1:]):
+        return True
+    if action.type.startswith("wait_for_") and any(item >= 1.5 for item in chunk_scores):
+        return True
+    if action.type == "wait" and any(item >= 1.5 for item in chunk_scores):
+        return True
+    step_tokens = _expanded_tokens(_step_display_text(step))
+    action_tokens = _expanded_tokens(_action_evidence_text(action))
+    return (
+        _is_login_step(step_tokens)
+        and action.type in {"fill", "click", "press"}
+        and bool(action_tokens & (FIELD_CREDENTIAL_HINTS | SUBMIT_HINTS))
+    )
+
+
+def _mapping_status(step: dict, actions: list[RawAction], scores: list[float]) -> str:
+    if not actions:
+        return "unmapped"
+    if any(action.type == "custom_code" for action in actions):
+        return "needs_review"
+    supported = [
+        _supported_action(step, action, score, scores, index)
+        for index, (action, score) in enumerate(zip(actions, scores))
+    ]
+    if all(supported):
+        return "mapped"
+    matched = sum(1 for score in scores if score >= 1.0)
+    if matched and sum(scores) + _chunk_pattern_score(step, actions) >= max(2.0, len(actions) * 1.1):
+        return "mapped" if matched == len(actions) else "needs_review"
+    return "needs_review"
+
+
 def auto_map_case(session: Session, case: TestCase, run_id: str) -> tuple[list[MappingItem], str]:
-    steps = json.loads(case.steps_json or "[]")
+    steps = _safe_steps(case)
     actions = session.exec(
-        select(RawAction).where(RawAction.webwright_run_id == run_id).order_by(RawAction.order_index)
+        select(RawAction)
+        .where(RawAction.webwright_run_id == run_id)
+        .order_by(RawAction.order_index, RawAction.id)
     ).all()
+    run = session.get(WebwrightRun, run_id)
+    trajectory_text_by_id = _trajectory_by_action(
+        actions,
+        _read_trajectory_items(run.trajectory_path if run else None),
+    )
 
     _clear_mappings(session, case.id)
 
     mappings: list[MappingItem] = []
-    status = "mapped"
 
     if not steps:
         return mappings, "needs_review"
 
-    if len(steps) != len(actions):
-        status = "needs_review"
+    evidence_texts = [
+        _action_evidence_text(action, trajectory_text_by_id.get(action.id or "", ""))
+        for action in actions
+    ]
+    score_matrix = [
+        [
+            _action_score(step, action, evidence_text)
+            for action, evidence_text in zip(actions, evidence_texts)
+        ]
+        for step in steps
+    ]
+    chunks = _planned_chunks(steps, actions, score_matrix)
 
     for idx, step in enumerate(steps):
-        step_index = step.get("index", idx + 1)
-        action = actions[idx] if idx < len(actions) else None
-        step_name = slugify(step.get("action", f"step_{step_index}"), separator="_")[:40] or f"step_{step_index}"
+        step_index = _normalize_step_index(step, idx + 1)
+        action_indexes = chunks[idx] if idx < len(chunks) else []
+        chunk_actions = [actions[action_index] for action_index in action_indexes]
+        chunk_scores = [score_matrix[idx][action_index] for action_index in action_indexes]
+        action_ids = [action.id for action in chunk_actions if action.id]
+        step_name = _step_slug(step, step_index)
         mapping = MappingItem(
             tc_step_index=step_index,
-            action_ids=[action.id] if action else [],
+            action_ids=action_ids,
             normalized_step_id=f"flow_{step_index:03d}",
             normalized_step_name=step_name,
             pom_method_name=step_name,
-            status="mapped" if action else "unmapped",
+            status=_mapping_status(step, chunk_actions, chunk_scores),
         )
         mappings.append(mapping)
         _add_mapping(session, case.id, mapping)
 
-    if status == "needs_review":
+    if any(mapping.status != "mapped" for mapping in mappings):
+        status = "needs_review"
         case.status = "needs_review"
     else:
+        status = "mapped"
         case.status = "mapped"
     session.add(case)
     session.commit()

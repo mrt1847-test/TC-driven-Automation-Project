@@ -1,6 +1,6 @@
 # Structuring Spec
 
-Last aligned: 2026-06-05
+Last aligned: 2026-06-11
 
 This document defines how Webwright raw output becomes a maintainable
 Playwright pytest project.
@@ -124,6 +124,26 @@ Mapping review API requirements:
   reviewed case on validation failure;
 - keep legacy `CaseActionMapping.raw_action_id` aligned with the first ordered
   action for backward compatibility.
+
+C6-08 implementation behavior:
+
+- initial auto-mapping uses the selected run's ordered `RawAction` rows as the
+  canonical sequence, then enriches scoring with `trajectory.json` strings when
+  present;
+- trajectory evidence is intentionally tolerant of Webwright shape changes:
+  action/order indexes align explicit events, otherwise list order is used, and
+  malformed/missing trajectory files fall back to raw action evidence;
+- TC step action and expected text are scored against raw action type,
+  selector, target, value, URL/page-title text, and surrounding accessibility
+  text;
+- contiguous low-level actions are grouped into candidate chunks, so one
+  business step can own ordered `goto+fill+fill+click` or similar sequences;
+- every TC step still receives one `CaseActionMapping`; grouped matches persist
+  ordered `CaseActionMappingAction` links and keep the legacy first-action field
+  aligned;
+- unsupported, missing, extra, ambiguous, or low-confidence chunks stay visible
+  as mapping candidates but mark the case `needs_review` instead of blocking raw
+  action review.
 
 ## Step 3: Structured Flow
 
@@ -505,6 +525,11 @@ Done:
 - C6-07 Mapping GET/PUT round-trips ordered multi-action joins, atomically
   replaces/removes stale links, validates selected-case action ownership, and
   keeps the legacy first-action field aligned.
+- C6-08 auto-mapping plans deterministic ordered RawAction chunks per TC step,
+  uses trajectory URL/page-title/selector/target/value/accessibility evidence
+  when available, persists multi-action join rows for grouped matches, marks
+  only low-confidence/extra/missing chunks for review, and keeps malformed or
+  missing trajectory fallback stable.
 - C6-03 action CRUD creates reviewed actions on the selected case's latest run,
   updates only selected-case actions, deletes selected-case actions while
   repairing ordered joins and legacy first-action compatibility, and rejects
