@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from sqlmodel import Session, select
 
-from worker.core.config import new_id
+from worker.core.config import SECRET_PATTERNS, mask_secrets, new_id, secret_env_placeholders
 from worker.models.db import (
     CaseActionMapping,
     CaseActionMappingAction,
@@ -49,10 +51,38 @@ PLANNED_ACTION_TYPES = {
     "assert_hidden",
     "assert_count",
 }
+EXISTING_VALUE_PLACEHOLDER_RE = re.compile(r"\$\{(?:env|data)\.[^}]+\}")
+CREDENTIAL_FIELD_RE = re.compile(
+    r"(api[_\-\s]?key|access[_\-\s]?key|private[_\-\s]?key|password|passwd|passcode|"
+    r"credential|secret|token|bearer|pin|otp|mfa|2fa)",
+    re.IGNORECASE,
+)
+FIELD_TEXT_RE = re.compile(
+    r"(?:get_by_(?:label|placeholder|test_id|text)|locator)\(\s*[rbufRBUF]*['\"]([^'\"]+)",
+    re.IGNORECASE,
+)
+ATTRIBUTE_TEXT_RE = re.compile(
+    r"\[(?:name|id|aria-label|placeholder|type)\s*=\s*['\"]?([^'\"\]]+)",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class CredentialPlaceholder:
+    value: str
+    source: str
 
 
 def _snake(name: str) -> str:
     return name.lower().replace("-", "_").replace(" ", "_")
+
+
+def _method_base_name(mapping: MappingItem, step_name: str) -> str:
+    return _snake(mapping.pom_method_name or step_name)
+
+
+def _scoped_method_name(case: TestCase, mapping: MappingItem, base_name: str) -> str:
+    return f"{_snake(case.automation_key)}__step_{mapping.tc_step_index}_{base_name}"
 
 
 def _action_kind(action: RawAction | None) -> str:
@@ -100,23 +130,139 @@ def _review_reason(action: RawAction) -> str | None:
     return None
 
 
+def _has_existing_placeholder(value: str) -> bool:
+    return bool(EXISTING_VALUE_PLACEHOLDER_RE.search(value))
+
+
+def _placeholder_leaf(text: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").lower()
+    if not normalized:
+        return "secret"
+    return normalized[:48].strip("_") or "secret"
+
+
+def _credential_context(action: RawAction) -> str:
+    return " ".join(part for part in (action.selector, action.target) if part)
+
+
+def _credential_placeholder_path(action: RawAction) -> str:
+    context = _credential_context(action)
+    candidates = [
+        match.group(1)
+        for pattern in (FIELD_TEXT_RE, ATTRIBUTE_TEXT_RE)
+        for match in pattern.finditer(context)
+    ]
+    candidates.append(context)
+    for candidate in candidates:
+        if CREDENTIAL_FIELD_RE.search(candidate):
+            return f"credentials.{_placeholder_leaf(candidate)}"
+    return "credentials.secret"
+
+
+def _is_credential_field(action: RawAction) -> bool:
+    return bool(CREDENTIAL_FIELD_RE.search(_credential_context(action)))
+
+
+def _is_secret_looking_value(value: str) -> bool:
+    text = value.strip()
+    if not text or _has_existing_placeholder(text):
+        return False
+    if mask_secrets(text) != text:
+        return True
+    if any(pattern.search(text) for pattern in SECRET_PATTERNS):
+        return True
+    if len(text) < 16 or any(char.isspace() for char in text):
+        return False
+    classes = sum(
+        any(predicate(char) for char in text)
+        for predicate in (
+            str.islower,
+            str.isupper,
+            str.isdigit,
+            lambda char: not char.isalnum(),
+        )
+    )
+    return classes >= 3
+
+
+def _credential_placeholder(action: RawAction) -> CredentialPlaceholder | None:
+    value = action.value
+    if action.type != "fill" or not value or _has_existing_placeholder(value):
+        return None
+
+    known_secret_placeholders = secret_env_placeholders()
+    if value in known_secret_placeholders:
+        return CredentialPlaceholder(known_secret_placeholders[value], "secret_env_value")
+
+    if _is_credential_field(action):
+        return CredentialPlaceholder(f"${{env.{_credential_placeholder_path(action)}}}", "credential_field")
+
+    if _is_secret_looking_value(value):
+        return CredentialPlaceholder(f"${{env.{_credential_placeholder_path(action)}}}", "secret_literal")
+
+    return None
+
+
+def _credential_safe_target(target: str | None, literal: str | None, placeholder: str | None) -> str | None:
+    if target is None or literal is None or placeholder is None:
+        return target
+    return target.replace(literal, placeholder)
+
+
+def _value_template_from_plan(body_plan: list[dict]) -> str | None:
+    return next(
+        (
+            str(entry["value"])
+            for entry in body_plan
+            if isinstance(entry, dict) and entry.get("value") is not None
+        ),
+        None,
+    )
+
+
+def _mapping_suffix(mapping: MappingItem) -> str:
+    return _snake(mapping.id or f"step_{mapping.tc_step_index}")
+
+
+def _mapping_method(session: Session, page_id: str, mapping_id: str | None) -> PageObjectMethod | None:
+    if not mapping_id:
+        return None
+    return session.exec(
+        select(PageObjectMethod).where(
+            PageObjectMethod.page_object_id == page_id,
+            PageObjectMethod.source_mapping_id == mapping_id,
+        )
+    ).first()
+
+
 def _plan_entry(order: int, mapping_id: str | None, action: RawAction) -> dict:
     review_reason = _review_reason(action)
+    credential = _credential_placeholder(action)
     entry = {
         "order": order,
         "action": action.type,
         "sourceRawActionId": action.id,
         "sourceMappingId": mapping_id,
-        "requiresReview": review_reason is not None,
+        "requiresReview": review_reason is not None or credential is not None,
     }
     if action.selector is not None:
         entry["selector"] = action.selector
     if action.value is not None:
-        entry["value"] = action.value
+        entry["value"] = credential.value if credential else action.value
     if action.target is not None:
-        entry["target"] = action.target
+        entry["target"] = _credential_safe_target(
+            action.target,
+            action.value,
+            credential.value if credential else None,
+        )
     if review_reason:
         entry["reviewReason"] = review_reason
+    if credential:
+        entry["reviewReason"] = "credential_value_placeholder"
+        entry["credentialPlaceholder"] = {
+            "placeholder": credential.value,
+            "source": credential.source,
+        }
     return entry
 
 
@@ -228,11 +374,12 @@ def sync_structured_entities(session: Session, project_id: str, case: TestCase, 
         body_plan, actions, requires_review = build_method_body_plan(mapping, action_by_id)
         flow_requires_review = flow_requires_review or requires_review
         step_name = mapping.normalized_step_name or mapping.pom_method_name or f"step_{mapping.tc_step_index}"
-        method_name = _snake(mapping.pom_method_name or step_name)
+        base_method_name = _method_base_name(mapping, step_name)
+        method_name = _scoped_method_name(case, mapping, base_method_name)
 
         method_type = _method_type(actions, requires_review)
         selector = next((action.selector for action in actions if action.selector is not None), None)
-        value_template = next((action.value for action in actions if action.value is not None), None)
+        value_template = _value_template_from_plan(body_plan)
         body_plan_json = json.dumps(body_plan, sort_keys=True, separators=(",", ":"))
         method_status = (
             PageObjectMethodStatus.draft.value
@@ -243,6 +390,19 @@ def sync_structured_entities(session: Session, project_id: str, case: TestCase, 
         pom = session.exec(
             select(PageObjectMethod).where(PageObjectMethod.page_object_id == page.id, PageObjectMethod.name == method_name)
         ).first()
+        if pom and pom.source_mapping_id != mapping.id:
+            method_name = f"{method_name}__{_mapping_suffix(mapping)}"
+            pom = session.exec(
+                select(PageObjectMethod).where(
+                    PageObjectMethod.page_object_id == page.id,
+                    PageObjectMethod.name == method_name,
+                )
+            ).first()
+        if not pom:
+            existing_mapping_pom = _mapping_method(session, page.id, mapping.id)
+            if existing_mapping_pom and not _method_used_by_other_cases(session, existing_mapping_pom.id, case.id):
+                pom = existing_mapping_pom
+                pom.name = method_name
         if not pom:
             pom = PageObjectMethod(
                 id=new_id("pom"),
@@ -440,6 +600,56 @@ def _method_used_by_other_cases(
     return False
 
 
+def _repair_shared_method_for_case(
+    session: Session,
+    *,
+    case: TestCase,
+    mapping: MappingItem,
+    step: StructuredStep,
+    method: PageObjectMethod,
+) -> PageObjectMethod:
+    step_name = mapping.normalized_step_name or mapping.pom_method_name or step.name or f"step_{mapping.tc_step_index}"
+    base_name = _method_base_name(mapping, step_name)
+    scoped_name = _scoped_method_name(case, mapping, base_name)
+    if method.name == scoped_name:
+        return method
+
+    scoped = session.exec(
+        select(PageObjectMethod).where(
+            PageObjectMethod.page_object_id == method.page_object_id,
+            PageObjectMethod.name == scoped_name,
+        )
+    ).first()
+    if not scoped:
+        scoped = PageObjectMethod(
+            id=new_id("pom"),
+            page_object_id=method.page_object_id,
+            name=scoped_name,
+            method_type=method.method_type,
+            selector=method.selector,
+            value_template=method.value_template,
+            return_type=method.return_type,
+            body_plan_json=method.body_plan_json,
+            source_mapping_id=mapping.id,
+            status=method.status,
+        )
+    else:
+        scoped.method_type = method.method_type
+        scoped.selector = method.selector
+        scoped.value_template = method.value_template
+        scoped.return_type = method.return_type
+        scoped.body_plan_json = method.body_plan_json
+        scoped.source_mapping_id = mapping.id
+        scoped.status = method.status
+        scoped.updated_at = datetime.utcnow()
+    session.add(scoped)
+    session.flush()
+    step.page_object_method_id = scoped.id
+    step.updated_at = datetime.utcnow()
+    session.add(step)
+    return scoped
+
+
 def _mark_raw_refresh_needs_review(
     session: Session,
     *,
@@ -549,8 +759,13 @@ def merge_refreshed_raw_actions(
                 structural_reason = "stable_structure_incomplete"
                 break
             if _method_used_by_other_cases(session, method.id, case.id):
-                structural_reason = "shared_page_object_method"
-                break
+                method = _repair_shared_method_for_case(
+                    session,
+                    case=case,
+                    mapping=next(mapping for mapping in mappings if mapping.id == mapping_id),
+                    step=step,
+                    method=method,
+                )
             methods_by_mapping[mapping_id] = method
 
     matches, unmatched_old, unmatched_new, match_reason = _match_refreshed_actions(old_actions, new_actions)
@@ -596,7 +811,7 @@ def merge_refreshed_raw_actions(
         flow_requires_review = flow_requires_review or requires_review
         method.method_type = _method_type(actions, requires_review)
         method.selector = next((action.selector for action in actions if action.selector is not None), None)
-        method.value_template = next((action.value for action in actions if action.value is not None), None)
+        method.value_template = _value_template_from_plan(body_plan)
         method.body_plan_json = json.dumps(body_plan, sort_keys=True, separators=(",", ":"))
         method.source_mapping_id = mapping.id
         method.status = (

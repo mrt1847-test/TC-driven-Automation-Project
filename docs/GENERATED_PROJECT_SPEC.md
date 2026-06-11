@@ -46,6 +46,14 @@ The generated runner must redact known secret environment values before writing
 metadata must not include secret values or secret-bearing environment variable
 names.
 
+Structuring must also break the raw-script credential path before code
+generation. Raw `fill` values that are entered into password-like fields, match
+known secret environment values, or look like bearer/API/token material must be
+persisted into `PageObjectMethod.body_plan_json` only as `${env.*}`
+placeholders, with the affected entry left review-required. Generated page,
+flow, test, mapping, and refresh-preview output must never include the original
+credential literal.
+
 ## Directory Contract
 
 ```text
@@ -341,6 +349,12 @@ Page object code generation normalizes persisted Playwright locator expressions:
   `select` action are stripped the same way;
 - a leading `page.` locator is scoped to the generated page object as
   `self.page.`.
+- generated page method names are taken from `PageObjectMethod.name`, which is
+  case-scoped by structuring as
+  `{automation_key}__step_{tc_step_index}_{readable_method_base}` to prevent
+  same-named TC steps in different cases from overwriting each other; generated
+  flow files call these scoped names while mappings and step labels keep the
+  shorter reviewed display text.
 
 Method body rendering (C8-11) consumes the full ordered
 `PageObjectMethod.body_plan_json`:
@@ -382,6 +396,9 @@ Value parameterization (C8-12) keeps generated code env-switchable:
   missing paths; env-free pages keep the minimal class shape unchanged;
 - non-placeholder literal values keep their existing `json.dumps` rendering,
   and all rendering stays deterministic for the regeneration guards.
+- credential placeholders produced by structuring use the same rendering path
+  after review, while review-required credential entries remain deterministic
+  comments until a reviewer confirms the placeholder/config contract.
 
 ## Maintenance Contract
 

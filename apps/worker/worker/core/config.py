@@ -80,6 +80,23 @@ def _secret_values(environ: Mapping[str, str] | None = None) -> list[str]:
     return sorted(values, key=len, reverse=True)
 
 
+def _env_placeholder_name(name: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").lower()
+    return normalized or "value"
+
+
+def secret_env_placeholders(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    source = environ or os.environ
+    placeholders: dict[str, str] = {}
+    for name, value in sorted(source.items()):
+        if not value or len(value) < 6:
+            continue
+        if not SECRET_NAME_RE.search(name):
+            continue
+        placeholders.setdefault(value, f"${{env.secrets.{_env_placeholder_name(name)}}}")
+    return dict(sorted(placeholders.items(), key=lambda item: len(item[0]), reverse=True))
+
+
 def mask_secrets(text: str | None, environ: Mapping[str, str] | None = None) -> str:
     if not text:
         return ""

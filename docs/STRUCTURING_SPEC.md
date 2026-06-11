@@ -179,19 +179,34 @@ Planner requirements:
 - represent assertions and waits explicitly;
 - convert hard waits into review warnings unless they are intentionally accepted;
 - support value placeholders from env config or test data;
+- replace credential-like raw `fill` literals with `${env.*}` placeholders
+  before persisting planner entries, including password fields, values matching
+  known secret environment values, and secret-looking token/key strings;
 - mark unsupported actions as `custom` and require review before generation;
-- keep method names deterministic.
+- keep method names deterministic and scoped by stable case identity plus TC
+  step index before the readable method base name, e.g.
+  `{automation_key}__step_{tc_step_index}_{pom_method_name}`, while preserving
+  `StructuredStep.name` and `CaseActionMapping.pom_method_name` as the
+  human-readable review names.
 
 Persisted planner entry contract:
 
 - `order` follows `CaseActionMappingAction.order_index`;
 - `sourceMappingId` and `sourceRawActionId` are present on every entry;
 - `selector`, `value`, and `target` preserve the extracted values without
-  rewriting data/env placeholders;
+  rewriting data/env placeholders, except credential-like raw `fill` literals
+  must be replaced with env placeholders before `body_plan_json` persistence;
 - supported assertion, wait, select, check, upload, and interaction actions
   remain explicit action types;
 - unsupported/missing actions and hard waits set `requiresReview=true` with a
   stable `reviewReason`;
+- credential placeholder substitutions set `requiresReview=true`,
+  `reviewReason=credential_value_placeholder`, and non-secret metadata naming
+  the placeholder/source category, never the original literal;
+- PageObjectMethod names must not be reused across different cases unless a
+  future explicit dedupe layer proves identical canonical body plans and
+  selector/value semantics; the current short-term policy keeps even identical
+  cross-case plans separately scoped to avoid hidden refresh/retire coupling;
 - any review-required entry keeps the PageObjectMethod in `draft`, marks the
   StructuredFlow `needs_review`, and is reported by structure validation.
 
@@ -295,6 +310,10 @@ Merge requirements:
   silently deleting them;
 - update `PageObjectMethod.body_plan_json` from the new raw actions only after
   the mapping/intent match is safe;
+- if an existing selected flow still references a legacy PageObjectMethod shared
+  with another case, clone/repair that method into the selected case's scoped
+  method identity before applying the safe merge, so old collisions do not keep
+  blocking refresh as `shared_page_object_method`;
 - keep old raw artifacts linked for diff/review;
 - never regenerate unrelated cases as part of the merge.
 
@@ -542,3 +561,14 @@ Done:
   values render as runtime `self._env_value(...)` lookups backed by a
   self-contained env-config loader emitted only when placeholders exist
   (see GENERATED_PROJECT_SPEC value parameterization contract).
+- G-05 structuring separates raw credential values before codegen:
+  credential-like `fill` values from password fields, known secret env values,
+  or secret-looking token/key strings are replaced in `body_plan_json`,
+  `target`, and `value_template` with `${env.*}` placeholders, marked
+  `credential_value_placeholder` for review, and kept out of generated source;
+  raw refresh merges reuse the same planner path before preview/regeneration.
+- C7-15 PageObjectMethod identity is case-scoped: structure sync writes
+  generated-page methods as `{automation_key}__step_{tc_step_index}_{base}`,
+  prevents cross-case overwrite for same-named steps, keeps readable mapping
+  names unchanged, and repairs legacy shared methods into scoped methods during
+  selected raw refresh before updating the selected case.

@@ -84,20 +84,19 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 
 
-**Checklist item:** G-05 raw-script credential value separation
+**Checklist item:** C6-08 trajectory-based multi-action auto mapping
 
 
 
-**Why this is next:** C8-12 delivered the `${env.*}` placeholder mechanism
-G-05 depends on. Credential-like values typed during raw generation (password
-fills, secret env values) still flow verbatim from `RawAction.value` into
-`body_plan_json` and generated source. Structuring must detect them, replace
-them with env placeholders, flag the step for review, and never persist the
-literal.
+**Why this is next:** C7-15 closed the method identity overwrite risk. The next
+structuring gap is that `auto_map_case` still pairs TC steps and raw actions by
+index, while real Webwright scripts commonly emit `goto+fill+fill+click` or
+other multi-action chunks for one business step. This leaves many mappings
+manual and starves the ordered multi-action join/planner path.
 
 
 
-**Owning spec:** [GENERATED_PROJECT_SPEC.md](./GENERATED_PROJECT_SPEC.md) (§13.3 architecture), [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md)
+**Owning spec:** [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md)
 
 
 
@@ -105,18 +104,17 @@ literal.
 
 
 
-- Detect credential-like fill values during structuring: password-type
-  selectors/fields, values equal to known secret env values, and
-  secret-looking strings.
+- Replace index-based 1:1 auto mapping with a deterministic grouping planner
+  that can map one TC step to ordered RawAction chunks.
 
-- Replace detected literals with `${env.*}` placeholders before writing
-  `body_plan_json`; mark the affected plan entry/step for review.
+- Use selected run RawAction order and `trajectory.json` evidence when
+  available: navigation/URL/page-title boundaries, selector/target/value text,
+  and surrounding accessibility text.
 
-- Ensure the literal never reaches `body_plan_json`, generated files, or
-  refresh-merge previews; placeholder rendering reuses the C8-12 mechanism.
+- Persist ordered `CaseActionMappingAction` links for grouped matches and mark
+  only ambiguous/low-confidence groups as `needs_review`.
 
-- Update GENERATED_PROJECT_SPEC/STRUCTURING_SPEC contract text for the
-  credential separation rules.
+- Keep behavior stable when trajectory evidence is missing or malformed.
 
 
 
@@ -124,13 +122,13 @@ literal.
 
 
 
-- Focused pytest covering password-field detection, secret-env-value
-  detection, placeholder substitution into body plans, review flagging, and
-  absence of literals in generated output.
+- Focused pytest for login-style `goto+fill+fill+click`, one TC step mapping
+  to many actions, extra/missing actions, assertion-only action mapping,
+  refresh-merge interaction, and trajectory-missing fallback.
 
 - Existing structuring/codegen/regeneration guard tests still pass.
 
-- Checklist G-05 marked `[x]` with verification note.
+- Checklist C6-08 marked `[x]` with verification note.
 
 
 
@@ -146,37 +144,52 @@ Pick the next item from this list after Current Batch is done:
 
 |-------|----------------|---------|
 
-| 1 | C7-15 | POM method identity/collision policy (stop silent cross-case overwrite) |
+| 1 | C7-16 | Selector candidate ranking in body plans |
 
-| 2 | C6-08 | Trajectory-based multi-action auto mapping |
+| 2 | C3-09 | Webwright subprocess cancel |
 
-| 3 | C7-16 | Selector candidate ranking in body plans |
+| 3 | C9-08 | Execution `runner.cli` subprocess cancel |
 
-| 4 | C3-09 | Webwright subprocess cancel |
+| 4 | D4-07 | Generate Raw Worker C2 prompt API GUI wiring |
 
-| 5 | C9-08 | Execution `runner.cli` subprocess cancel |
+| 5 | C12-11 | Artifact read API |
 
-| 6 | D4-07 | Generate Raw Worker C2 prompt API GUI wiring |
+| 6 | C12-12 | Selector-candidates read API |
 
-| 7 | C12-11 | Artifact read API |
+| 7 | C7-13 | Project-level stale/conflict API |
 
-| 8 | C12-12 | Selector-candidates read API |
+| 8 | C1-08, C1-09, C10-07, C10-08, G-04 | Real TestRail/Sheets connector depth |
 
-| 9 | C7-13 | Project-level stale/conflict API |
+| 9 | D5-08 | Worker structure validate in Mapping |
 
-| 10 | C1-08, C1-09, C10-07, C10-08, G-04 | Real TestRail/Sheets connector depth |
+| 10 | I-10 | Third-party legal packaging gate |
 
-| 11 | D5-08 | Worker structure validate in Mapping |
-
-| 12 | I-10 | Third-party legal packaging gate |
-
-| 13 | J.* | Optional Post-MVP extensions (`C7-17` page segmentation lives here) |
+| 11 | J.* | Optional Post-MVP extensions (`C7-17` page segmentation lives here) |
 
 
 
 ## Completed Batch Notes
 
 
+
+- **C7-15 (2026-06-11):** PageObjectMethod identity is now case-scoped as
+  `{automation_key}__step_{tc_step_index}_{base}` while readable mapping/step
+  names remain unchanged. Same-named steps across cases no longer overwrite
+  body plans, identical cross-case plans remain separately scoped, and selected
+  raw refresh repairs legacy shared POMs before merging. Selected generation
+  and retire cleanup preserve/remove the scoped page methods and origins
+  correctly. Single-case legacy POMs are renamed in place to preserve
+  selector/healing links. Focused structuring/raw-refresh/generation/retire
+  tests passed, and the non-e2e Worker suite passed with 150 tests.
+
+- **G-05 (2026-06-11):** Structuring now detects credential-like `fill`
+  values from password fields, known secret env values, and secret-looking
+  token/key strings; replaces body-plan `value`, matching `target`, and
+  `value_template` with `${env.*}` placeholders; marks affected entries/flows
+  for review with `credential_value_placeholder`; and keeps credential literals
+  out of generated page/flow/test output. Raw refresh merge reuses the same
+  planner path. Focused structuring/codegen/raw-refresh/regeneration guard tests
+  passed, and the non-e2e Worker suite passed.
 
 - **C8-12 (2026-06-11):** Generated `goto` now resolves through the project
   default-env `baseUrl` (output config first, template fallback): matching

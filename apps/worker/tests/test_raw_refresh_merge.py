@@ -183,12 +183,68 @@ def test_equivalent_raw_refresh_updates_links_and_body_plan_in_place(
         assert steps[0].id == seeded["step"].id
         assert steps[0].name == "reviewed_equivalent_step"
         assert method.id == seeded["method"].id
-        assert method.name == "reviewed_checkout"
+        assert method.name.endswith("__step_1_reviewed_checkout")
         assert [entry["sourceRawActionId"] for entry in plan] == new_action_ids
         assert plan[0]["value"] == "https://new.example"
         assert plan[1]["selector"] == "page.get_by_role('button', name='Continue')"
         assert plan != old_plan
         assert session.get(DbTestCase, case.id).status == "structured"
+
+
+def test_raw_refresh_merge_replaces_new_credential_literal_before_plan_persist(
+    project_id: str,
+    imported_case: dict,
+) -> None:
+    import worker.core.database as database
+
+    literal = "N3w-password-value!"
+    with Session(database.engine) as session:
+        case = session.get(DbTestCase, imported_case["id"])
+        seeded = _seed_structure(
+            session,
+            project_id=project_id,
+            case=case,
+            suffix="credential",
+            method_name="enter_password",
+            specs=[
+                {
+                    "type": "fill",
+                    "selector": "page.get_by_label('Password')",
+                    "target": "old-password-value",
+                    "value": "old-password-value",
+                },
+            ],
+        )
+        run, new_action_ids = _add_refresh_run(
+            session,
+            project_id=project_id,
+            case=case,
+            suffix="credential",
+            specs=[
+                {
+                    "type": "fill",
+                    "selector": "page.get_by_label('Password')",
+                    "target": f"typed {literal}",
+                    "value": literal,
+                },
+            ],
+        )
+
+        result = merge_refreshed_raw_actions(session, project_id, case, run)
+
+        method = session.get(PageObjectMethod, seeded["method"].id)
+        plan = json.loads(method.body_plan_json)
+
+        assert result["status"] == "needs_review"
+        assert result["reason"] == "planner_review_required"
+        assert [entry["sourceRawActionId"] for entry in plan] == new_action_ids
+        assert plan[0]["value"] == "${env.credentials.password}"
+        assert plan[0]["target"] == "typed ${env.credentials.password}"
+        assert plan[0]["requiresReview"] is True
+        assert plan[0]["reviewReason"] == "credential_value_placeholder"
+        assert literal not in method.body_plan_json
+        assert method.value_template == "${env.credentials.password}"
+        assert method.status == "draft"
 
 
 def test_changed_raw_sequence_marks_review_and_preserves_existing_structure(
