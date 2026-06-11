@@ -337,9 +337,51 @@ Page object code generation normalizes persisted Playwright locator expressions:
 
 - a terminal action already present in a selector expression is stripped before
   the reviewed action is emitted, preventing output such as
-  `.click().click()`;
+  `.click().click()`; alias methods such as `select_option` for the planned
+  `select` action are stripped the same way;
 - a leading `page.` locator is scoped to the generated page object as
   `self.page.`.
+
+Method body rendering (C8-11) consumes the full ordered
+`PageObjectMethod.body_plan_json`:
+
+- every plan entry is rendered in order; multi-action mapped steps emit one
+  line per action instead of only the first entry;
+- interaction coverage includes `click`, `fill`, `press`, `check`, `uncheck`,
+  `hover`, `select` (emitted as `select_option`), `set_input_files` (string or
+  Python list-literal file values), and `drag_to` (target expression scoped to
+  `self.page.`);
+- assertion entries are emitted as Playwright `expect(...)` calls:
+  `assert_text` → `to_contain_text`, `assert_url` → `to_have_url`,
+  `assert_visible`/`assert_hidden` → `to_be_visible`/`to_be_hidden`, and
+  `assert_count` → `to_have_count` with an integer value; the generated page
+  file imports `expect` only when assertions exist;
+- wait entries are emitted as locator `wait_for(state=...)`/`wait_for()` or
+  `page.wait_for_load_state(...)` for load states; `wait_for_request` and
+  `wait_for_response` require expect-context wiring around the triggering
+  action and therefore remain explicit review comments;
+- review-required, unsupported, and missing-action entries stay deterministic
+  comments, and `pass` is appended only when a method has no executable line.
+
+Value parameterization (C8-12) keeps generated code env-switchable:
+
+- `goto` URLs whose scheme+origin match the configured generation base URL are
+  emitted as relative paths (`self.page.goto("/login?next=...")`); the runtime
+  Playwright context `base_url` (env config `baseUrl` / `TC_BASE_URL`) resolves
+  them, so `TC_ENV` switching applies; foreign-origin URLs stay absolute;
+- the generation base URL is resolved deterministically from the project
+  default env config: `generated/config/env.<defaultEnv>.json` first, falling
+  back to the template config, reading `baseUrl`/`base_url`;
+- `${env.dot.path}` placeholders in body-plan values (fill/press/select,
+  `assert_text`/`assert_url`, goto, non-list `set_input_files`) render as
+  runtime lookups `self._env_value("dot.path")`; mixed text renders via
+  `"...{}...".format(self._env_value(...))`;
+- when placeholders are present, the generated page file emits a self-contained
+  `_load_env_config()` helper (reads `config/env.{TC_ENV}.json`, default `stg`)
+  and a `GeneratedPage._env_value()` accessor that raises `KeyError` for
+  missing paths; env-free pages keep the minimal class shape unchanged;
+- non-placeholder literal values keep their existing `json.dumps` rendering,
+  and all rendering stays deterministic for the regeneration guards.
 
 ## Maintenance Contract
 

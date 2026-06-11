@@ -3,10 +3,12 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 from sqlmodel import Session, select
@@ -18,6 +20,7 @@ from worker.models.db import (
     GeneratedFileOrigin,
     GeneratedFileStatus,
     PageObjectMethod,
+    Project,
     RawAction,
     StructuredFlowStatus,
     TestCase,
@@ -154,65 +157,213 @@ def _snake(name: str) -> str:
     return name.lower().replace("-", "_").replace(" ", "_")
 
 
+_PLAYWRIGHT_INTERACTION_METHODS = {
+    "click": "click",
+    "fill": "fill",
+    "press": "press",
+    "check": "check",
+    "uncheck": "uncheck",
+    "hover": "hover",
+    "select": "select_option",
+    "set_input_files": "set_input_files",
+    "drag_to": "drag_to",
+}
+_LOAD_STATES = {"load", "domcontentloaded", "networkidle"}
+_LOCATOR_WAIT_STATES = {"attached", "detached", "visible", "hidden"}
+_ENV_PLACEHOLDER_RE = re.compile(r"\$\{env\.([A-Za-z0-9_][A-Za-z0-9_.\-]*)\}")
+
+
 def _selector_expression(selector: str, action: str) -> str:
     expression_text = selector.strip()
+    terminal_methods = {action, _PLAYWRIGHT_INTERACTION_METHODS.get(action, action)}
     try:
         expression = ast.parse(expression_text, mode="eval").body
         if (
             isinstance(expression, ast.Call)
             and isinstance(expression.func, ast.Attribute)
-            and expression.func.attr == action
+            and expression.func.attr in terminal_methods
         ):
             expression = expression.func.value
         expression_text = ast.unparse(expression)
     except SyntaxError:
         pass
-    if expression_text == "page" or expression_text.startswith("page."):
-        return f"self.{expression_text}"
-    return expression_text
+    return _scoped_expression(expression_text)
+
+
+def _scoped_expression(expression_text: str) -> str:
+    text = expression_text.strip()
+    if text == "page" or text.startswith("page."):
+        return f"self.{text}"
+    return text
+
+
+def _python_value_expression(value: str) -> str:
+    text = value.strip()
+    if text.startswith(("[", "(")):
+        try:
+            parsed = ast.literal_eval(text)
+        except (SyntaxError, ValueError):
+            return _value_expression(value)
+        if isinstance(parsed, (list, tuple)):
+            return text
+    return _value_expression(value)
+
+
+def _value_expression(value: str) -> str:
+    matches = list(_ENV_PLACEHOLDER_RE.finditer(value))
+    if not matches:
+        return json.dumps(value)
+    if len(matches) == 1 and matches[0].span() == (0, len(value)):
+        return f"self._env_value({json.dumps(matches[0].group(1))})"
+    template_parts: list[str] = []
+    args: list[str] = []
+    last = 0
+    for match in matches:
+        template_parts.append(value[last:match.start()].replace("{", "{{").replace("}", "}}"))
+        template_parts.append("{}")
+        args.append(f"self._env_value({json.dumps(match.group(1))})")
+        last = match.end()
+    template_parts.append(value[last:].replace("{", "{{").replace("}", "}}"))
+    return f"{json.dumps(''.join(template_parts))}.format({', '.join(args)})"
+
+
+def _relative_url(url: str, base_url: str | None) -> str | None:
+    if not base_url or _ENV_PLACEHOLDER_RE.search(url):
+        return None
+    try:
+        target = urlsplit(url.strip())
+        base = urlsplit(base_url.strip())
+    except ValueError:
+        return None
+    if target.scheme not in {"http", "https"} or not target.netloc:
+        return None
+    if (target.scheme.lower(), target.netloc.lower()) != (base.scheme.lower(), base.netloc.lower()):
+        return None
+    relative = target.path or "/"
+    if not relative.startswith("/"):
+        relative = f"/{relative}"
+    if target.query:
+        relative = f"{relative}?{target.query}"
+    if target.fragment:
+        relative = f"{relative}#{target.fragment}"
+    return relative
 
 
 def _interaction_line(action: str, selector: str | None, value: str | None) -> str | None:
     if not selector:
         return None
+    method = _PLAYWRIGHT_INTERACTION_METHODS.get(action)
+    if not method:
+        return None
     expression = _selector_expression(selector, action)
-    if action == "fill":
-        return f"{expression}.fill({json.dumps(value or '')})"
-    if action == "press":
-        return f"{expression}.press({json.dumps(value or '')})"
-    if action in {"click", "check", "uncheck", "hover"}:
-        return f"{expression}.{action}()"
+    if action in {"fill", "press", "select"}:
+        return f"{expression}.{method}({_value_expression(value or '')})"
+    if action == "set_input_files":
+        return f"{expression}.{method}({_python_value_expression(value or '')})"
+    if action == "drag_to":
+        if not value:
+            return None
+        return f"{expression}.{method}({_scoped_expression(value)})"
+    return f"{expression}.{method}()"
+
+
+def _assertion_line(action: str, selector: str | None, value: str | None) -> str | None:
+    if action == "assert_url":
+        if value is None:
+            return None
+        return f"expect(self.page).to_have_url({_value_expression(value)})"
+    if not selector:
+        return None
+    expression = _selector_expression(selector, action)
+    if action == "assert_text":
+        if value is None:
+            return None
+        return f"expect({expression}).to_contain_text({_value_expression(value)})"
+    if action == "assert_visible":
+        return f"expect({expression}).to_be_visible()"
+    if action == "assert_hidden":
+        return f"expect({expression}).to_be_hidden()"
+    if action == "assert_count":
+        try:
+            count = int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+        return f"expect({expression}).to_have_count({count})"
     return None
 
 
-def _method_body(pom: PageObjectMethod) -> list[str]:
-    lines: list[str] = []
+def _wait_line(action: str, selector: str | None, value: str | None) -> str | None:
+    # wait_for_request/wait_for_response need to wrap the triggering action in
+    # an expect_* context manager, which cannot be emitted standalone; they
+    # stay as review comments.
+    if action != "wait":
+        return None
+    state = (value or "").strip()
+    if selector:
+        expression = _selector_expression(selector, action)
+        if state in _LOCATOR_WAIT_STATES:
+            return f"{expression}.wait_for(state={json.dumps(state)})"
+        return f"{expression}.wait_for()"
+    if state in _LOAD_STATES:
+        return f"self.page.wait_for_load_state({json.dumps(state)})"
+    return None
+
+
+def _entry_comment(entry: dict, note: str) -> str:
+    action = entry.get("action", "unknown")
+    detail = entry.get("selector") or entry.get("target") or entry.get("value") or ""
+    text = f"# {note}: {action}"
+    if detail:
+        text = f"{text} {detail}"
+    return text
+
+
+def _plan_entry_lines(entry: dict, base_url: str | None = None) -> list[str]:
+    action = str(entry.get("action", ""))
+    selector = entry.get("selector")
+    value = entry.get("value")
+    if entry.get("requiresReview"):
+        reason = entry.get("reviewReason", "review_required")
+        return [_entry_comment(entry, f"review required ({reason})")]
+    if action == "goto":
+        url = value if value is not None else entry.get("target")
+        if url:
+            relative = _relative_url(str(url), base_url)
+            if relative is not None:
+                return [f"self.page.goto({json.dumps(relative)})"]
+            return [f"self.page.goto({_value_expression(str(url))})"]
+        return [_entry_comment(entry, "unsupported generated action")]
+    if action.startswith("assert_"):
+        line = _assertion_line(action, selector, value)
+    elif action == "wait" or action.startswith("wait_for_"):
+        line = _wait_line(action, selector, value)
+    else:
+        line = _interaction_line(action, selector, value)
+    if line:
+        return [line]
+    return [_entry_comment(entry, "unsupported generated action")]
+
+
+def _method_body(pom: PageObjectMethod, base_url: str | None = None) -> list[str]:
     try:
         plan = json.loads(pom.body_plan_json or "[]")
     except json.JSONDecodeError:
         plan = []
-    if plan:
-        entry = plan[0]
-        action = entry.get("action", pom.method_type)
-        selector = entry.get("selector")
-        value = entry.get("value") or entry.get("target")
-        if action == "goto" and value:
-            lines.append(f"        self.page.goto({json.dumps(value)})")
-        elif interaction := _interaction_line(action, selector, value):
-            lines.append(f"        {interaction}")
-        else:
-            lines.append(f"        # {action}: {entry.get('target', '')}")
-            lines.append("        pass")
-    elif pom.selector:
+    entries = [entry for entry in plan if isinstance(entry, dict)]
+    if not entries and pom.selector:
         action = "goto" if pom.method_type == "navigate" else pom.method_type
+        entry: dict = {"action": action}
         if action == "goto":
-            lines.append(f"        self.page.goto({json.dumps(pom.value_template or '')})")
-        elif interaction := _interaction_line(action, pom.selector, pom.value_template):
-            lines.append(f"        {interaction}")
+            entry["value"] = pom.value_template or ""
         else:
-            lines.append(f"        # {action}: unsupported generated interaction")
-            lines.append("        pass")
-    else:
+            entry["selector"] = pom.selector
+            entry["value"] = pom.value_template
+        entries = [entry]
+
+    lines: list[str] = []
+    for entry in entries:
+        lines.extend(f"        {line}" for line in _plan_entry_lines(entry, base_url))
+    if not any(not line.lstrip().startswith("#") for line in lines):
         lines.append("        pass")
     return lines
 
@@ -644,7 +795,11 @@ def _runtime_manifest_content(settings: object, profile: object, template_path: 
     return json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
-def _page_content(session: Session, generations: list[CaseGeneration]) -> str:
+def _page_content(
+    session: Session,
+    generations: list[CaseGeneration],
+    base_url: str | None = None,
+) -> str:
     page_methods: dict[str, list[str]] = {}
     for generation in sorted(generations, key=lambda item: (item.case.automation_key, item.case.id)):
         for step in generation.steps:
@@ -654,10 +809,44 @@ def _page_content(session: Session, generations: list[CaseGeneration]) -> str:
             if pom and pom.name not in page_methods:
                 page_methods[pom.name] = [
                     f"    def {pom.name}(self):",
-                    *_method_body(pom),
+                    *_method_body(pom, base_url),
                     "",
                 ]
-    lines = ["class GeneratedPage:", "    def __init__(self, page):", "        self.page = page", ""]
+    body_lines = [line for body in page_methods.values() for line in body]
+    uses_expect = any(line.lstrip().startswith("expect(") for line in body_lines)
+    uses_env = any("self._env_value(" in line for line in body_lines)
+    lines: list[str] = []
+    if uses_env:
+        lines.extend(["import json", "import os", "from pathlib import Path"])
+        if uses_expect:
+            lines.extend(["", "from playwright.sync_api import expect"])
+        lines.extend(["", ""])
+        lines.extend([
+            "def _load_env_config():",
+            "    env = os.environ.get(\"TC_ENV\", \"stg\")",
+            "    path = Path(__file__).resolve().parents[1] / \"config\" / f\"env.{env}.json\"",
+            "    if not path.exists():",
+            "        return {\"name\": env}",
+            "    return json.loads(path.read_text(encoding=\"utf-8\"))",
+            "",
+            "",
+        ])
+    elif uses_expect:
+        lines.extend(["from playwright.sync_api import expect", "", ""])
+    lines.extend(["class GeneratedPage:", "    def __init__(self, page):", "        self.page = page"])
+    if uses_env:
+        lines.extend([
+            "        self._env_config = _load_env_config()",
+            "",
+            "    def _env_value(self, path):",
+            "        value = self._env_config",
+            "        for key in path.split(\".\"):",
+            "            if not isinstance(value, dict) or key not in value:",
+            "                raise KeyError(f\"Missing env config value: {path}\")",
+            "            value = value[key]",
+            "        return str(value)",
+        ])
+    lines.append("")
     for method_name in sorted(page_methods):
         lines.extend(page_methods[method_name])
     return "\n".join(lines)
@@ -696,6 +885,40 @@ def _merge_mapping_entries(existing: list[dict], replacements: list[dict]) -> li
     return merged
 
 
+def _resolved_template_path(profile: object) -> Path:
+    template_path = Path(getattr(profile, "template_path", "") or "")
+    if not template_path.exists():
+        template_path = Path(__file__).resolve().parents[4] / "packages" / "generated-template"
+    return template_path
+
+
+def _generation_base_url(
+    session: Session,
+    project_id: str,
+    output: Path,
+    template_path: Path,
+) -> str | None:
+    project = session.get(Project, project_id)
+    default_env = ((project.default_env if project else "") or "").strip()
+    if not default_env:
+        runner = _settings_section(load_settings(), "runner")
+        default_env = _manifest_string(runner.get("defaultEnv")) or "stg"
+    for root in (output, template_path):
+        path = root / "config" / f"env.{default_env}.json"
+        if not path.is_file():
+            continue
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(config, dict):
+            continue
+        base = config.get("baseUrl") or config.get("base_url")
+        if isinstance(base, str) and base.strip():
+            return base.strip()
+    return None
+
+
 def _latest_generation(session: Session, case: TestCase) -> CaseGeneration | None:
     flow = get_latest_flow(session, case.id)
     if not flow:
@@ -714,9 +937,7 @@ def generate_project(
 ) -> GenerationResult:
     settings = load_settings()
     profile = resolve_runtime(settings)
-    template_path = Path(profile.template_path)
-    if not template_path.exists():
-        template_path = Path(__file__).resolve().parents[4] / "packages" / "generated-template"
+    template_path = _resolved_template_path(profile)
     runtime_manifest_content = _runtime_manifest_content(settings, profile, template_path)
     output = project_root / "generated"
     selection_requested = case_ids is not None
@@ -814,7 +1035,8 @@ def generate_project(
 
     mapping_relative_path = "mappings/cases.yaml"
     mapping_path = output / mapping_relative_path
-    page_content = _page_content(session, list(shared_generations.values()))
+    generation_base_url = _generation_base_url(session, project_id, output, template_path)
+    page_content = _page_content(session, list(shared_generations.values()), generation_base_url)
     mapping_content = yaml.dump({"cases": mapping_entries}, allow_unicode=True, sort_keys=False)
     existing_mapping_origins = (
         set()
@@ -1160,7 +1382,12 @@ def retire_generated_case(
                 continue
             generations.append(generation)
         if relative_path == "pages/generated_page.py":
-            content = _page_content(session, generations)
+            template_path = _resolved_template_path(resolve_runtime(load_settings()))
+            content = _page_content(
+                session,
+                generations,
+                _generation_base_url(session, project_id, output, template_path),
+            )
 
         refreshed_origins: set[Origin] = set()
         automation_keys: set[str] = set()

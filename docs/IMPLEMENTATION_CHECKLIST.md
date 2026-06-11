@@ -1,6 +1,6 @@
 ﻿# Implementation Checklist
 
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-11
 **Current phase:** Post-MVP
 **Architecture:** [webwright_automation_generator_architecture.md](../webwright_automation_generator_architecture.md)  
 **Product workspaces:** [PRODUCT_PILLARS.md](./PRODUCT_PILLARS.md)  
@@ -23,15 +23,15 @@
 |----------|------|-------|
 | A. Infra | 33 | 33 |
 | B. Template | 20 | 20 |
-| C. Worker | 87 | 98 |
+| C. Worker | 89 | 104 |
 | D. GUI | 49 | 53 |
 | E. E2E | 12 | 12 |
 | F. Errors | 4 | 4 |
-| G. Security | 3 | 4 |
+| G. Security | 3 | 5 |
 | H. MVP Gates | 4 | 4 |
 | I. Quality | 9 | 10 |
 
-Post-MVP optional extensions live in section **J** but keep their C/D ID prefixes (`C7-14`, `C12-13`, `D1-08`, `D9-04`).
+Post-MVP optional extensions live in section **J** but keep their C/D ID prefixes (`C7-14`, `C7-17`, `C12-13`, `D1-08`, `D9-04`).
 
 
 ## Implementation audit (2026-06-02)
@@ -55,6 +55,17 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - **Resolved:** C8-07 now persists complete `GeneratedFileOrigin` links and replaces stale origin sets on regeneration; C7-10 detects edited/stale/conflict generated-file state; C8-06 enforces deterministic full/selected regeneration preflight before rewrites/deletes; C8-04 makes generated output Git-ready while preserving existing Git metadata; C8-08 writes a deterministic generated-project runtime manifest from template and RuntimeProfile defaults; C9-07 caches successful generated runtime readiness per project/runtime fingerprint.
 - **Resolved:** C12-06 applies accepted selector proposals through guarded selected regeneration with conflict rollback and rerun context; C12-07 adds project-enabled auto-apply guardrails for safe selector proposals.
 - **Resolved:** C2-04 persists project-scoped batch prompt and per-case overrides in the Worker and wires them into Webwright prompt generation without changing no-context runs. C2-05 persists built-in and project prompt presets separately without applying them to run prompts yet. C2-06 adds a read-only prompt preview API that combines base prompt, optional preset guidance, and saved batch/case context without creating run/history rows. C2-07 records immutable per-run Webwright prompt payload snapshots for audit/history.
+
+## Structuring/codegen gap audit (2026-06-11)
+
+Scope checked: `structuring_service.py`, `mapping.py`, `project_generator.py` against STRUCTURING_SPEC and GENERATED_PROJECT_SPEC. The structured data model (body plans, ordered joins, origins, guards) is ahead of the final code generation layer, which silently drops most of it.
+
+- **Codegen renders only `body_plan_json[0]`:** `_method_body` emits the first plan entry only, so multi-action mapped steps (C6-07/C7-11) lose all subsequent actions in generated code. Tracked as **C8-11**.
+- **No assertion/wait/select/upload codegen:** `_interaction_line` supports only `fill/press/click/check/uncheck/hover`; assertion and wait plan entries become `# comment` + `pass`, so generated tests verify nothing from the TC expected result. Tracked as **C8-11**.
+- **Values are hard-coded:** generated `goto` uses absolute raw-script URLs (env switching via `TC_ENV`/`base_url` does not actually apply), and raw `fill` values — including credentials typed during raw generation — flow verbatim into generated source. Tracked as **C8-12** (parameterization) and **G-05** (credential value separation).
+- **Single `GeneratedPage` god object + silent method overwrite:** `sync_structured_entities` upserts POMs by `(page, method_name)` where names come from slugified TC step text, so similar steps across cases overwrite each other's selector/body plan, and the resulting shared methods then block raw refresh merges (`shared_page_object_method`). Tracked as **C7-15**; URL/route-based page segmentation as optional **C7-17**.
+- **Auto-mapping is index-based 1:1:** `auto_map_case` pairs `steps[i] ↔ actions[i]`, but raw scripts almost always have more actions than TC steps, forcing manual remapping of nearly every case and starving the multi-action join model. Tracked as **C6-08**.
+- **SelectorCandidate rows are unused at structuring time:** body plans copy raw selectors verbatim instead of preferring stable candidates (test-id > role > text > css), leaving selector stability entirely to after-the-fact self-healing. Tracked as **C7-16**.
 
 ---
 
@@ -207,6 +218,7 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C6-05** normalized step / POM method 이름 — §5.9 | Phase 1 | Layer: Worker | Depends: C6-03
 - [x] **C6-06** Mapping API — §7.4 | Phase 1 | Layer: Worker | Depends: C6-01
 - [x] **C6-07** TC step ↔ multiple raw actions join 저장 — Spec: DB_SCHEMA, STRUCTURING_SPEC | Phase 1 | Layer: Worker | Depends: A2-08, C6-06 (verified 2026-06-04: Mapping GET/PUT round-trips ordered `action_ids`, atomically replaces/removes join rows, aligns legacy `raw_action_id`, and rejects invalid/foreign action IDs before mutation; focused mapping tests passed)
+- [ ] **C6-08** trajectory 기반 multi-action 자동 매핑 — Spec: STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C5-02, C6-07 (replace index-based 1:1 `auto_map_case` with navigation/URL-boundary grouping from `trajectory.json` plus step-text/action-target similarity so one TC step maps to ordered multi-action groups; ambiguous groupings stay `needs_review`)
 
 ### C7. Structuring Service — §5.10
 
@@ -223,6 +235,8 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C7-11** structured method body planner coverage — Spec: STRUCTURING_SPEC | Phase 2 | Layer: Worker | Depends: C5-03, C6-07, C7-08 (verified 2026-06-04: structuring compiles ordered multi-run/multi-action mappings into deterministic traceable body plans, preserves assertion/wait/select/check/upload selectors and value templates, refreshes existing POM plans, and forces review for unsupported/missing actions and hard waits; focused and related tests passed)
 - [x] **C7-12** selected raw refresh merge into existing structure — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 2 | Layer: Worker | Depends: C7-11, C8-07 (verified 2026-06-05: selected Webwright reruns conservatively match equivalent replacement actions, preserve reviewed mapping/flow/step/POM identities, names, order, and unrelated cases, remap raw-action links and refresh safe body plans in place, and mark count/order/ambiguity/shared-method conflicts as `needs_review`; focused and related structuring/traceability tests passed)
 - [ ] **C7-13** project-level stale/conflict API — Spec: API_SPEC, STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C7-10, C8-06 (project-wide edited/stale/conflict summary beyond per-case `structure/validate`)
+- [ ] **C7-15** POM method identity/collision policy — Spec: STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C7-08, C7-12 (stop silent cross-case overwrites: `sync_structured_entities` upserts methods by slugified step name, so equal names from different cases replace each other's selector/body plan and then block raw refresh as `shared_page_object_method`; scope method names per case or dedupe only on identical body plans)
+- [ ] **C7-16** selector candidate ranking in body plans — Spec: STRUCTURING_SPEC, SELF_HEALING_SPEC | Phase 5 | Layer: Worker | Depends: C12-02, C7-11 (apply a selector preference policy — test-id > role > text > css — using persisted `SelectorCandidate` confidence when compiling body plans, instead of copying raw selectors verbatim; record the chosen/runner-up candidates for review and healing)
 
 ### C8. Project Generator Service — §5.11
 
@@ -236,6 +250,8 @@ Scope checked: RuntimeProfile, Webwright adapter, generated runtime bootstrap, g
 - [x] **C8-08** generated-project runtime manifest — Spec: GENERATED_PROJECT_SPEC, RUNTIME_SPEC | Phase 2 | Layer: Worker | Depends: C8-03, B3-04 (verified 2026-06-05: generation writes deterministic `config/runtime-manifest.json` with requirements, Python/runtime defaults, Playwright browser/cache expectations, fixture policy, and standalone/Studio commands; tracks the manifest as generated metadata, keeps selected regeneration stable unless runtime inputs change, and blocks edited manifests before overwrite; `python -m pytest tests/test_regeneration_guard.py tests/test_generated_file_origins.py tests/test_incremental_generation.py -q` passed)
 - [x] **C8-09** selected TC incremental regeneration — Spec: STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C8-06, C8-07, C7-12 (verified 2026-06-05: selected `caseIds` default to incremental generation, reuse merged structured flows, rewrite selected tests/flows plus origin-linked shared page/mapping files, merge `cases.yaml`, replace origins only for rewritten files, preserve unrelated generated/runtime/artifact files and metadata, stop on `needs_review`, and return deterministic affected/changed/preserved summaries; focused Worker/API, origin, and structuring tests passed)
 - [x] **C8-10** TC retire/delete generated artifact cleanup — Spec: STRUCTURING_SPEC, API_SPEC | Phase 2 | Layer: Worker | Depends: C8-07, C8-09 (verified 2026-06-05: explicit human-confirmed soft retire/delete preflights impacted file status/hash/origins, removes selected private test/flow files, marks metadata obsolete while preserving audit origins, rebuilds shared page/mapping files from active cases, preserves shared methods and unrelated content/history, and stops without cleanup on edited or unproven shared conflicts; focused and related generation/origin tests passed)
+- [x] **C8-11** generated method body full-plan rendering — Spec: STRUCTURING_SPEC, GENERATED_PROJECT_SPEC | Phase 5 | Layer: Worker | Depends: C7-11, C8-01 (verified 2026-06-11: `_method_body` renders every ordered `body_plan_json` entry in order; codegen now covers `select`→`select_option`, `set_input_files` with list-literal support, `drag_to` with page-scoped targets, `press`, locator `wait_for(state=...)`/bare `wait_for()`/`wait_for_load_state`, and `assert_text/url/visible/hidden/count` emitted as Playwright `expect(...)`; `wait_for_request/response`, review-required, and unsupported entries remain explicit deterministic comments with `pass` only when no executable line exists; generated page imports `expect` only when assertions exist; terminal-action stripping extended to method aliases like `select_option`; `python -m pytest tests/test_generated_codegen.py tests/test_incremental_generation.py tests/test_regeneration_guard.py tests/test_generated_file_origins.py tests/test_generated_file_status.py tests/test_retire_cleanup.py tests/test_healing_proposals.py tests/test_structuring_planner.py tests/test_raw_refresh_merge.py tests/test_raw_refresh_regeneration.py tests/e2e/test_raw_refresh_regeneration.py tests/e2e/test_retire_cleanup.py -q` passed; pre-existing local Webwright-run failures in `e2e/test_generation`/`mvp1`/`mvp2` reproduce without this change and are unrelated to codegen)
+- [x] **C8-12** generated value parameterization — Spec: GENERATED_PROJECT_SPEC, STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C8-11, B3-04 (verified 2026-06-11: `goto` URLs whose scheme+origin match the project default-env `baseUrl` — resolved deterministically from `generated/config/env.<defaultEnv>.json` with template-config fallback — emit as relative paths resolved by the runtime Playwright context `base_url` so `TC_ENV` switching applies, foreign origins stay absolute; `${env.dot.path}` placeholders in fill/press/select, `assert_text/url`, goto, and non-list `set_input_files` values render as runtime `self._env_value(...)` lookups with mixed-text `.format(...)` support, backed by a self-contained `_load_env_config()`/`_env_value()` helper emitted only when placeholders exist; non-placeholder literals keep `json.dumps` rendering and retire-path page rebuilds use the same base-url resolution; `python -m pytest tests/test_generated_codegen.py -q` (19 passed incl. new relative/foreign goto, placeholder, determinism, env-helper emission tests) and full `python -m pytest tests --ignore=tests/e2e -q` (141 passed) green; e2e regeneration/retire suites passed while the known pre-existing live-Webwright environment failures persist unchanged on a clean tree)
 
 ### C9. Project Runner Service — §5.13
 
@@ -410,6 +426,7 @@ Persistent settings surface after Setup Wizard. Same fields as D2 must remain ed
 - [x] **G-02** 로그 마스킹 — §13.2 | Phase 5 | Layer: Worker | Depends: A4-03 (verified 2026-06-06: Worker `mask_secrets` now redacts provider keys, bearer tokens, password assignments, session cookies, and secret env values; WebSocket log buffers mask centrally; execution/export persisted messages use the same redaction; generated-template `secret_redaction` patterns aligned; `python -m pytest tests/test_log_masking.py tests/test_generated_runtime.py tests/e2e/test_cli_standalone.py -q` passed)
 - [x] **G-03** generated project secret 분리 — §13.3 | Phase 1 | Layer: Template | Depends: B1-03 (verified 2026-06-05: generated-template runner redacts secret env values before writing stdout/stderr/results artifacts, Worker runner/bootstrap artifacts apply the same value-based masking, template copy skips `.env*` and local secret override config files, generated `.gitignore` ignores secret overrides, and runtime manifests exclude API key values/names; `python -m pytest tests/test_generated_runtime.py tests/test_generated_template_fixture_policy.py tests/test_regeneration_guard.py tests/e2e/test_cli_standalone.py -q` and `npm run build` passed)
 - [ ] **G-04** connector OAuth/token storage — §8.2, §13.1 | Phase 4 | Layer: Infra | Depends: G-01, A3-03 | Spec: API_SPEC (TestRail/Google Sheets credentials via OS credential store without persisting tokens in `settings.json`)
+- [ ] **G-05** raw-script credential value separation — §13.3 | Phase 5 | Layer: Worker | Depends: G-03, C8-12 | Spec: GENERATED_PROJECT_SPEC (close the `RawAction.value` → body plan → generated source path: detect credential-like fill values — password fields, known secret env values, secret-looking strings — replace them with env placeholders during structuring, flag them for review, and never write the literal into `body_plan_json` or generated files)
 
 ---
 
@@ -443,6 +460,7 @@ Optional product depth after MVP gates. These are tracked separately from the co
 
 - [ ] **C12-13** extended healing proposal kinds — Spec: SELF_HEALING_SPEC, DB_SCHEMA | Phase 5 | Layer: Worker | Depends: C12-05 | Spec: DB_SCHEMA (`wait_adjust`, `assertion_update`, `pom_method_patch` beyond `selector_replace`)
 - [ ] **C7-14** generated protected regions — Spec: STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C7-10, C8-06 | Spec: STRUCTURING_SPEC (manual-edit protected regions during regeneration; conflict detection exists, region preservation does not)
+- [ ] **C7-17** PageObject segmentation by URL/route — Spec: STRUCTURING_SPEC | Phase 5 | Layer: Worker | Depends: C7-15, C6-08 | Spec: STRUCTURING_SPEC (split the single project-wide `GeneratedPage` into page objects grouped by trajectory URL/route boundaries so large projects avoid a god object; generation, origins, and retire cleanup must follow the segmented files)
 - [ ] **D1-08** automation_key deep linking — Spec: UI_UX_DIRECTION, PRODUCT_PILLARS | Phase 5 | Layer: GUI | Depends: D1-05 | Spec: UI_UX_DIRECTION (route/deeplink to a case by `automation_key` beyond persisted handoff state)
 - [ ] **D9-04** self-healing auto-apply Settings toggle — Spec: SELF_HEALING_SPEC, API_SPEC | Phase 5 | Layer: GUI | Depends: C12-07, D9-02 | Spec: API_SPEC (`self_healing.autoApplyProjectIds` exposed as structured Settings control instead of advanced JSON only)
 

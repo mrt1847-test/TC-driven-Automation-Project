@@ -529,3 +529,16 @@ Done:
 - E-12 feature-removed TC retire cleanup E2E proves diagnosis-bound retire
   preview/apply removes only the selected TC artifacts while preserving unrelated
   generated cases and execution evidence.
+- C8-11 code generation renders the full ordered `body_plan_json` per method:
+  all plan entries emit in order, planned `select`/`set_input_files`/`drag_to`
+  interactions, locator/load-state waits, and `assert_*` entries materialize as
+  Playwright `expect(...)` assertions, while `wait_for_request/response`,
+  review-required, and unsupported entries remain deterministic review
+  comments (see GENERATED_PROJECT_SPEC code generation contract).
+- C8-12 code generation parameterizes values: `goto` URLs matching the
+  configured default-env `baseUrl` origin emit as relative paths resolved by
+  the runtime context `base_url` (so `TC_ENV` switching applies), foreign
+  origins stay absolute, and `${env.dot.path}` placeholders in body-plan
+  values render as runtime `self._env_value(...)` lookups backed by a
+  self-contained env-config loader emitted only when placeholders exist
+  (see GENERATED_PROJECT_SPEC value parameterization contract).
