@@ -121,16 +121,19 @@ function startWorker(): void {
 
   const workerDir = getWorkerDir()
   const python = resolvePythonExecutable()
-  workerProcess = spawn(
+  const proc = spawn(
     python,
     ['-m', 'uvicorn', 'worker.main:app', '--host', '127.0.0.1', '--port', String(WORKER_PORT)],
     { cwd: workerDir, env: buildWorkerEnv() }
   )
-  workerProcess.stdout.on('data', (d) => logWorkerChunk('stdout', d))
-  workerProcess.stderr.on('data', (d) => logWorkerChunk('stderr', d))
-  workerProcess.on('exit', () => {
-    detachWorkerStreamHandlers(workerProcess!)
-    workerProcess = null
+  workerProcess = proc
+  proc.stdout.on('data', (d) => logWorkerChunk('stdout', d))
+  proc.stderr.on('data', (d) => logWorkerChunk('stderr', d))
+  proc.on('exit', () => {
+    detachWorkerStreamHandlers(proc)
+    if (workerProcess === proc) {
+      workerProcess = null
+    }
     if (workerKillTimer) {
       clearTimeout(workerKillTimer)
       workerKillTimer = null

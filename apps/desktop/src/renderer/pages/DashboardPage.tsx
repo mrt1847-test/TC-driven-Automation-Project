@@ -64,18 +64,19 @@ export function DashboardPage() {
         </button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(16rem,22rem)_1fr]">
-        <section className="space-y-3">
+      <div className="grid gap-4 xl:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]">
+        <section className="min-w-0 space-y-3">
           <h3 className="font-semibold">Projects</h3>
           <div className="grid gap-2">
             {projects.map((p) => (
               <button
                 key={p.id}
-                className={`text-left p-3 rounded border ${currentProject?.id === p.id ? 'border-blue-500 bg-slate-800' : 'border-slate-700 hover:bg-slate-900'}`}
+                className={`min-w-0 text-left p-3 rounded border ${currentProject?.id === p.id ? 'border-blue-500 bg-slate-800' : 'border-slate-700 hover:bg-slate-900'}`}
                 onClick={() => setCurrentProject(p)}
+                title={`${p.name}\n${p.root_path}`}
               >
-                <div className="font-medium">{p.name}</div>
-                <div className="mt-1 truncate text-xs text-slate-400">{p.root_path}</div>
+                <div className="truncate font-medium">{p.name}</div>
+                <div className="mt-1 text-xs text-slate-500">Env {p.default_env || 'stg'}</div>
               </button>
             ))}
             {!projects.length && (
@@ -86,26 +87,33 @@ export function DashboardPage() {
           </div>
         </section>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <section className="rounded border border-slate-800 bg-slate-900/40 p-4">
             <h3 className="font-semibold">Current Project</h3>
             {currentProject ? (
-              <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-                <div>
+              <dl className="mt-3 grid min-w-0 gap-3 text-sm sm:grid-cols-2">
+                <div className="min-w-0">
                   <dt className="text-xs text-slate-500">Name</dt>
-                  <dd className="mt-1">{currentProject.name}</dd>
+                  <dd className="mt-1 truncate" title={currentProject.name}>{currentProject.name}</dd>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <dt className="text-xs text-slate-500">Default Env</dt>
                   <dd className="mt-1">{currentProject.default_env}</dd>
                 </div>
-                <div className="sm:col-span-2">
+                <div className="min-w-0 sm:col-span-2">
                   <dt className="text-xs text-slate-500">Root Path</dt>
-                  <dd className="mt-1 break-all text-slate-300">{currentProject.root_path}</dd>
+                  <dd className="mt-1 truncate text-slate-300" title={currentProject.root_path}>
+                    {currentProject.root_path}
+                  </dd>
                 </div>
-                <div className="sm:col-span-2">
+                <div className="min-w-0 sm:col-span-2">
                   <dt className="text-xs text-slate-500">Generated Project</dt>
-                  <dd className="mt-1 break-all text-slate-300">{currentProject.generated_project_path || 'Not generated yet'}</dd>
+                  <dd
+                    className="mt-1 truncate text-slate-300"
+                    title={currentProject.generated_project_path || 'Not generated yet'}
+                  >
+                    {currentProject.generated_project_path || 'Not generated yet'}
+                  </dd>
                 </div>
               </dl>
             ) : (
