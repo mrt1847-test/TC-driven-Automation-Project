@@ -128,6 +128,159 @@ class _Clock:
         return real_datetime(2026, 6, 12, 0, 0, max(cls.current_second, 1))
 
 
+class _SameSecondClock:
+    @classmethod
+    def now(cls, tz=None):
+        return real_datetime(2026, 6, 12, 0, 0, 0, tzinfo=tz)
+
+    @classmethod
+    def utcnow(cls):
+        return real_datetime(2026, 6, 12, 0, 0, 0)
+
+
+def test_wsl_command_builder_passes_unsafe_values_as_positional_argv(tmp_path: Path) -> None:
+    prompt = "Prompt with spaces; $(touch hacked) 'single' \"double\" & 한글"
+    webwright_root = "/mnt/c/QA/Webwright Root (한글) & 'quoted'"
+    output_root = tmp_path / "output dir (한글) & shell"
+    cli_args = webwright_adapter._build_webwright_cli_args(
+        python_path="python",
+        config_args=[
+            "base config.yaml",
+            "model_openai.yaml",
+            "model.model_name=gpt-5-mini; echo bad",
+            "environment.shell=/mnt/c/Program Files/Git/bin/bash.exe && bad",
+            "agent.step_limit=30",
+        ],
+        prompt=prompt,
+        start_url="https://example.test/path?q=one&name='two'",
+        automation_key="case key $(bad) & 한글",
+        output_root=output_root,
+    )
+
+    wsl_args = webwright_adapter._build_wsl_webwright_args(webwright_root, cli_args)
+
+    assert wsl_args[:4] == ["wsl.exe", "bash", "-lc", webwright_adapter.WSL_WEBWRIGHT_SCRIPT]
+    assert wsl_args[4] == "tc-studio-webwright"
+    assert wsl_args[5] == webwright_root
+    assert wsl_args[6:] == cli_args
+    assert webwright_root not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+    assert prompt not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+    assert str(output_root) not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+    assert "$(touch hacked)" not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+    assert "echo bad" not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+
+
+def test_wsl_webwright_run_uses_argv_safe_wrapper(monkeypatch, tmp_path: Path) -> None:
+    session, case = _session_with_case(tmp_path)
+    profile = _Profile(tmp_path / "Webwright Root (한글) & shell", tmp_path / "runs dir (한글) & shell")
+    profile.execution_mode = "wsl"
+    profile.webwright_root = "/mnt/c/QA/Webwright Root (한글) & 'quoted'"
+    profile.base_config = "base config.yaml"
+    profile.model_config = "model openai.yaml"
+    profile.model_name = "gpt-5-mini; echo bad"
+    profile.webwright_shell = "/mnt/c/Program Files/Git/bin/bash.exe && bad"
+    profile.webwright_step_limit = 37
+    captured_args: list[str] = []
+    captured_kwargs: dict[str, object] = {}
+    start_url = "https://example.test/path?q=one&name='two'&lang=한글"
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        captured_args.extend(str(arg) for arg in args)
+        captured_kwargs.update(kwargs)
+        output_root = Path(args[args.index("-o") + 1])
+        (output_root / "final_script.py").write_text("print('ok')\n", encoding="utf-8")
+        return _FakeProcess()
+
+    async def capture_publish(_job_id: str, _message: str) -> None:
+        return None
+
+    monkeypatch.setattr(webwright_adapter, "resolve_runtime", lambda: profile)
+    monkeypatch.setattr(webwright_adapter, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(webwright_adapter.log_streams, "publish", capture_publish)
+    monkeypatch.setattr(webwright_adapter, "index_webwright_run_artifacts", lambda *_args: None)
+
+    run = asyncio.run(
+        webwright_adapter.run_webwright_for_case(
+            session,
+            "proj_test",
+            case,
+            "ignored model.yaml",
+            "job_wsl",
+            start_url_override=start_url,
+        )
+    )
+
+    assert run.status == WebwrightRunStatus.completed.value
+    assert captured_args[:4] == ["wsl.exe", "bash", "-lc", webwright_adapter.WSL_WEBWRIGHT_SCRIPT]
+    assert captured_args[5] == profile.webwright_root
+    assert captured_kwargs["cwd"] is None
+    assert captured_args[captured_args.index("--start-url") + 1] == start_url
+    assert captured_args[captured_args.index("--task-id") + 1] == case.automation_key
+    assert captured_args[captured_args.index("-o") + 1] == run.output_path
+    config_values = [
+        captured_args[index + 1]
+        for index, value in enumerate(captured_args)
+        if value == "-c"
+    ]
+    assert config_values == [
+        "base config.yaml",
+        "model openai.yaml",
+        "model.model_name=gpt-5-mini; echo bad",
+        "environment.shell=/mnt/c/Program Files/Git/bin/bash.exe && bad",
+        "agent.step_limit=37",
+    ]
+    assert profile.webwright_root not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+    assert start_url not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+    assert "echo bad" not in webwright_adapter.WSL_WEBWRIGHT_SCRIPT
+    session.close()
+
+
+def test_webwright_same_second_runs_use_unique_output_roots_and_metadata(monkeypatch, tmp_path: Path) -> None:
+    session, case = _session_with_case(tmp_path)
+    profile = _Profile(tmp_path, tmp_path / "runs")
+    output_roots: list[Path] = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        output_root = Path(args[args.index("-o") + 1])
+        output_roots.append(output_root)
+        (output_root / "final_script.py").write_text(f"print('run {len(output_roots)}')\n", encoding="utf-8")
+        return _FakeProcess()
+
+    async def capture_publish(_job_id: str, _message: str) -> None:
+        return None
+
+    monkeypatch.setattr(webwright_adapter, "resolve_runtime", lambda: profile)
+    monkeypatch.setattr(webwright_adapter, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(webwright_adapter.log_streams, "publish", capture_publish)
+    monkeypatch.setattr(webwright_adapter, "index_webwright_run_artifacts", lambda *_args: None)
+    monkeypatch.setattr(webwright_adapter, "datetime", _SameSecondClock)
+
+    first = asyncio.run(
+        webwright_adapter.run_webwright_for_case(session, "proj_test", case, "model_openai.yaml", "job_same_second_a")
+    )
+    second = asyncio.run(
+        webwright_adapter.run_webwright_for_case(session, "proj_test", case, "model_openai.yaml", "job_same_second_b")
+    )
+
+    assert first.id != second.id
+    assert first.output_path != second.output_path
+    assert output_roots == [Path(first.output_path or ""), Path(second.output_path or "")]
+    assert output_roots[0].parent == output_roots[1].parent
+    assert output_roots[0].name.startswith("run_20260612_000000_ww_")
+    assert output_roots[1].name.startswith("run_20260612_000000_ww_")
+    first_metadata = json.loads((output_roots[0] / "metadata.json").read_text(encoding="utf-8"))
+    second_metadata = json.loads((output_roots[1] / "metadata.json").read_text(encoding="utf-8"))
+    assert first_metadata["runId"] == output_roots[0].name
+    assert second_metadata["runId"] == output_roots[1].name
+    assert first_metadata["runId"] != second_metadata["runId"]
+    assert "Running task" in (output_roots[0] / "stdout.log").read_text(encoding="utf-8")
+    assert "Running task" in (output_roots[1] / "stdout.log").read_text(encoding="utf-8")
+    runs = session.exec(select(WebwrightRun).where(WebwrightRun.test_case_id == case.id)).all()
+    assert {run.id for run in runs} == {first.id, second.id}
+    assert {run.output_path for run in runs} == {first.output_path, second.output_path}
+    session.close()
+
+
 def test_cancel_stops_active_webwright_process_and_retry_creates_fresh_run(monkeypatch, tmp_path: Path) -> None:
     session, case = _session_with_case(tmp_path)
     profile = _Profile(tmp_path, tmp_path / "runs")
@@ -220,6 +373,56 @@ def test_cancel_stops_active_webwright_process_and_retry_creates_fresh_run(monke
     session.refresh(case)
     assert case.status == "webwright_completed"
     session.close()
+
+
+def test_webwright_queue_and_retry_return_unique_job_ids(monkeypatch, client, project_id: str) -> None:
+    async def noop_process_runs(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(webwright_runs, "_process_runs", noop_process_runs)
+
+    first = client.post(f"/projects/{project_id}/webwright-runs", json={"caseIds": ["tc_same_second"]})
+    second = client.post(f"/projects/{project_id}/webwright-runs", json={"caseIds": ["tc_same_second"]})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_job = first.json()["jobId"]
+    second_job = second.json()["jobId"]
+    assert first_job.startswith("wwjob_")
+    assert second_job.startswith("wwjob_")
+    assert first_job != second_job
+
+    with Session(database.engine) as session:
+        case = DbTestCase(
+            id="tc_retry_job_unique",
+            project_id=project_id,
+            source_type="excel",
+            source_case_id="CASE-RETRY-JOB",
+            title="Retry job uniqueness",
+            steps_json="[]",
+            automation_key="retry_job_unique",
+        )
+        run = WebwrightRun(
+            id="ww_retry_job_unique",
+            project_id=project_id,
+            test_case_id=case.id,
+            automation_key=case.automation_key,
+            status=WebwrightRunStatus.failed.value,
+        )
+        session.add(case)
+        session.add(run)
+        session.commit()
+
+    retry_first = client.post(f"/projects/{project_id}/webwright-runs/ww_retry_job_unique/retry")
+    retry_second = client.post(f"/projects/{project_id}/webwright-runs/ww_retry_job_unique/retry")
+
+    assert retry_first.status_code == 200
+    assert retry_second.status_code == 200
+    retry_first_job = retry_first.json()["jobId"]
+    retry_second_job = retry_second.json()["jobId"]
+    assert retry_first_job.startswith("wwretry_")
+    assert retry_second_job.startswith("wwretry_")
+    assert retry_first_job != retry_second_job
 
 
 def test_cancel_endpoint_marks_case_and_delegates_to_process_registry(

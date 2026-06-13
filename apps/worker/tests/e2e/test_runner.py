@@ -100,7 +100,7 @@ def test_automation_ide_runner_workflow(client: TestClient, project_id: str, imp
     assert results[0]["automation_key"] == automation_key
     assert results[0]["status"] in {"passed", "failed"}
 
-    with client.websocket_connect(f"/ws/logs/{job_id}") as websocket:
+    with client.websocket_connect(f"/ws/logs/{job_id}?token=test-worker-token") as websocket:
         first_log = websocket.receive_text()
         assert "runner.cli" in first_log
         second_log = websocket.receive_text()

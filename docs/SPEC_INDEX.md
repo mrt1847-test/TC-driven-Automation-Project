@@ -40,13 +40,17 @@ source-of-truth documents above.
 ## Post-MVP Checklist Follow-ups
 
 After the 2026-06-06 docs audit, [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md)
-tracks additional open rows for:
+tracked additional rows for:
 
 - subprocess cancel depth (`C3-09`, `C9-08`);
 - Generate Raw Worker C2 prompt API wiring (`D4-07`);
 - API_SPEC Planned/Partial endpoints (`C7-13`, `C12-11`, `C12-12`);
 - real TestRail/Sheets connector depth (`C1-08`, `C1-09`, `C10-07`, `C10-08`, `G-04`);
 - optional extensions in section **J. Post-MVP**.
+
+These tracked follow-ups are complete as of 2026-06-13. New work should be
+added first to the owning source-of-truth spec and checklist, then queued in
+[NEXT_ACTIONS.md](./NEXT_ACTIONS.md).
 
 ## Runtime Planning Correction
 

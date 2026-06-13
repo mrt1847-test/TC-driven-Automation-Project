@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getWorkerUrl: () => ipcRenderer.invoke('get-worker-url'),
+  getWorkerToken: () => ipcRenderer.invoke('get-worker-token'),
   selectFile: (filters?: Electron.FileFilter[]) => ipcRenderer.invoke('select-file', filters),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   openPath: (path: string) => ipcRenderer.invoke('open-path', path),

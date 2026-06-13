@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 
 import httpx
+
+from e2e_worker_client import worker_client
 from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,7 +91,7 @@ def main() -> int:
         source = Path(temp_dir) / "mvp4_cases.xlsx"
         shutil.copy2(EXCEL, source)
 
-        client = httpx.Client(base_url=BASE, timeout=60)
+        client = worker_client(BASE, timeout=60)
         client.get("/health").raise_for_status()
 
         project = client.post("/projects", json={"name": "E2E MVP 4 Gate"}).json()

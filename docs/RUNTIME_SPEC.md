@@ -1,6 +1,6 @@
 # Runtime Spec
 
-Last aligned: 2026-06-06
+Last aligned: 2026-06-13
 
 This document defines the runtime contract for three execution contexts:
 
@@ -40,7 +40,7 @@ need an explicit Python interpreter and a verified Playwright browser install.
 | `webwright_root` | Working directory for Webwright config/source |
 | `playwright_browsers_path` | Shared browser cache; passed as `PLAYWRIGHT_BROWSERS_PATH` |
 | `template_path` | Source template copied into generated projects |
-| `webwright_output_root` | Root for Webwright run artifacts |
+| `webwright_output_root` | Root for Webwright run artifacts; defaults to `TC_STUDIO_DATA_DIR/webwright-runs` when `settings.webwright.outputRoot` is unset |
 | `execution_mode` | `native` or `wsl` |
 | `base_config` / `model_config` | Webwright config file names |
 | `model_name` | Optional model override passed to Webwright for providers where the default model is unavailable |
@@ -55,6 +55,8 @@ need an explicit Python interpreter and a verified Playwright browser install.
 | `TC_STUDIO_PYTHON` | Explicit Python path selected by Studio |
 | `TC_STUDIO_RESOURCES` | Packaged runtime root in bundled mode |
 | `TC_STUDIO_RUNTIME_MODE` | `custom` or `bundled` |
+| `TC_STUDIO_WORKER_TOKEN` | Unguessable per-session Worker token required for mutating localhost HTTP APIs and WebSocket log streams |
+| `TC_STUDIO_ALLOWED_ORIGINS` | Comma-separated Electron renderer/dev origins allowed to call the Worker; defaults to local Electron/Vite/file origins |
 | `TC_STUDIO_PLAYWRIGHT_BROWSERS_PATH` | Studio browser cache path; runner may translate this to `PLAYWRIGHT_BROWSERS_PATH` |
 | `PLAYWRIGHT_BROWSERS_PATH` | Path consumed by Playwright |
 | `TC_HEADLESS` | Generated pytest headless toggle |
@@ -64,6 +66,28 @@ need an explicit Python interpreter and a verified Playwright browser install.
 | `WEBWRIGHT_SOURCE_VERSION` | commit SHA, tag, or release identifier for `WEBWRIGHT_SOURCE` |
 | `WEBWRIGHT_PIP_PACKAGE` | optional pinned pip requirement, for example `webwright==1.2.3` |
 | `WEBWRIGHT_CONFIG_SOURCE` | config source required when using a pip package without a source tree |
+
+## Worker Trust Boundary Runtime Contract
+
+Electron main owns the Worker trust boundary for app-launched sessions:
+
+1. Generate a random `TC_STUDIO_WORKER_TOKEN` for the app session.
+2. Pass the token and allowed renderer origins to the Worker subprocess
+   environment.
+3. Return the token through preload to the renderer API client without logging
+   it.
+4. Attach `X-TC-Studio-Worker-Token` to HTTP API requests and pass the same
+   token as `/ws/logs/{job_id}?token=...` for log streams.
+
+The Worker enforces this boundary before mutating route handlers run. Direct
+CLI/dev/test usage must set `TC_STUDIO_WORKER_TOKEN` explicitly when it needs
+mutating APIs; read-only health/status requests remain available without the
+token.
+
+Live E2E helper scripts under `scripts/e2e_*.py` create their HTTP clients via
+`scripts/e2e_worker_client.py`, which requires `TC_STUDIO_WORKER_TOKEN` and
+attaches it as `X-TC-Studio-Worker-Token`. The Worker process used for those
+scripts must be started with the same token value.
 
 ## Live Webwright Readiness Contract
 
@@ -325,6 +349,61 @@ commands. Python's `subprocess.run(command, shell=True, executable=<Git Bash
 path with spaces>)` does not work reliably on Windows; Git Bash must be invoked
 as an argv list, for example `[bash.exe, "-lc", command]`.
 
+### WSL Command Safety
+
+When `RuntimeProfile.execution_mode == "wsl"`, the Worker may invoke
+`wsl.exe bash -lc` only with a constant, audited wrapper script. Runtime values
+such as `webwright_root`, config names, prompt text, start URL, task ID,
+`environment.shell`, step limit, model override, Python command, and output path
+must be passed as positional argv values to bash and the Webwright CLI, not
+interpolated into the shell script string.
+
+The current wrapper is:
+
+```bash
+set -e; cd "$1"; source .venv/bin/activate; shift; exec "$@"
+```
+
+This preserves the existing WSL `.venv` activation behavior while preventing
+spaces, quotes, parentheses, ampersands, Korean characters, or shell-looking
+strings inside runtime values from changing shell syntax. The Worker does not
+set a Windows `cwd` for WSL subprocesses; the WSL-side `cd "$1"` is the working
+directory transition. Path mapping between Windows and WSL remains a
+RuntimeProfile responsibility.
+
+## Run And Job Identity Contract
+
+Worker-issued WebSocket `jobId` values are opaque, collision-resistant IDs
+created per request. Webwright raw-generation queues, Webwright retry queues,
+generated-project execution queues, and `rerun-failed` queues must each return
+a fresh `jobId`; callers must subscribe to the exact returned ID instead of
+assuming a project-scoped stream name.
+
+Webwright raw-generation output directories must not rely on a second-only
+timestamp. The Worker creates each output root as:
+
+```text
+{webwright_output_root}/{automationKey}/run_{UTC_YYYYMMDD_HHMMSS}_{WebwrightRun.id}
+```
+
+The leaf directory is created with no-overwrite semantics before the subprocess
+starts, so repeated starts for the same case in the same second produce
+separate stdout, stderr, metadata, final script, trajectory, and indexed
+artifact rows.
+
+Studio-launched generated-project runs use an `ExecutionRun.id`-suffixed run ID
+instead of a timestamp-only run ID:
+
+```text
+run_{UTC_YYYYMMDD_HHMMSS}_{ExecutionRun.id}
+```
+
+The Worker reserves `artifacts/runs/{runId}` before bootstrap or `runner.cli`
+execution and passes that exact `runId` to the generated runner. Normal runs,
+cancelled runs, bootstrap-failure runs, and `rerun-failed` runs therefore keep
+distinct logs, `results.json`, `ExecutionRun`, and `ExecutionResult` records
+even when queued concurrently in the same second.
+
 E-09 cannot close on Windows native execution until one explicit strategy is
 selected:
 
@@ -403,6 +482,9 @@ Done:
   import checks; placeholder `base.yaml` alone does not pass live readiness.
   Config readiness accepts both root-level configs and the official source
   checkout layout `src/webwright/config/*.yaml`.
+- WSL Webwright subprocess launch uses a constant bash wrapper with positional
+  argv for root, config args, prompt, start URL, task ID, and output path,
+  preserving `.venv` activation without shell-interpolating runtime values.
 - Health output separates `webwrightRoot`, `webwrightPython`, `webwrightCli`,
   `webwrightConfig`, and explicit `mockMode`.
 - `prepare-runtime.ps1` enforces the Webwright package/source policy: live
@@ -420,6 +502,10 @@ Done:
   `generated_runtime_install_states`, skips redundant install commands on cache
   hits, invalidates on generated project/runtime/browser input changes, and
   never stores failed installs as ready.
+- Webwright and generated-project Worker runs use request-unique log stream
+  `jobId` values plus timestamp-and-row-ID artifact directories; same-second
+  repeated Webwright starts and concurrent runner starts no longer share or
+  overwrite output roots.
 - E-09 live Webwright runtime E2E passes locally with a real Microsoft Webwright
   checkout/venv, OpenAI `gpt-5-mini`, Git Bash shell readiness, explicit
   `webwrightShell` health, nested `final_script.py` harvesting, indexed

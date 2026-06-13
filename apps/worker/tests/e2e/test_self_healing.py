@@ -139,7 +139,7 @@ def test_self_healing_proposal_workflow(client: TestClient, project_id: str, imp
     rerun_detail = client.get(f"/projects/{project_id}/executions/{rerun_execution['id']}").json()
     assert any(result["automation_key"] == automation_key for result in rerun_detail["results"])
 
-    with client.websocket_connect(f"/ws/logs/{rerun_job_id}") as websocket:
+    with client.websocket_connect(f"/ws/logs/{rerun_job_id}?token=test-worker-token") as websocket:
         first_log = websocket.receive_text()
         assert "rerun-failed" in first_log
         second_log = websocket.receive_text()

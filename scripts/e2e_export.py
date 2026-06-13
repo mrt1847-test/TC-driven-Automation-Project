@@ -8,6 +8,8 @@ from pathlib import Path
 
 import httpx
 
+from e2e_worker_client import worker_client
+
 ROOT = Path(__file__).resolve().parents[1]
 EXCEL = ROOT / "fixtures" / "sample_cases.xlsx"
 DATA = ROOT / ".data"
@@ -33,7 +35,7 @@ def main() -> int:
     export_source = DATA / f"e2e_export_cases_{int(time.time())}.xlsx"
     shutil.copy2(EXCEL, export_source)
 
-    client = httpx.Client(base_url=BASE, timeout=60)
+    client = worker_client(BASE, timeout=60)
     client.get("/health").raise_for_status()
 
     project = client.post("/projects", json={"name": "E2E Result Export"}).json()

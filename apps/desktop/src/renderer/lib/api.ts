@@ -1,4 +1,6 @@
 let baseUrl = 'http://127.0.0.1:8765'
+let workerToken = import.meta.env.VITE_TC_STUDIO_WORKER_TOKEN || ''
+const WORKER_TOKEN_HEADER = 'X-TC-Studio-Worker-Token'
 
 export class ApiError extends Error {
   readonly status: number
@@ -15,6 +17,7 @@ export class ApiError extends Error {
 export async function initApiBase(): Promise<string> {
   if (window.electronAPI) {
     baseUrl = await window.electronAPI.getWorkerUrl()
+    workerToken = await window.electronAPI.getWorkerToken()
   }
   return baseUrl
 }
@@ -24,9 +27,12 @@ export function getBaseUrl(): string {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  if (workerToken) headers.set(WORKER_TOKEN_HEADER, workerToken)
   const res = await fetch(`${baseUrl}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
-    ...options
+    ...options,
+    headers
   })
   if (!res.ok) {
     throw await buildApiError(res)
@@ -636,7 +642,9 @@ export function connectLogStream(
   onStatus?: (status: LogStreamStatus) => void
 ): WebSocket {
   onStatus?.('connecting')
-  const ws = new WebSocket(`${baseUrl.replace('http', 'ws')}/ws/logs/${jobId}`)
+  const url = new URL(`${baseUrl.replace(/^http/, 'ws')}/ws/logs/${jobId}`)
+  if (workerToken) url.searchParams.set('token', workerToken)
+  const ws = new WebSocket(url.toString())
   ws.onopen = () => onStatus?.('open')
   ws.onmessage = (e) => onMessage(String(e.data))
   ws.onerror = () => onStatus?.('error')

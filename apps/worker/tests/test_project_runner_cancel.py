@@ -30,6 +30,12 @@ class _Clock:
         return real_datetime(2026, 6, 12, 0, 0, cls.current_second)
 
 
+class _SameSecondClock:
+    @classmethod
+    def utcnow(cls):
+        return real_datetime(2026, 6, 12, 0, 0, 0)
+
+
 class _LongRunningRunnerProcess:
     pid = 9876
 
@@ -79,6 +85,35 @@ class _CompletedRunnerProcess:
 
     def kill(self) -> None:
         self.returncode = -9
+
+
+class _BlockingRunnerProcess:
+    pid = 9878
+
+    def __init__(self, label: str) -> None:
+        self.returncode: int | None = 0
+        self.stdout = f"{label} stdout\n".encode("utf-8")
+        self.stderr = f"{label} stderr\n".encode("utf-8")
+        self._done = asyncio.Event()
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        await self._done.wait()
+        return self.stdout, self.stderr
+
+    async def wait(self) -> int:
+        await self._done.wait()
+        return self.returncode if self.returncode is not None else 0
+
+    def terminate(self) -> None:
+        self.returncode = -15
+        self._done.set()
+
+    def kill(self) -> None:
+        self.returncode = -9
+        self._done.set()
+
+    def finish(self) -> None:
+        self._done.set()
 
 
 def _session_with_project(tmp_path: Path) -> tuple[Session, Project]:
@@ -149,6 +184,79 @@ def _patch_runner(monkeypatch, processes: list[object]) -> None:
 
     monkeypatch.setattr(project_runner, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(project_runner.log_streams, "publish", capture_publish)
+
+
+def test_parallel_same_second_executions_use_unique_run_dirs_logs_and_rows(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    session, project = _session_with_project(tmp_path)
+    processes: list[_BlockingRunnerProcess] = []
+    published: list[tuple[str, str]] = []
+    request = ExecutionRequest(
+        env="stg",
+        browser="chromium",
+        headed=False,
+        target_type="case",
+        automation_key="runner_cancel_case",
+        result_target="local",
+    )
+
+    monkeypatch.setattr(project_runner, "ensure_generated_runtime", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(project_runner, "resolve_runtime", lambda: _Profile())
+    monkeypatch.setattr(project_runner, "datetime", _SameSecondClock)
+
+    async def capture_publish(job_id: str, message: str) -> None:
+        published.append((job_id, message))
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        generated_path = Path(args[3])
+        run_id = args[args.index("--run-id") + 1]
+        label = f"parallel {len(processes) + 1}"
+        _write_results(generated_path, run_id, status="passed")
+        process = _BlockingRunnerProcess(label)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(project_runner, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(project_runner.log_streams, "publish", capture_publish)
+
+    async def run_parallel() -> tuple[ExecutionRun, ExecutionRun]:
+        first_task = asyncio.create_task(project_runner.run_project(session, project, request, "job_parallel_a"))
+        while len(processes) < 1:
+            await asyncio.sleep(0)
+        second_task = asyncio.create_task(project_runner.run_project(session, project, request, "job_parallel_b"))
+        while len(processes) < 2:
+            await asyncio.sleep(0)
+        for process in processes:
+            process.finish()
+        first_run, second_run = await asyncio.gather(first_task, second_task)
+        return first_run, second_run
+
+    first, second = asyncio.run(run_parallel())
+
+    assert first.id != second.id
+    assert first.run_id != second.run_id
+    assert first.run_id.startswith("run_20260612_000000_exec_")
+    assert second.run_id.startswith("run_20260612_000000_exec_")
+    assert first.result_path is not None
+    assert second.result_path is not None
+    first_dir = Path(first.result_path).parent
+    second_dir = Path(second.result_path).parent
+    assert first_dir != second_dir
+    assert first_dir.name == first.run_id
+    assert second_dir.name == second.run_id
+    assert json.loads(Path(first.result_path).read_text(encoding="utf-8"))["runId"] == first.run_id
+    assert json.loads(Path(second.result_path).read_text(encoding="utf-8"))["runId"] == second.run_id
+    assert "parallel 1 stdout" in (first_dir / "stdout.log").read_text(encoding="utf-8")
+    assert "parallel 2 stdout" in (second_dir / "stdout.log").read_text(encoding="utf-8")
+    first_results = session.exec(select(ExecutionResult).where(ExecutionResult.execution_run_id == first.id)).all()
+    second_results = session.exec(select(ExecutionResult).where(ExecutionResult.execution_run_id == second.id)).all()
+    assert len(first_results) == 1
+    assert len(second_results) == 1
+    assert first_results[0].id != second_results[0].id
+    assert {job_id for job_id, _message in published} >= {"job_parallel_a", "job_parallel_b"}
+    session.close()
 
 
 def test_execution_cancel_stops_process_harvests_artifacts_and_rerun_uses_fresh_dir(
@@ -295,3 +403,56 @@ def test_execution_cancel_endpoint_delegates_to_process_registry(monkeypatch, cl
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
     assert cancelled_execution_ids == ["exec_cancel_api"]
+
+
+def test_execution_queue_and_rerun_return_unique_job_ids(monkeypatch, client, project_id: str) -> None:
+    async def noop_run_execution(*_args, **_kwargs) -> None:
+        return None
+
+    async def noop_rerun_failed_execution(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(executions, "_run_execution", noop_run_execution)
+    monkeypatch.setattr(executions, "_rerun_failed_execution", noop_rerun_failed_execution)
+
+    payload = {
+        "env": "stg",
+        "browser": "chromium",
+        "headed": False,
+        "target_type": "all",
+        "result_target": "local",
+    }
+    first = client.post(f"/projects/{project_id}/executions", json=payload)
+    second = client.post(f"/projects/{project_id}/executions", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_job = first.json()["jobId"]
+    second_job = second.json()["jobId"]
+    assert first_job.startswith("execjob_")
+    assert second_job.startswith("execjob_")
+    assert first_job != second_job
+
+    with Session(database.engine) as session:
+        run = ExecutionRun(
+            id="exec_rerun_job_unique",
+            project_id=project_id,
+            run_id="run_rerun_job_unique",
+            env="stg",
+            browser="chromium",
+            headed=False,
+            status="failed",
+        )
+        session.add(run)
+        session.commit()
+
+    rerun_first = client.post(f"/projects/{project_id}/executions/exec_rerun_job_unique/rerun-failed")
+    rerun_second = client.post(f"/projects/{project_id}/executions/exec_rerun_job_unique/rerun-failed")
+
+    assert rerun_first.status_code == 200
+    assert rerun_second.status_code == 200
+    rerun_first_job = rerun_first.json()["jobId"]
+    rerun_second_job = rerun_second.json()["jobId"]
+    assert rerun_first_job.startswith("rerunjob_")
+    assert rerun_second_job.startswith("rerunjob_")
+    assert rerun_first_job != rerun_second_job

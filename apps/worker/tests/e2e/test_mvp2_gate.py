@@ -191,7 +191,7 @@ def test_mvp2_automation_ide_edit_regenerate_debug_gate(
     assert diagnosis["kind"] == "generated_step_failure"
     assert diagnosis["status"] == "proposed"
 
-    with client.websocket_connect(f"/ws/logs/{job_id}") as websocket:
+    with client.websocket_connect(f"/ws/logs/{job_id}?token=test-worker-token") as websocket:
         first_log = websocket.receive_text()
         assert "runner.cli" in first_log
         second_log = websocket.receive_text()

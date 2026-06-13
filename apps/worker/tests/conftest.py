@@ -8,7 +8,11 @@ from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, Session, create_engine
 
 from worker.core.database import get_session
+
+os.environ.setdefault("TC_STUDIO_WORKER_TOKEN", "test-worker-token")
+
 from worker.main import app
+from worker.core.security import WORKER_TOKEN_HEADER
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 FIXTURES = os.path.join(ROOT, "fixtures")
@@ -29,7 +33,7 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={WORKER_TOKEN_HEADER: "test-worker-token"}) as test_client:
         yield test_client
     app.dependency_overrides.clear()
 

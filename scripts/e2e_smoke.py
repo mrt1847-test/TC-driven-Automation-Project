@@ -7,6 +7,8 @@ from pathlib import Path
 
 import httpx
 
+from e2e_worker_client import worker_client
+
 BASE = "http://127.0.0.1:8765"
 
 
@@ -38,7 +40,7 @@ def assert_health_shape(payload: dict) -> None:
 
 
 def main() -> int:
-    client = httpx.Client(base_url=BASE, timeout=60)
+    client = worker_client(BASE, timeout=60)
     original_settings = None
     try:
         root = client.get("/")

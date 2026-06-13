@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
+import { randomBytes } from 'crypto'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { getCredential, setCredential } from './credentials'
@@ -7,6 +8,8 @@ import { listProviderModels } from './providerModels'
 
 const WORKER_PORT = 8765
 const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`
+const WORKER_TOKEN_HEADER = 'X-TC-Studio-Worker-Token'
+const WORKER_TOKEN = process.env.TC_STUDIO_WORKER_TOKEN || randomBytes(32).toString('base64url')
 
 let mainWindow: BrowserWindow | null = null
 let workerProcess: ChildProcessWithoutNullStreams | null = null
@@ -70,6 +73,8 @@ function buildWorkerEnv(): NodeJS.ProcessEnv {
     ...process.env,
     TC_STUDIO_DATA_DIR: join(app.getPath('userData'), 'data'),
     TC_STUDIO_PYTHON: resolvePythonExecutable(),
+    TC_STUDIO_WORKER_TOKEN: WORKER_TOKEN,
+    TC_STUDIO_ALLOWED_ORIGINS: buildAllowedWorkerOrigins(),
     PYTHONUTF8: process.env.PYTHONUTF8 ?? '1',
     PYTHONIOENCODING: process.env.PYTHONIOENCODING ?? 'utf-8'
   }
@@ -86,6 +91,29 @@ function buildWorkerEnv(): NodeJS.ProcessEnv {
     env.TC_STUDIO_RUNTIME_MODE = 'custom'
   }
   return env
+}
+
+function buildAllowedWorkerOrigins(): string {
+  const origins = new Set([
+    'http://127.0.0.1:5173',
+    'http://localhost:5173',
+    'http://127.0.0.1:8765',
+    'http://localhost:8765',
+    'file://',
+    'null'
+  ])
+  for (const origin of (process.env.TC_STUDIO_ALLOWED_ORIGINS || '').split(',')) {
+    const trimmed = origin.trim()
+    if (trimmed) origins.add(trimmed)
+  }
+  if (process.env.ELECTRON_RENDERER_URL) {
+    try {
+      origins.add(new URL(process.env.ELECTRON_RENDERER_URL).origin)
+    } catch {
+      safeWrite(process.stderr, '[worker] Ignoring invalid ELECTRON_RENDERER_URL for CORS origins.\n')
+    }
+  }
+  return Array.from(origins).join(',')
 }
 
 function startWorker(): void {
@@ -159,6 +187,7 @@ app.on('before-quit', () => stopWorker())
 app.on('will-quit', () => stopWorker())
 
 ipcMain.handle('get-worker-url', () => WORKER_URL)
+ipcMain.handle('get-worker-token', () => WORKER_TOKEN)
 
 ipcMain.handle('select-file', async (_e, filters?: Electron.FileFilter[]) => {
   const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters })
@@ -227,7 +256,7 @@ async function workerPostJson(
   try {
     const response = await fetch(`${WORKER_URL}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', [WORKER_TOKEN_HEADER]: WORKER_TOKEN },
       body: JSON.stringify(body)
     })
     if (!response.ok) {

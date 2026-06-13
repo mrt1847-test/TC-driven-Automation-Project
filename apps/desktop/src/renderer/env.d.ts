@@ -1,5 +1,6 @@
 export interface ElectronAPI {
   getWorkerUrl: () => Promise<string>
+  getWorkerToken: () => Promise<string>
   selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>
   selectDirectory: () => Promise<string | null>
   openPath: (path: string) => Promise<string>

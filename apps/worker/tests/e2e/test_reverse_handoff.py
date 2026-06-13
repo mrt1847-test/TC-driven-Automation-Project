@@ -88,6 +88,6 @@ def test_reverse_handoff_rerun_workflow(client: TestClient, project_id: str, imp
     assert refreshed_mappings[0]["action_ids"]
     assert refreshed_mappings[0]["status"] == "mapped"
 
-    with client.websocket_connect(f"/ws/logs/{retry_job_id}") as websocket:
+    with client.websocket_connect(f"/ws/logs/{retry_job_id}?token=test-worker-token") as websocket:
         message = websocket.receive_text()
         assert automation_key in message or "mock" in message.lower() or "webwright" in message.lower()

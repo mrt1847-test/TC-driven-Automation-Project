@@ -123,10 +123,10 @@ def test_mvp1_excel_to_automation_ide_run_gate(client: TestClient, project_id: s
     assert detail["summary"]["summary"]["total"] >= 1
     assert any(result["automation_key"] == automation_key for result in detail["results"])
 
-    with client.websocket_connect(f"/ws/logs/{raw_job_id}") as raw_ws:
+    with client.websocket_connect(f"/ws/logs/{raw_job_id}?token=test-worker-token") as raw_ws:
         raw_log = raw_ws.receive_text()
         assert automation_key in raw_log or "mock" in raw_log.lower() or "webwright" in raw_log.lower()
 
-    with client.websocket_connect(f"/ws/logs/{execution_job_id}") as runner_ws:
+    with client.websocket_connect(f"/ws/logs/{execution_job_id}?token=test-worker-token") as runner_ws:
         runner_log = runner_ws.receive_text()
         assert "runner.cli" in runner_log

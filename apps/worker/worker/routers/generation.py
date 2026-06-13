@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
@@ -26,6 +27,7 @@ from worker.services.project_generator import (
     retire_generated_case,
 )
 from worker.services.project_ide import (
+    ProjectPathError,
     create_file,
     delete_file,
     list_file_tree,
@@ -38,6 +40,17 @@ from worker.services.raw_refresh_regeneration import refresh_and_regenerate_case
 from worker.services.structuring_service import get_latest_flow
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["generation"])
+
+
+def _generated_root_for_project(session: Session, project_id: str) -> Path:
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return Path(project.generated_project_path or Path(project.root_path) / "generated")
+
+
+def _raise_project_path_error(exc: ProjectPathError) -> NoReturn:
+    raise HTTPException(400, str(exc)) from exc
 
 
 def _generation_summary(result: GenerationResult, *, preview: bool = False) -> dict:
@@ -279,10 +292,7 @@ def preview_retire_case(
 
 @router.get("/generated-files")
 def generated_files(project_id: str, session: Session = Depends(get_session)):
-    project = session.get(Project, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-    root = Path(project.generated_project_path or Path(project.root_path) / "generated")
+    root = _generated_root_for_project(session, project_id)
     metadata = refresh_generated_file_statuses(session, project_id, root, commit=True)
     items = list_file_tree(root)
     for item in items:
@@ -301,49 +311,65 @@ def generated_file_status(project_id: str, session: Session = Depends(get_sessio
 
 @router.get("/generated-files/content")
 def get_file_content(project_id: str, path: str, session: Session = Depends(get_session)):
-    project = session.get(Project, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-    root = Path(project.generated_project_path or Path(project.root_path) / "generated")
-    return {"path": path, "content": read_file(root, path)}
+    root = _generated_root_for_project(session, project_id)
+    try:
+        content = read_file(root, path)
+    except ProjectPathError as exc:
+        _raise_project_path_error(exc)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "File not found") from exc
+    except IsADirectoryError as exc:
+        raise HTTPException(400, "Generated file path is a directory") from exc
+    return {"path": path, "content": content}
 
 
 @router.put("/generated-files/content")
 def put_file_content(project_id: str, body: FileContentUpdate, session: Session = Depends(get_session)):
-    project = session.get(Project, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-    root = Path(project.generated_project_path or Path(project.root_path) / "generated")
-    write_file(root, body.path, body.content)
+    root = _generated_root_for_project(session, project_id)
+    try:
+        write_file(root, body.path, body.content)
+    except ProjectPathError as exc:
+        _raise_project_path_error(exc)
+    except IsADirectoryError as exc:
+        raise HTTPException(400, "Generated file path is a directory") from exc
     return {"ok": True}
 
 
 @router.post("/generated-files/create")
 def create_generated_file(project_id: str, body: FileCreateRequest, session: Session = Depends(get_session)):
-    project = session.get(Project, project_id)
-    root = Path(project.generated_project_path or Path(project.root_path) / "generated")
-    create_file(root, body.path, body.content)
+    root = _generated_root_for_project(session, project_id)
+    try:
+        create_file(root, body.path, body.content)
+    except ProjectPathError as exc:
+        _raise_project_path_error(exc)
+    except IsADirectoryError as exc:
+        raise HTTPException(400, "Generated file path is a directory") from exc
     return {"ok": True}
 
 
 @router.delete("/generated-files")
 def delete_generated_file(project_id: str, path: str, session: Session = Depends(get_session)):
-    project = session.get(Project, project_id)
-    root = Path(project.generated_project_path or Path(project.root_path) / "generated")
-    delete_file(root, path)
+    root = _generated_root_for_project(session, project_id)
+    try:
+        delete_file(root, path)
+    except ProjectPathError as exc:
+        _raise_project_path_error(exc)
     return {"ok": True}
 
 
 @router.post("/generated-files/rename")
 def rename_generated_file(project_id: str, body: FileRenameRequest, session: Session = Depends(get_session)):
-    project = session.get(Project, project_id)
-    root = Path(project.generated_project_path or Path(project.root_path) / "generated")
-    rename_file(root, body.old_path, body.new_path)
+    root = _generated_root_for_project(session, project_id)
+    try:
+        rename_file(root, body.old_path, body.new_path)
+    except ProjectPathError as exc:
+        _raise_project_path_error(exc)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "File not found") from exc
     return {"ok": True}
 
 
 @router.get("/search")
 def search(project_id: str, q: str, session: Session = Depends(get_session)):
-    project = session.get(Project, project_id)
-    root = Path(project.generated_project_path or Path(project.root_path) / "generated")
+    root = _generated_root_for_project(session, project_id)
     return search_project(session, project_id, root, q)

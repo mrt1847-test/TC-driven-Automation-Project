@@ -384,7 +384,7 @@ def resolve_runtime(settings: AppSettings | None = None) -> RuntimeProfile:
     )
     browsers = runtime_cfg.get("playwrightBrowsersPath") or os.environ.get("TC_STUDIO_PLAYWRIGHT_BROWSERS_PATH")
     template = generator_cfg.get("templatePath") or str(_default_template_path())
-    output_root = webwright_cfg.get("outputRoot") or str(Path.home() / "webwright-runs")
+    output_root = webwright_cfg.get("outputRoot") or str(get_data_dir() / "webwright-runs")
 
     return RuntimeProfile(
         mode="custom",

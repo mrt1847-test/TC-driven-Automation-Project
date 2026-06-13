@@ -116,6 +116,20 @@ Full regeneration must preserve existing `.git`, `.gitattributes`, and
 `.gitmodules` metadata. Template copy must not bring stale local caches or
 historical run artifacts into a generated project.
 
+## Project IDE Path Containment
+
+Studio Project IDE file APIs are allowed to operate only inside the generated
+project root. The Worker must resolve the root and requested path with
+`Path.resolve()` and require the resolved target to be `relative_to(root)`
+before reading, writing, creating, deleting, renaming, listing, or searching
+generated files.
+
+Requests must use relative paths. Absolute paths, drive-qualified paths, UNC
+paths, `..` traversal, root sibling-prefix tricks, and symlink or junction
+escapes are invalid. Mutating operations must reject unsafe paths before
+creating parent directories, writing content, renaming files, or recursively
+deleting directories.
+
 ## Identity And Collision Contract
 
 Generated project paths, mapping rows, result rows, and write-back targets use
@@ -316,6 +330,13 @@ run artifacts under `artifacts/runs/{runId}`:
 - `stderr.log` with the actionable failure message;
 - `results.json` with a `bootstrap` object and failed case entry when the run
   targeted a specific `automationKey`.
+
+For Studio-launched runs, the Worker owns `runId` allocation. It must pass a
+collision-resistant `run_{UTC_YYYYMMDD_HHMMSS}_{ExecutionRun.id}` value through
+`runner.cli --run-id` and reserve `artifacts/runs/{runId}` before bootstrap or
+pytest starts. Fast repeated starts, concurrent starts, cancellation harvests,
+and `rerun-failed` must therefore write separate runner logs and result files
+instead of reusing a second-resolution directory.
 
 ## results.json
 

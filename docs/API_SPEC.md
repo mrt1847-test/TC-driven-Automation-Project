@@ -17,6 +17,27 @@ Base URL in development: `http://127.0.0.1:8765`
 - `automation_key`는 TC, raw action, structured test, execution result를 잇는 핵심 키다.
 - Python/Playwright/Webwright 경로는 `RuntimeProfile`로 통일한다 ([RUNTIME_SPEC.md](./RUNTIME_SPEC.md)).
 
+## Local Worker Trust Boundary
+
+The localhost Worker is not a browser-public API. G-06 requires a per-session
+trust boundary for privileged HTTP and WebSocket calls:
+
+- CORS must not use wildcard origins. The Worker allows only configured Electron
+  renderer/dev origins from `TC_STUDIO_ALLOWED_ORIGINS`, or the built-in local
+  defaults: `http://127.0.0.1:5173`, `http://localhost:5173`,
+  `http://127.0.0.1:8765`, `http://localhost:8765`, `file://`, and `null`.
+- `POST`, `PUT`, `PATCH`, and `DELETE` requests must include
+  `X-TC-Studio-Worker-Token` matching `TC_STUDIO_WORKER_TOKEN`. Missing or
+  invalid tokens return `401` before route body side effects. Disallowed
+  `Origin` values return `403` before route body side effects.
+- Intentionally read-only endpoints such as `GET /health`, `GET /settings`,
+  status reads, and generated-file reads remain usable without the token unless
+  a future spec explicitly tightens them.
+- Electron main generates an unguessable token for each app session, passes it
+  to the Worker environment, and exposes it through preload only for the API
+  client to attach. Direct CLI/test flows set `TC_STUDIO_WORKER_TOKEN`
+  explicitly.
+
 ## API By Product Workspace
 
 | Workspace | API groups | Primary GUI surfaces |
@@ -627,6 +648,15 @@ same blocking severity used by generation conflict panels.
 | DELETE | `/projects/{project_id}/generated-files?path=...` | Implemented | 파일 삭제 | C11-02 |
 | POST | `/projects/{project_id}/generated-files/rename` | Implemented | 파일 이름 변경 | C11-02 |
 | GET | `/projects/{project_id}/search?q=...` | Implemented | generated project 검색 | C11-03 |
+
+C11-05 path containment rule: every generated-file read, write, create,
+delete, rename, tree, and search operation resolves the generated project root
+and requested path with `Path.resolve()` and requires the target to be
+`relative_to(root)`. Requests must use relative paths only. Absolute paths,
+drive-qualified paths, UNC paths, `..` traversal, root sibling-prefix tricks,
+and symlink/junction escapes are rejected before filesystem side effects.
+Mutating APIs return HTTP 400 for unsafe paths and HTTP 404 for missing
+projects.
 
 ### Generate response
 
@@ -1251,7 +1281,7 @@ Auto-apply remains selector-only.
 
 | Path | Status | Purpose |
 |------|--------|---------|
-| `/ws/logs/{job_id}` | Implemented | Webwright run, execution run stdout/stderr stream |
+| `/ws/logs/{job_id}?token=...` | Implemented | Webwright run, execution run stdout/stderr stream; token and allowed Origin required |
 
 ## Planned API Follow-ups
 

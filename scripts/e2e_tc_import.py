@@ -6,6 +6,8 @@ from pathlib import Path
 
 import httpx
 
+from e2e_worker_client import worker_client
+
 ROOT = Path(__file__).resolve().parents[1]
 EXCEL = ROOT / "fixtures" / "sample_cases.xlsx"
 BASE = "http://127.0.0.1:8765"
@@ -16,7 +18,7 @@ def main() -> int:
         print(f"Missing fixture: {EXCEL}", file=sys.stderr)
         return 1
 
-    client = httpx.Client(base_url=BASE, timeout=60)
+    client = worker_client(BASE, timeout=60)
     health = client.get("/health")
     health.raise_for_status()
     print("health", health.json())

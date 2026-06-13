@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlmodel import Session, select
 
+from worker.core.config import new_id
 from worker.core.runtime import resolve_runtime
 from worker.core.database import get_session
 from worker.core.log_stream import log_streams
@@ -74,7 +75,7 @@ async def create_runs(project_id: str, request: WebwrightRunRequest, background:
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    job_id = f"ww_{project_id}"
+    job_id = new_id("wwjob")
     background.add_task(_process_runs, project_id, request, job_id)
     return {"jobId": job_id, "caseIds": request.case_ids, "status": "queued"}
 
@@ -100,7 +101,7 @@ async def retry_run(project_id: str, run_id: str, background: BackgroundTasks, s
     case = session.get(TestCase, run.test_case_id)
     if not case or case.project_id != project_id:
         raise HTTPException(404, "Case not found")
-    job_id = f"ww_retry_{run_id}"
+    job_id = new_id("wwretry")
     background.add_task(_process_runs, project_id, WebwrightRunRequest(case_ids=[case.id]), job_id)
     return {"jobId": job_id, "status": "queued"}
 

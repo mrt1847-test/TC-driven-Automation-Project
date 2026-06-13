@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from e2e_worker_client import worker_client
+
 BASE = "http://127.0.0.1:8765"
 
 CASES = [
@@ -142,7 +144,7 @@ def write_fake_pytest_fixture(client: httpx.Client, project_id: str) -> None:
 
 def main() -> int:
     server, clone_url = start_clone_server()
-    client = httpx.Client(base_url=BASE, timeout=60)
+    client = worker_client(BASE, timeout=60)
     original_settings = None
     try:
         client.get("/health").raise_for_status()

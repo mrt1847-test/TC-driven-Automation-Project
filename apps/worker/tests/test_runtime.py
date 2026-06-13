@@ -12,6 +12,7 @@ from worker.models.schemas import AppSettings
 
 def test_resolve_runtime_custom_fallback(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("TC_STUDIO_RESOURCES", raising=False)
+    monkeypatch.setenv("TC_STUDIO_DATA_DIR", str(tmp_path / ".data"))
     settings = AppSettings(
         runtime={"mode": "custom"},
         webwright={"root": str(tmp_path / "ww"), "python": sys.executable},
@@ -29,6 +30,7 @@ def test_resolve_runtime_custom_fallback(monkeypatch, tmp_path: Path) -> None:
     assert readiness.config.ok is False
     assert readiness.cli.ok is False
     assert profile.has_webwright_cli is False
+    assert profile.webwright_output_root == str(tmp_path / ".data" / "webwright-runs")
 
 
 def test_webwright_readiness_requires_importable_cli(monkeypatch, tmp_path: Path) -> None:

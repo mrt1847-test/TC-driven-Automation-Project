@@ -36,6 +36,7 @@ HEARTBEAT_INTERVAL_SECONDS = 15
 PIPE_DRAIN_TIMEOUT_SECONDS = 2
 PROCESS_STOP_TIMEOUT_SECONDS = 10
 CANCELLED_CASE_STATUS = "cancelled"
+WSL_WEBWRIGHT_SCRIPT = 'set -e; cd "$1"; source .venv/bin/activate; shift; exec "$@"'
 
 
 @dataclass
@@ -63,12 +64,65 @@ def classify_error(stderr: str) -> str:
     return "unknown"
 
 
+def _build_webwright_cli_args(
+    *,
+    python_path: str,
+    config_args: list[str],
+    prompt: str,
+    start_url: str,
+    automation_key: str,
+    output_root: Path,
+) -> list[str]:
+    cmd = [
+        python_path, "-m", "webwright.run.cli",
+    ]
+    for config_arg in config_args:
+        cmd.extend(["-c", config_arg])
+    cmd.extend([
+        "-t", prompt,
+        "--start-url", start_url,
+        "--task-id", automation_key,
+        "-o", str(output_root),
+    ])
+    return cmd
+
+
+def _build_wsl_webwright_args(webwright_root: str, cli_args: list[str]) -> list[str]:
+    if not webwright_root:
+        raise ValueError("WSL Webwright execution requires webwright_root")
+    return [
+        "wsl.exe",
+        "bash",
+        "-lc",
+        WSL_WEBWRIGHT_SCRIPT,
+        "tc-studio-webwright",
+        webwright_root,
+        *cli_args,
+    ]
+
+
 def _resolve_output_root() -> Path:
+    from worker.core.config import get_data_dir
+
     profile = resolve_runtime()
-    root = profile.webwright_output_root or str(Path.home() / "webwright-runs")
+    root = profile.webwright_output_root or str(get_data_dir() / "webwright-runs")
     path = Path(root)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _create_webwright_output_root(automation_key: str, run_id: str) -> Path:
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    parent = _resolve_output_root() / automation_key
+    for attempt in range(20):
+        unique_id = run_id if attempt == 0 else f"{run_id}_{new_id('dir')}"
+        output_root = parent / f"run_{run_ts}_{unique_id}"
+        try:
+            output_root.mkdir(parents=True, exist_ok=False)
+            return output_root
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"Could not allocate Webwright output directory for {automation_key}")
 
 
 def _find_webwright_artifact(output_root: Path, file_name: str) -> Path | None:
@@ -331,12 +385,11 @@ async def run_webwright_for_case(
     start_url = prompt_components["startUrl"]
     prompt = prompt_components["prompt"]
 
-    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_root = _resolve_output_root() / case.automation_key / f"run_{run_ts}"
-    output_root.mkdir(parents=True, exist_ok=True)
+    run_id = new_id("ww")
+    output_root = _create_webwright_output_root(case.automation_key, run_id)
 
     run = WebwrightRun(
-        id=new_id("ww"),
+        id=run_id,
         project_id=project_id,
         test_case_id=case.id,
         automation_key=case.automation_key,
@@ -373,17 +426,14 @@ async def run_webwright_for_case(
         model_config=model_cfg,
     )
 
-    cmd = [
-        python_path, "-m", "webwright.run.cli",
-    ]
-    for config_arg in config_args:
-        cmd.extend(["-c", config_arg])
-    cmd.extend([
-        "-t", prompt,
-        "--start-url", start_url,
-        "--task-id", case.automation_key,
-        "-o", str(output_root),
-    ])
+    cmd = _build_webwright_cli_args(
+        python_path=python_path,
+        config_args=config_args,
+        prompt=prompt,
+        start_url=start_url,
+        automation_key=case.automation_key,
+        output_root=output_root,
+    )
 
     await log_streams.publish(job_id, f"[webwright] Starting run for {case.automation_key}")
 
@@ -401,13 +451,12 @@ async def run_webwright_for_case(
 
     try:
         if execution_mode == "wsl":
-            inner = " ".join([f"'{c}'" if " " in c else c for c in cmd])
-            shell_cmd = ["wsl.exe", "bash", "-lc", f"cd {webwright_root} && source .venv/bin/activate && {inner}"]
+            shell_cmd = _build_wsl_webwright_args(webwright_root, cmd)
             process = await create_subprocess_exec(
                 *shell_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=webwright_root or None,
+                cwd=None,
                 env=subprocess_env,
             )
         else:
@@ -602,9 +651,8 @@ async def create_mock_run(
         if project
         else None
     )
-    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_root = _resolve_output_root() / case.automation_key / f"run_{run_ts}"
-    output_root.mkdir(parents=True, exist_ok=True)
+    run_id = new_id("ww")
+    output_root = _create_webwright_output_root(case.automation_key, run_id)
 
     script = f'''from playwright.sync_api import sync_playwright, expect
 
@@ -626,7 +674,7 @@ if __name__ == "__main__":
     (output_root / "stderr.log").write_text("", encoding="utf-8")
 
     run = WebwrightRun(
-        id=new_id("ww"),
+        id=run_id,
         project_id=project_id,
         test_case_id=case.id,
         automation_key=case.automation_key,

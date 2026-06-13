@@ -84,17 +84,16 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 
 
-**Checklist item:** C3-10 WSL Webwright command quoting hardening
+**Checklist item:** _None queued_
 
 
 
-**Why this is next:** C1-10 closed the Worker identity collision task. The
-first remaining open checklist item is the Webwright subprocess hardening task
-for WSL command quoting and shell-injection resistant argument handling.
+**Why this is next:** G-06 is complete, the checklist has no open `[ ]` rows,
+and there are no remaining queued candidate items in this file.
 
 
 
-**Owning spec:** [RUNTIME_SPEC.md](./RUNTIME_SPEC.md)
+**Owning spec:** _TBD when the next checklist item is selected_
 
 
 
@@ -102,19 +101,10 @@ for WSL command quoting and shell-injection resistant argument handling.
 
 
 
-- Inspect native and WSL Webwright subprocess command builders, runtime profile
-  fields, `.venv` activation behavior, config/model args, prompt/start URL/task
-  ID/output path handling, and existing subprocess compatibility tests.
-
-- Remove ad-hoc `bash -lc` string construction in WSL mode or constrain it with
-  deterministic `shlex.quote`/argv-safe wrapper behavior.
-
-- Preserve current native execution behavior and WSL `.venv`/Python selection
-  semantics.
-
-- Add regression tests for roots, prompts, start URLs, task IDs, and output
-  paths containing spaces, quotes, parentheses, ampersands, Korean text, and
-  shell-looking strings.
+- Add the next checklist item here before starting another NEXT ACTION batch.
+- If a new audit uncovers work, add it first to the owning source-of-truth spec
+  and [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md), then queue it
+  here.
 
 
 
@@ -122,12 +112,7 @@ for WSL command quoting and shell-injection resistant argument handling.
 
 
 
-- WSL command construction preserves each argument exactly and cannot inject
-  extra shell commands through prompt/path/config fields.
-
-- Native subprocess tests still pass.
-
-- Checklist C3-10 marked `[x]` with verification note.
+- _N/A until the next batch is queued._
 
 
 
@@ -143,13 +128,58 @@ Pick the next item from this list after Current Batch is done:
 
 |-------|----------------|---------|
 
-| 1 | C9-09 | run/job ID uniqueness and concurrent artifact isolation |
-| 2 | C11-05 | generated-file path containment hardening |
-| 3 | G-06 | localhost Worker trust boundary hardening |
+| _None_ | _TBD_ | Add the next checklist item after G-06 is complete |
 
 
 
 ## Completed Batch Notes
+
+- **Queue closeout (2026-06-13):** Confirmed `IMPLEMENTATION_CHECKLIST.md`
+  has no open `[ ]` rows, aligned the progress summary to the actual completed
+  counts including section J, and updated `SPEC_INDEX.md` so the former
+  post-MVP follow-up list no longer reads as open work. `Current Batch` remains
+  `_None queued_` until a new checklist item is added.
+
+- **G-06 (2026-06-13):** Hardened the localhost Worker trust boundary. Worker
+  CORS now uses configured Electron/dev/file origins instead of wildcard
+  origins, mutating HTTP APIs require `X-TC-Studio-Worker-Token`, disallowed
+  origins and missing/invalid tokens are rejected before filesystem/settings
+  mutations, and `/ws/logs/{job_id}` requires the same token via query string
+  plus allowed Origin. Electron main generates the session token, passes it to
+  the Worker env and renderer API client, and main-process connector IPC uses
+  it for Worker POST calls. Live E2E scripts now require
+  `TC_STUDIO_WORKER_TOKEN` through a shared HTTP client helper. Focused
+  security/path/settings tests, script compile checks, the Worker non-e2e
+  suite, and `npm run build` passed.
+
+- **C11-05 (2026-06-13):** Hardened Project IDE generated-file path
+  containment. All generated-file read/write/create/delete/rename/tree/search
+  operations now resolve paths under the generated root with
+  `Path.resolve()` + `relative_to(root)`, reject absolute/drive/UNC/traversal/
+  sibling-prefix/symlink escape paths before filesystem side effects, return
+  400 for unsafe paths and 404 for missing projects, and preserve allowed
+  nested file CRUD/search. Focused containment tests and generated-file status/
+  regeneration regressions plus the Worker non-e2e suite passed;
+  live-Webwright-dependent IDE e2e still fails before generation on this
+  machine, at the known raw-generation prerequisite.
+
+- **C9-09 (2026-06-13):** Hardened Worker run/job identity and artifact
+  isolation. Webwright output roots now include `WebwrightRun.id`, generated
+  runner `runId` values include `ExecutionRun.id`, both artifact directories
+  are reserved with no-overwrite semantics before subprocess work starts, and
+  Webwright queue/retry plus execution/rerun APIs return request-unique
+  WebSocket `jobId` values. Regression tests cover two same-second Webwright
+  starts for one case and two same-second parallel generated-runner executions
+  with distinct logs, metadata, result paths, DB rows, and job IDs; focused
+  suites, the Worker non-e2e suite, and generated browser contract e2e passed.
+
+- **C3-10 (2026-06-13):** Hardened WSL Webwright command construction. Worker
+  raw-generation now builds the Webwright CLI argv separately, invokes
+  `wsl.exe bash -lc` only with a constant `.venv` activation wrapper, passes
+  root/config/prompt/start URL/task ID/model/shell/step/output values as
+  positional argv, and avoids Windows `cwd` for WSL subprocesses. Regression
+  tests cover spaces, quotes, parentheses, ampersands, Korean text, and
+  shell-looking strings, alongside native subprocess and runtime regressions.
 
 - **C1-10 (2026-06-13):** Added a project-scoped active `automation_key`
   policy across Worker import, generation, mapping merge, and export

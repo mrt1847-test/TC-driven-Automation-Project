@@ -53,7 +53,7 @@ def test_generate_raw_workflow(client: TestClient, project_id: str, imported_cas
     mappings = client.get(f"/projects/{project_id}/cases/{case_id}/mappings").json()
     assert len(mappings) >= 1
 
-    with client.websocket_connect(f"/ws/logs/{job_id}") as websocket:
+    with client.websocket_connect(f"/ws/logs/{job_id}?token=test-worker-token") as websocket:
         message = websocket.receive_text()
         assert automation_key in message or "mock" in message.lower() or "webwright" in message.lower()
 

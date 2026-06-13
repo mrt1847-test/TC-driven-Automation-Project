@@ -45,6 +45,20 @@ _active_job_executions: dict[str, set[str]] = {}
 _active_executions_lock = RLock()
 
 
+def _create_execution_identity(generated_path: Path) -> tuple[str, str, Path]:
+    for _ in range(20):
+        execution_id = new_id("exec")
+        run_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        run_id = f"run_{run_ts}_{execution_id}"
+        artifact_dir = generated_path / "artifacts" / "runs" / run_id
+        try:
+            artifact_dir.mkdir(parents=True, exist_ok=False)
+            return execution_id, run_id, artifact_dir
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"Could not allocate execution artifact directory under {generated_path}")
+
+
 def _register_active_execution(active_execution: ActiveExecutionRun) -> None:
     with _active_executions_lock:
         _active_executions[active_execution.execution_id] = active_execution
@@ -165,10 +179,10 @@ async def cancel_execution_run(execution_id: str, job_id: str | None = None) -> 
 
 async def run_project(session: Session, project: Project, request: ExecutionRequest, job_id: str) -> ExecutionRun:
     generated_path = Path(project.generated_project_path or (Path(project.root_path) / "generated"))
-    run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    execution_id, run_id, _artifact_dir = _create_execution_identity(generated_path)
 
     exec_run = ExecutionRun(
-        id=new_id("exec"),
+        id=execution_id,
         project_id=project.id,
         run_id=run_id,
         env=request.env,
@@ -222,9 +236,9 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
     if not prev:
         raise ValueError("Execution not found")
     generated_path = Path(project.generated_project_path or (Path(project.root_path) / "generated"))
-    run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    execution_id, run_id, _artifact_dir = _create_execution_identity(generated_path)
     exec_run = ExecutionRun(
-        id=new_id("exec"),
+        id=execution_id,
         project_id=project.id,
         run_id=run_id,
         env=prev.env,

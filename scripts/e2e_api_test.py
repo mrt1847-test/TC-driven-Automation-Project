@@ -7,6 +7,8 @@ from pathlib import Path
 
 import httpx
 
+from e2e_worker_client import worker_client
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / ".data"
 EXCEL = ROOT / "fixtures" / "sample_cases.xlsx"
@@ -14,7 +16,7 @@ BASE = "http://127.0.0.1:8765"
 
 
 def main() -> None:
-    client = httpx.Client(base_url=BASE, timeout=60)
+    client = worker_client(BASE, timeout=60)
     print("health", client.get("/health").json())
 
     proj = client.post("/projects", json={"name": "E2E Project"}).json()

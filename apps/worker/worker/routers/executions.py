@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlmodel import Session, select
 
+from worker.core.config import new_id
 from worker.core.database import get_session
 from worker.models.db import ExecutionResult, ExecutionRun, Project, TestCase
 from worker.models.schemas import (
@@ -64,7 +65,7 @@ async def create_execution(project_id: str, request: ExecutionRequest, backgroun
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    job_id = f"exec_{project_id}"
+    job_id = new_id("execjob")
     background.add_task(_run_execution, project_id, request, job_id)
     return {"jobId": job_id, "status": "queued"}
 
@@ -171,7 +172,7 @@ async def rerun_failed_execution(project_id: str, execution_id: str, background:
     if not project:
         raise HTTPException(404, "Project not found")
     _get_execution_run(session, project_id, execution_id)
-    job_id = f"rerun_{execution_id}"
+    job_id = new_id("rerunjob")
     background.add_task(_rerun_failed_execution, project_id, execution_id, job_id)
     return {"jobId": job_id, "status": "queued"}
 
