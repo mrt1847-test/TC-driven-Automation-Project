@@ -9,7 +9,7 @@ type ExportErrorPanelProps = {
   exportPending?: boolean
   onOpenSettings?: () => void
   onOpenResults?: () => void
-  onOpenMapping?: () => void
+  onOpenMapping?: (automationKey?: string) => void
 }
 
 export function ExportErrorPanel({
@@ -47,8 +47,17 @@ export function ExportErrorPanel({
           <div className="text-[11px] uppercase tracking-wide text-amber-200/80">Failed items</div>
           <ul className="max-h-28 space-y-1 overflow-auto text-xs text-amber-100/90">
             {guide.issues.map((issue, index) => (
-              <li key={`${issue.kind}-${issue.automationKey || index}`} className="rounded bg-amber-950/40 px-2 py-1">
-                {formatExportIssue(issue)}
+              <li key={`${issue.kind}-${issue.automationKey || index}`} className="flex items-center justify-between gap-2 rounded bg-amber-950/40 px-2 py-1">
+                <span>{formatExportIssue(issue)}</span>
+                {issue.automationKey && onOpenMapping && (
+                  <button
+                    type="button"
+                    className="shrink-0 rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-200"
+                    onClick={() => onOpenMapping(issue.automationKey)}
+                  >
+                    Mapping
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -82,7 +91,7 @@ export function ExportErrorPanel({
           <button
             type="button"
             className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-200"
-            onClick={onOpenMapping}
+            onClick={() => onOpenMapping()}
           >
             Open mapping
           </button>

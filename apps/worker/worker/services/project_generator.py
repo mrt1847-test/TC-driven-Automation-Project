@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from worker.models.db import (
     GeneratedFile,
     GeneratedFileOrigin,
     GeneratedFileStatus,
+    PageObject,
     PageObjectMethod,
     Project,
     RawAction,
@@ -33,6 +35,7 @@ from worker.services.generated_file_status import (
     latest_generated_files_by_path,
     refresh_generated_file_statuses,
 )
+from worker.services.automation_keys import assert_unique_active_automation_keys
 from worker.services.mapping import get_mappings
 from worker.services.protected_regions import merge_protected_regions, protected_region_block
 from worker.services.structuring_service import get_flow_steps, get_latest_flow, sync_structured_entities
@@ -144,11 +147,21 @@ class GenerationConflictError(ValueError):
 
 
 @dataclass
+class PageObjectUsage:
+    id: str
+    class_name: str
+    file_path: str
+    instance_name: str
+
+
+@dataclass
 class CaseGeneration:
     case: TestCase
     flow: object
     steps: list
     origins: set[Origin]
+    page_origins: dict[str, set[Origin]]
+    page_objects: dict[str, PageObjectUsage]
     test_file: str
     flow_file: str
     test_content: str
@@ -158,6 +171,41 @@ class CaseGeneration:
 
 def _snake(name: str) -> str:
     return name.lower().replace("-", "_").replace(" ", "_")
+
+
+def _snake_identifier(name: str) -> str:
+    text = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
+    text = re.sub(r"[^a-zA-Z0-9_]+", "_", text).strip("_").lower()
+    if not text:
+        return "generated_page"
+    if text == "page":
+        return "page_object"
+    if text[0].isdigit():
+        return f"page_{text}"
+    return text
+
+
+def _module_from_path(relative_path: str) -> str:
+    path = Path(relative_path)
+    without_suffix = path.with_suffix("")
+    return ".".join(without_suffix.parts)
+
+
+def _page_file_path(page: PageObject | None) -> str:
+    return (page.file_path if page and page.file_path else "pages/generated_page.py").replace("\\", "/")
+
+
+def _page_usage(page: PageObject | None) -> PageObjectUsage:
+    page_id = page.id if page and page.id else "generated_page"
+    class_name = page.name if page and page.name else "GeneratedPage"
+    file_path = _page_file_path(page)
+    return PageObjectUsage(
+        id=page_id,
+        class_name=class_name,
+        file_path=file_path,
+        instance_name=_snake_identifier(class_name),
+    )
 
 
 _PLAYWRIGHT_INTERACTION_METHODS = {
@@ -393,8 +441,63 @@ def _method_body(pom: PageObjectMethod, base_url: str | None = None) -> list[str
     return lines
 
 
+def _case_page_origins(session: Session, case: TestCase, flow, steps) -> dict[str, set[Origin]]:
+    page_origins: dict[str, set[Origin]] = {}
+    mappings_by_id = {
+        mapping.id: mapping
+        for mapping in get_mappings(session, case.id)
+        if mapping.id
+    }
+    raw_action_ids: set[str] = {
+        action_id
+        for mapping in mappings_by_id.values()
+        for action_id in mapping.action_ids
+    }
+    raw_actions = {
+        action.id: action
+        for action in session.exec(select(RawAction).where(RawAction.id.in_(sorted(raw_action_ids)))).all()
+        if action.id
+    } if raw_action_ids else {}
+
+    for step in steps:
+        if not step.page_object_method_id:
+            continue
+        method = session.get(PageObjectMethod, step.page_object_method_id)
+        if not method or not method.id:
+            continue
+        page = session.get(PageObject, method.page_object_id)
+        usage = _page_usage(page)
+        origins = page_origins.setdefault(usage.file_path, {("test_case", case.id)})
+        if flow and flow.id:
+            origins.add(("structured_flow", flow.id))
+        if step.id:
+            origins.add(("structured_step", step.id))
+        origins.add(("page_object_method", method.id))
+        origins.add(("page_object", method.page_object_id))
+
+        mapping_ids: set[str] = set()
+        if step.mapping_id:
+            mapping_ids.add(step.mapping_id)
+        if method.source_mapping_id:
+            mapping_ids.add(method.source_mapping_id)
+        for mapping_id in mapping_ids:
+            origins.add(("mapping", mapping_id))
+            mapping = mappings_by_id.get(mapping_id)
+            if not mapping:
+                continue
+            for action_id in mapping.action_ids:
+                action = raw_actions.get(action_id)
+                if not action:
+                    continue
+                origins.add(("raw_action", action.id))
+                if action.webwright_run_id:
+                    origins.add(("webwright_run", action.webwright_run_id))
+    return page_origins
+
+
 def _case_origins(session: Session, case: TestCase, flow, steps) -> set[Origin]:
-    origins: set[Origin] = {("test_case", case.id)}
+    page_origins = _case_page_origins(session, case, flow, steps)
+    origins: set[Origin] = set().union(*page_origins.values()) if page_origins else {("test_case", case.id)}
     if flow and flow.id:
         origins.add(("structured_flow", flow.id))
 
@@ -611,6 +714,7 @@ def _mapping_entry(case: TestCase, test_file: str, test_fn: str) -> dict:
         "title": case.title,
         "testFile": test_file,
         "testFunction": test_fn,
+        "pageObjects": ["pages/generated_page.py"],
         "tags": json.loads(case.tags_json or "[]"),
         "resultTargets": result_targets,
     }
@@ -634,28 +738,50 @@ def _case_generation(
     steps,
 ) -> CaseGeneration:
     origins = _case_origins(session, case, flow, steps)
+    page_origins = _case_page_origins(session, case, flow, steps)
     flow_class = flow.name if flow else "".join(part.capitalize() for part in case.automation_key.split("_")) + "Flow"
     flow_file = f"flows/{_snake(case.automation_key)}_flow.py"
     test_file = f"tests/test_{_snake(case.automation_key)}.py"
     test_fn = f"test_{_snake(case.automation_key)}"
+    page_objects: dict[str, PageObjectUsage] = {}
+    step_calls: list[tuple[str, str]] = []
+    for step in steps:
+        if not step.page_object_method_id:
+            continue
+        pom = session.get(PageObjectMethod, step.page_object_method_id)
+        if not pom:
+            continue
+        page = session.get(PageObject, pom.page_object_id)
+        usage = _page_usage(page)
+        page_objects[usage.file_path] = usage
+        step_calls.append((usage.instance_name, pom.name))
+    if not page_objects:
+        fallback = _page_usage(None)
+        page_objects[fallback.file_path] = fallback
+
+    imports = [
+        f"from {_module_from_path(usage.file_path)} import {usage.class_name}"
+        for usage in sorted(page_objects.values(), key=lambda item: (item.file_path, item.class_name))
+    ]
     flow_lines = [
-        "from pages.generated_page import GeneratedPage",
+        *imports,
         "",
         f"class {flow_class}:",
         "    def __init__(self, page):",
         "        self.page = page",
-        "        self.generated_page = GeneratedPage(page)",
+        *[
+            f"        self.{usage.instance_name} = {usage.class_name}(page)"
+            for usage in sorted(page_objects.values(), key=lambda item: (item.file_path, item.class_name))
+        ],
         "",
         *protected_region_block("flow-helpers", indent="    "),
         "",
         "    def execute(self):",
     ]
-    for step in steps:
-        if not step.page_object_method_id:
-            continue
-        pom = session.get(PageObjectMethod, step.page_object_method_id)
-        if pom:
-            flow_lines.append(f"        self.generated_page.{pom.name}()")
+    for instance_name, method_name in step_calls:
+        flow_lines.append(f"        self.{instance_name}.{method_name}()")
+    if not step_calls:
+        flow_lines.append("        pass")
 
     test_import_region = "\n".join(protected_region_block("test-imports"))
     test_setup_region = "\n".join(protected_region_block("test-setup", indent="    "))
@@ -676,11 +802,16 @@ def {test_fn}(page: Page):
         flow=flow,
         steps=steps,
         origins=origins,
+        page_origins=page_origins,
+        page_objects=page_objects,
         test_file=test_file,
         flow_file=flow_file,
         test_content=test_content,
         flow_content="\n".join(flow_lines) + "\n",
-        mapping_entry=_mapping_entry(case, test_file, test_fn),
+        mapping_entry={
+            **_mapping_entry(case, test_file, test_fn),
+            "pageObjects": sorted(page_objects),
+        },
     )
 
 
@@ -868,14 +999,26 @@ def _page_content(
     session: Session,
     generations: list[CaseGeneration],
     base_url: str | None = None,
+    page_file_path: str = "pages/generated_page.py",
 ) -> str:
     page_methods: dict[str, list[str]] = {}
+    page_usage = _page_usage(None)
     for generation in sorted(generations, key=lambda item: (item.case.automation_key, item.case.id)):
+        generation_page_objects = getattr(generation, "page_objects", {})
+        if page_file_path in generation_page_objects:
+            page_usage = generation_page_objects[page_file_path]
         for step in generation.steps:
             if not step.page_object_method_id:
                 continue
             pom = session.get(PageObjectMethod, step.page_object_method_id)
-            if pom and pom.name not in page_methods:
+            if not pom:
+                continue
+            page = session.get(PageObject, pom.page_object_id)
+            usage = _page_usage(page)
+            if generation_page_objects and usage.file_path != page_file_path:
+                continue
+            page_usage = usage
+            if pom.name not in page_methods:
                 page_methods[pom.name] = [
                     f"    def {pom.name}(self):",
                     *_method_body(pom, base_url),
@@ -902,7 +1045,7 @@ def _page_content(
         ])
     elif uses_expect:
         lines.extend(["from playwright.sync_api import expect", "", ""])
-    lines.extend(["class GeneratedPage:", "    def __init__(self, page):", "        self.page = page"])
+    lines.extend([f"class {page_usage.class_name}:", "    def __init__(self, page):", "        self.page = page"])
     if uses_env:
         lines.extend([
             "        self._env_config = _load_env_config()",
@@ -937,6 +1080,8 @@ def _load_cases_yaml(path: Path) -> list[dict]:
 
 
 def _merge_mapping_entries(existing: list[dict], replacements: list[dict]) -> list[dict]:
+    _assert_unique_mapping_entries(existing, "Existing mappings/cases.yaml")
+    _assert_unique_mapping_entries(replacements, "Replacement mappings")
     replacements_by_key = {
         entry["automationKey"]: entry
         for entry in replacements
@@ -954,6 +1099,52 @@ def _merge_mapping_entries(existing: list[dict], replacements: list[dict]) -> li
         if key not in used:
             merged.append(replacements_by_key[key])
     return merged
+
+
+def _assert_unique_mapping_entries(entries: list[dict], label: str) -> None:
+    grouped: dict[str, list[str]] = {}
+    for index, entry in enumerate(entries, start=1):
+        key = entry.get("automationKey")
+        if not key:
+            continue
+        grouped.setdefault(str(key), []).append(str(index))
+    duplicates = {
+        key: indexes
+        for key, indexes in grouped.items()
+        if len(indexes) > 1
+    }
+    if not duplicates:
+        return
+    details = ", ".join(
+        f"{key} (rows {', '.join(indexes)})"
+        for key, indexes in sorted(duplicates.items())
+    )
+    raise ValueError(f"{label} contains duplicate automationKey rows: {details}")
+
+
+def _assert_unique_generation_paths(generations: Iterable[CaseGeneration]) -> None:
+    path_groups: dict[str, list[str]] = {}
+    key_groups: dict[str, list[str]] = {}
+    for generation in generations:
+        case_id = str(generation.case.id or "")
+        key_groups.setdefault(generation.case.automation_key, []).append(case_id)
+        path_groups.setdefault(generation.test_file, []).append(case_id)
+        path_groups.setdefault(generation.flow_file, []).append(case_id)
+
+    duplicate_keys = {key: ids for key, ids in key_groups.items() if key and len(ids) > 1}
+    duplicate_paths = {path: ids for path, ids in path_groups.items() if len(ids) > 1}
+    if not duplicate_keys and not duplicate_paths:
+        return
+    details: list[str] = []
+    details.extend(
+        f"automationKey {key} ({', '.join(ids)})"
+        for key, ids in sorted(duplicate_keys.items())
+    )
+    details.extend(
+        f"path {path} ({', '.join(ids)})"
+        for path, ids in sorted(duplicate_paths.items())
+    )
+    raise ValueError("Generation would overwrite duplicate automation identities: " + "; ".join(details))
 
 
 def _resolved_template_path(profile: object) -> Path:
@@ -1019,6 +1210,8 @@ def generate_project(
     if generation_mode == "incremental" and not requested_case_ids:
         raise ValueError("Incremental generation requires caseIds")
 
+    assert_unique_active_automation_keys(session, project_id)
+
     before_files = _file_paths(output)
     initialized = not output.exists()
 
@@ -1064,50 +1257,83 @@ def generate_project(
         generation = _case_generation(session, case, flow, steps)
         generated[case.id] = generation
 
+    _assert_unique_generation_paths(generated.values())
+
     if generation_mode == "full":
-        page_case_ids = set(generated)
         mapping_entries = [generation.mapping_entry for generation in generated.values()]
     else:
-        page_case_ids = _shared_case_ids(session, project_id, "pages/generated_page.py")
-        page_case_ids.update(selected_case_ids)
         mapping_path = output / "mappings" / "cases.yaml"
         existing_entries = [] if initialized else _load_cases_yaml(mapping_path)
         mapping_entries = _merge_mapping_entries(
             existing_entries,
             [generated[case_id].mapping_entry for case_id in selected_case_ids],
         )
-
-    shared_generations: dict[str, CaseGeneration] = dict(generated)
-    for case_id in sorted(page_case_ids):
-        if case_id in shared_generations:
-            continue
-        case = all_cases_by_id.get(case_id)
-        generation = _latest_generation(session, case) if case else None
-        if generation:
-            shared_generations[case_id] = generation
-
-    shared_origins: set[Origin] = set()
-    shared_automation_keys: set[str] = set()
-    shared_primary_origins: list[Origin] = []
-    for generation in shared_generations.values():
-        shared_origins.update(generation.origins)
-        shared_automation_keys.add(generation.case.automation_key)
-        shared_primary_origins.append(
-            ("structured_flow", generation.flow.id)
-            if generation.flow and generation.flow.id
-            else ("test_case", generation.case.id)
-        )
-
-    page_relative_path = "pages/generated_page.py"
-    file_origins[page_relative_path] = shared_origins
-    file_automation_keys[page_relative_path] = shared_automation_keys
-    if shared_primary_origins:
-        file_primary_origins[page_relative_path] = sorted(shared_primary_origins)[0]
+    _assert_unique_mapping_entries(mapping_entries, "Planned mappings/cases.yaml")
 
     mapping_relative_path = "mappings/cases.yaml"
     mapping_path = output / mapping_relative_path
     generation_base_url = _generation_base_url(session, project_id, output, template_path)
-    page_content = _page_content(session, list(shared_generations.values()), generation_base_url)
+    page_paths: set[str] = set()
+    for generation in generated.values():
+        page_paths.update(generation.page_objects)
+    if generation_mode != "full":
+        for relative_path in latest_generated_files_by_path(session, project_id):
+            if not relative_path.startswith("pages/"):
+                continue
+            origins = _generated_file_origins(session, project_id, relative_path)
+            if any(
+                ("test_case", case_id) in origins
+                for case_id in selected_case_ids
+            ):
+                page_paths.add(relative_path)
+    if not page_paths:
+        page_paths.add("pages/generated_page.py")
+
+    page_generations_by_path: dict[str, dict[str, CaseGeneration]] = {
+        page_path: {} for page_path in sorted(page_paths)
+    }
+    for page_path in sorted(page_paths):
+        page_case_ids = {
+            case_id
+            for case_id, generation in generated.items()
+            if page_path in generation.page_objects
+        }
+        if generation_mode != "full":
+            page_case_ids.update(_shared_case_ids(session, project_id, page_path))
+        for case_id in sorted(page_case_ids):
+            generation = generated.get(case_id)
+            if not generation:
+                case = all_cases_by_id.get(case_id)
+                generation = _latest_generation(session, case) if case else None
+            if generation and page_path in generation.page_objects:
+                page_generations_by_path[page_path][case_id] = generation
+
+    page_contents = {
+        page_path: _page_content(
+            session,
+            list(page_generations.values()),
+            generation_base_url,
+            page_path,
+        )
+        for page_path, page_generations in page_generations_by_path.items()
+    }
+    for page_path, page_generations in page_generations_by_path.items():
+        page_origins: set[Origin] = set()
+        page_automation_keys: set[str] = set()
+        page_primary_origins: list[Origin] = []
+        for generation in page_generations.values():
+            page_origins.update(generation.page_origins.get(page_path, set()))
+            page_automation_keys.add(generation.case.automation_key)
+            page_primary_origins.append(
+                ("structured_flow", generation.flow.id)
+                if generation.flow and generation.flow.id
+                else ("test_case", generation.case.id)
+            )
+        file_origins[page_path] = page_origins
+        file_automation_keys[page_path] = page_automation_keys
+        if page_primary_origins:
+            file_primary_origins[page_path] = sorted(page_primary_origins)[0]
+
     mapping_content = yaml.dump({"cases": mapping_entries}, allow_unicode=True, sort_keys=False)
     existing_mapping_origins = (
         set()
@@ -1118,13 +1344,17 @@ def generate_project(
         _generated_file_origins(session, project_id, generated[case_id].test_file)
         for case_id in selected_case_ids
     )) if selected_case_ids else set()
+    generated_origins = set().union(*(
+        generation.origins
+        for generation in generated.values()
+    )) if generated else set()
     mapping_origins = (
-        (existing_mapping_origins - selected_existing_origins) | shared_origins
+        (existing_mapping_origins - selected_existing_origins) | generated_origins
         if selected_case_ids
         else existing_mapping_origins
     )
     if generation_mode == "full":
-        mapping_origins = shared_origins
+        mapping_origins = generated_origins
     file_origins[mapping_relative_path] = mapping_origins
     mapping_keys = {
         entry.get("automationKey")
@@ -1132,16 +1362,22 @@ def generate_project(
         if entry.get("automationKey")
     }
     file_automation_keys[mapping_relative_path] = mapping_keys
-    if shared_primary_origins:
-        file_primary_origins[mapping_relative_path] = sorted(shared_primary_origins)[0]
+    mapping_primary_origins = [
+        ("structured_flow", generation.flow.id)
+        if generation.flow and generation.flow.id
+        else ("test_case", generation.case.id)
+        for generation in generated.values()
+    ]
+    if mapping_primary_origins:
+        file_primary_origins[mapping_relative_path] = sorted(mapping_primary_origins)[0]
 
     file_origins[RUNTIME_MANIFEST_PATH] = set()
     file_automation_keys[RUNTIME_MANIFEST_PATH] = set()
 
     planned_rewritten_files = {
         RUNTIME_MANIFEST_PATH,
-        page_relative_path,
         mapping_relative_path,
+        *page_contents,
         *(
             relative_path
             for generation in generated.values()
@@ -1150,8 +1386,8 @@ def generate_project(
     }
     planned_contents = {
         RUNTIME_MANIFEST_PATH: runtime_manifest_content,
-        page_relative_path: page_content,
         mapping_relative_path: mapping_content,
+        **page_contents,
         **{
             generation.flow_file: generation.flow_content
             for generation in generated.values()
@@ -1277,7 +1513,8 @@ def generate_project(
             generation.flow.status = StructuredFlowStatus.generated.value
             session.add(generation.flow)
 
-    _write_text(output / page_relative_path, planned_contents[page_relative_path], rewritten_files, output)
+    for page_relative_path in sorted(page_contents):
+        _write_text(output / page_relative_path, planned_contents[page_relative_path], rewritten_files, output)
     _write_text(mapping_path, planned_contents[mapping_relative_path], rewritten_files, output)
 
     for relative_path in sorted(file_origins):
@@ -1377,7 +1614,14 @@ def retire_generated_case(
         for relative_path, origins in origins_by_path.items()
         if selected_origin in origins or latest_by_path[relative_path].automation_key == case.automation_key
     }
-    control_paths = {"pages/generated_page.py", "mappings/cases.yaml"}
+    control_paths = {
+        "mappings/cases.yaml",
+        *(
+            relative_path
+            for relative_path in impacted_files
+            if relative_path.startswith("pages/")
+        ),
+    }
     expected_private_paths = {
         f"flows/{_snake(case.automation_key)}_flow.py",
         f"tests/test_{_snake(case.automation_key)}.py",
@@ -1440,37 +1684,44 @@ def retire_generated_case(
             for origin_type, origin_id in origins
             if origin_type == "test_case" and origin_id in active_case_ids
         }
-        if origin_active_case_ids != remaining_mapping_case_ids:
-            conflict_files.add(relative_path)
         if relative_path == "mappings/cases.yaml":
+            if origin_active_case_ids != remaining_mapping_case_ids:
+                conflict_files.add(relative_path)
             entries = [
                 entry for entry in mapping_entries
                 if entry.get("automationKey") != case.automation_key
             ]
             content = yaml.dump({"cases": entries}, allow_unicode=True, sort_keys=False)
+            remaining_case_ids_for_file = remaining_mapping_case_ids
         else:
-            content = ""
+            remaining_case_ids_for_file = origin_active_case_ids
+            if not remaining_case_ids_for_file:
+                continue
 
         generations: list[CaseGeneration] = []
-        for remaining_case_id in sorted(remaining_mapping_case_ids):
+        for remaining_case_id in sorted(remaining_case_ids_for_file):
             generation = _latest_generation(session, project_cases[remaining_case_id])
             if not generation:
                 conflict_files.add(relative_path)
                 continue
             generations.append(generation)
-        if relative_path == "pages/generated_page.py":
+        if relative_path.startswith("pages/"):
             template_path = _resolved_template_path(resolve_runtime(load_settings()))
             content = _page_content(
                 session,
                 generations,
                 _generation_base_url(session, project_id, output, template_path),
+                relative_path,
             )
 
         refreshed_origins: set[Origin] = set()
         automation_keys: set[str] = set()
         primary_origins: list[Origin] = []
         for generation in generations:
-            refreshed_origins.update(generation.origins)
+            if relative_path.startswith("pages/"):
+                refreshed_origins.update(generation.page_origins.get(relative_path, set()))
+            else:
+                refreshed_origins.update(generation.origins)
             automation_keys.add(generation.case.automation_key)
             primary_origins.append(
                 ("structured_flow", generation.flow.id)

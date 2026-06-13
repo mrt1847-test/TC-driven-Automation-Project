@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type TestCase } from '@/lib/api'
+import { useAutomationKeyDeepLink } from '@/lib/caseDeepLink'
 import { useAppStore } from '@/store/appStore'
 
 const STATUS_OPTIONS = [
@@ -46,6 +47,7 @@ export function CasesPage() {
     queryFn: () => api.cases.list(project!.id),
     enabled: !!project
   })
+  useAutomationKeyDeepLink(cases)
 
   const sourceTypes = useMemo(
     () => Array.from(new Set(cases.map((item) => item.source_type))).sort(),

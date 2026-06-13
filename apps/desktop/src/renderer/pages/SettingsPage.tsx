@@ -62,6 +62,11 @@ type AppSettings = {
     googleSheets?: IntegrationConfig
     [key: string]: unknown
   }
+  self_healing?: {
+    autoApplyProjectIds?: unknown
+    auto_apply_project_ids?: unknown
+    [key: string]: unknown
+  }
   [key: string]: unknown
 }
 
@@ -180,6 +185,9 @@ export function SettingsPage() {
   const generator = parsedSettings?.generator || {}
   const runner = parsedSettings?.runner || {}
   const integrations = parsedSettings?.integrations || {}
+  const selfHealing = parsedSettings?.self_healing || {}
+  const autoApplyProjectIds = getAutoApplyProjectIds(selfHealing)
+  const currentProjectAutoApplyEnabled = Boolean(project?.id && autoApplyProjectIds.includes(project.id))
   const browserCheck = getHealthCheck(validation, 'playwrightBrowser')
   const smokeTestRan = typeof validation?.allOk === 'boolean'
   const smokeTestPassed = validation?.allOk === true
@@ -270,6 +278,22 @@ export function SettingsPage() {
     if (!project?.generated_project_path) return
     const res = await api.installDeps(project.id, project.generated_project_path)
     setHealth(JSON.stringify(res, null, 2))
+  }
+
+  function updateCurrentProjectAutoApply(enabled: boolean) {
+    if (!project) return
+    applyPatch((draft) => {
+      const current = draft.self_healing || {}
+      const existingProjectIds = getAutoApplyProjectIds(current)
+      const nextProjectIds = enabled
+        ? Array.from(new Set([...existingProjectIds, project.id]))
+        : existingProjectIds.filter((projectId) => projectId !== project.id)
+      draft.self_healing = {
+        ...current,
+        autoApplyProjectIds: nextProjectIds
+      }
+      delete draft.self_healing.auto_apply_project_ids
+    })
   }
 
   return (
@@ -553,6 +577,28 @@ export function SettingsPage() {
       </section>
 
       <section className={sectionClass}>
+        <h3 className="text-sm font-medium">Self-healing</h3>
+        <label className={`flex items-start gap-3 rounded border border-slate-800 bg-slate-950 p-3 text-sm ${project ? 'text-slate-300' : 'text-slate-500'}`}>
+          <input
+            checked={currentProjectAutoApplyEnabled}
+            className="mt-1"
+            disabled={!project}
+            type="checkbox"
+            onChange={(e) => updateCurrentProjectAutoApply(e.target.checked)}
+          />
+          <span>
+            <span className="block text-slate-200">Auto-apply safe selector healing for current project</span>
+            <span className="mt-1 block text-xs text-slate-500">
+              {project ? `${project.name} (${project.id})` : 'Select a project first.'}
+            </span>
+          </span>
+        </label>
+        <div className="text-xs text-slate-500">
+          Enabled project IDs: {autoApplyProjectIds.length ? autoApplyProjectIds.join(', ') : 'None'}
+        </div>
+      </section>
+
+      <section className={sectionClass}>
         <h3 className="text-sm font-medium">Integrations</h3>
         <IntegrationRow
           enabled={integrations.testrailClone?.enabled === true}
@@ -808,6 +854,18 @@ function credentialStatusText(account: string, presence: Record<string, boolean>
 function getHealthCheck(health: HealthResponse | null, key: string): HealthCheck | null {
   const value = health?.[key]
   return typeof value === 'object' && value !== null ? value : null
+}
+
+function getAutoApplyProjectIds(settings: AppSettings['self_healing'] | undefined): string[] {
+  return Array.from(new Set([
+    ...normalizeProjectIds(settings?.autoApplyProjectIds),
+    ...normalizeProjectIds(settings?.auto_apply_project_ids)
+  ]))
+}
+
+function normalizeProjectIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item).trim()).filter(Boolean)
 }
 
 function patchSettings(

@@ -162,6 +162,16 @@ C12-07 implementation behavior:
   file, or generation-conflict cases return a concrete `blocked` reason and do
   not persist selector/body-plan changes or rewrite generated files.
 
+D9-04 implementation behavior:
+
+- Settings exposes a current-project structured toggle for selector
+  auto-apply;
+- the toggle writes the canonical
+  `settings.self_healing.autoApplyProjectIds` list and preserves other
+  Settings fields;
+- existing advanced JSON editing remains available for manual inspection and
+  recovery.
+
 ## Extended Proposal Kinds
 
 C12-13 extends the same reviewable proposal table and decision flow beyond
@@ -327,6 +337,8 @@ Done:
 - C12-07 safe auto-apply guardrails keep proposal creation review-only by
   default and allow project-enabled selector auto-apply only under conservative
   evidence, confidence, semantic, stale-target, and generation-conflict checks.
+- D9-04 exposes the project-enabled auto-apply setting in the desktop Settings
+  surface instead of requiring advanced JSON edits.
 - C12-13 extended proposal kinds persist and apply reviewed `wait_adjust`,
   `assertion_update`, and `pom_method_patch` proposals with JSON patch payloads,
   evidence metadata, guarded selected regeneration, stale-target checks, and

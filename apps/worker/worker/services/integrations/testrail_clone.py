@@ -4,7 +4,7 @@ import httpx
 
 from worker.core.config import load_settings
 from worker.models.schemas import NormalizedTestCase, TestStep
-from worker.services.case_import import _generate_automation_key
+from worker.services.automation_keys import reserve_automation_key
 
 
 async def import_from_testrail_clone(project_id: str, suite_id: str | None, existing_keys: set[str]) -> list[NormalizedTestCase]:
@@ -22,7 +22,12 @@ async def import_from_testrail_clone(project_id: str, suite_id: str | None, exis
     for item in payload.get("cases", []):
         case_id = str(item.get("caseId", ""))
         title = item.get("title", case_id)
-        automation_key = item.get("automationKey") or _generate_automation_key(title, case_id, existing_keys)
+        automation_key = reserve_automation_key(
+            item.get("automationKey"),
+            title=title,
+            source_id=case_id,
+            reserved_keys=existing_keys,
+        )
         existing_keys.add(automation_key)
         steps = [TestStep(index=i + 1, action=s.get("action", ""), expected=s.get("expected")) for i, s in enumerate(item.get("steps", []))]
         cases.append(NormalizedTestCase(

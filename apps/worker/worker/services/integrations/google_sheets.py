@@ -12,6 +12,7 @@ import httpx
 from worker.core.config import MASK, mask_secrets
 from worker.models.schemas import ExcelColumnMapping, NormalizedTestCase, SourceLocation, TestStep
 from worker.services.case_import import DEFAULT_MAPPING, _generate_automation_key, _parse_steps
+from worker.services.automation_keys import reserve_automation_key
 
 
 SHEETS_READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
@@ -75,9 +76,12 @@ def normalize_google_sheet_values(
             continue
         case_id = _cell(row, mapping.case_id) or f"{spreadsheet_id}:{sheet_name}:{offset}"
         title = _cell(row, mapping.title) or case_id
-        automation_key = _cell(row, mapping.automation_key)
-        if not automation_key or automation_key in existing_keys:
-            automation_key = _generate_automation_key(title, case_id, existing_keys)
+        automation_key = reserve_automation_key(
+            _cell(row, mapping.automation_key),
+            title=title,
+            source_id=case_id,
+            reserved_keys=existing_keys,
+        )
         existing_keys.add(automation_key)
         expected_result = _cell(row, mapping.expected) or None
         preconditions = [line.strip() for line in _cell(row, mapping.precondition).splitlines() if line.strip()]

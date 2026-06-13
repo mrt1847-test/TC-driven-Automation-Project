@@ -174,6 +174,13 @@ credential IPC. The IPC returns presence only to the renderer; plaintext
 credential values remain available only inside the main process path that will
 mediate real connector calls.
 
+D9-04 Settings GUI rule: the desktop Settings surface exposes the current
+project's self-healing auto-apply state as a structured toggle backed by
+`self_healing.autoApplyProjectIds`. Saving the form sends the same full
+`PUT /settings` payload used by advanced JSON editing, preserving unrelated
+settings and canonicalizing legacy `auto_apply_project_ids` into
+`autoApplyProjectIds`.
+
 ## Projects
 
 | Method | Path | Status | Purpose | Checklist |

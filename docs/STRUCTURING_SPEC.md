@@ -282,8 +282,8 @@ Generation persistence contract:
   `content_hash` describes the actual output;
 - keep one active `GeneratedFile` row per project and relative path;
 - attach the complete relevant origin set to case-specific files;
-- attach the union of current relevant case origins to shared page and mappings
-  files;
+- attach the union of current relevant case origins to each shared page file and
+  mappings file;
 - replace the origin set on regeneration, removing stale origins and duplicate
   metadata rows while retaining the primary source fields for compatibility.
 
@@ -307,6 +307,30 @@ Regeneration must be deterministic:
 - protected regions preserve explicitly marked manual code blocks while keeping
   conflict detection for unprotected generated code.
 
+## Route-Segmented PageObjects
+
+C7-17 groups generated PageObjects by route evidence when available. During
+structure sync and selected raw refresh merge, Worker reads mapped
+RawAction/Webwright trajectory evidence. If a mapped action has a trajectory URL
+or current URL, the route path is normalized into a deterministic PageObject
+name and file path, for example:
+
+- `https://app.example/login` -> `LoginPage` in `pages/login_page.py`;
+- `/checkout/payment` -> `CheckoutPaymentPage` in
+  `pages/checkout_payment_page.py`.
+
+Mappings without usable route evidence continue to use the legacy fallback
+`GeneratedPage` in `pages/generated_page.py`.
+
+Generated flow files import and instantiate every PageObject used by that flow,
+then call each step's method on the matching page instance. Generated page files
+contain only the `PageObjectMethod` rows assigned to that PageObject. Full
+generation writes all active route page files. Selected generation rewrites the
+selected TC's page files plus any origin-linked shared page files and preserves
+unrelated route page files. Retire/delete cleanup rebuilds only impacted page
+files from remaining active origin links, marking page files obsolete when no
+active TC still references them.
+
 ## Generated Protected Regions
 
 C7-14 introduces protected regions for generated Python files that are expected
@@ -319,8 +343,8 @@ to host small user-maintained extensions. Regions use comment markers:
 
 Generated region names are unique per file. Current generated regions are:
 
-- `pages/generated_page.py`: `generated-page-helpers` inside
-  `GeneratedPage`;
+- each generated `pages/*_page.py` PageObject file: `generated-page-helpers`
+  inside the page class;
 - `flows/{automation_key}_flow.py`: `flow-helpers` inside the flow class;
 - `tests/test_{automation_key}.py`: `test-imports` at module level and
   `test-setup` inside the test function.
@@ -673,7 +697,7 @@ Done:
   `credential_value_placeholder` for review, and kept out of generated source;
   raw refresh merges reuse the same planner path before preview/regeneration.
 - C7-15 PageObjectMethod identity is case-scoped: structure sync writes
-  generated-page methods as `{automation_key}__step_{tc_step_index}_{base}`,
+  generated page methods as `{automation_key}__step_{tc_step_index}_{base}`,
   prevents cross-case overwrite for same-named steps, keeps readable mapping
   names unchanged, and repairs legacy shared methods into scoped methods during
   selected raw refresh before updating the selected case.
@@ -688,3 +712,9 @@ Done:
   import, and setup blocks in generated Python files by merging region bodies
   before regeneration and hashing generated files with protected bodies
   normalized out, while continuing to flag unprotected edits as edited/conflict.
+- C7-17 PageObject segmentation uses mapped Webwright trajectory route URLs to
+  assign `PageObjectMethod` rows to route-specific PageObjects/files such as
+  `pages/login_page.py`, keeps `GeneratedPage` as the no-route fallback,
+  generates flows with per-page imports/instances, records page-file origins per
+  segmented file, preserves unrelated route pages during selected regeneration,
+  and rebuilds shared segmented page files during retire/delete cleanup.

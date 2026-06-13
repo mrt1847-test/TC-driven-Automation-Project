@@ -33,6 +33,7 @@ import {
   type ExportErrorGuide
 } from '@/lib/exportErrors'
 import { ExportErrorPanel } from '@/components/ExportErrorPanel'
+import { caseDeepLink } from '@/lib/caseDeepLink'
 import { useAppStore } from '@/store/appStore'
 
 type GeneratedFileItem = {
@@ -461,7 +462,7 @@ export function IdePage() {
       <div className="flex gap-2">
         <h2 className="text-2xl font-bold flex-1">Project IDE</h2>
         {selectedCaseInProject && (
-          <button className="px-3 py-1 bg-slate-700 rounded" onClick={() => navigate('/webwright')}>
+          <button className="px-3 py-1 bg-slate-700 rounded" onClick={() => navigate(caseDeepLink('/webwright', selectedCaseInProject.automation_key))}>
             Rerun Raw
           </button>
         )}
@@ -755,7 +756,10 @@ export function IdePage() {
                     <ExportErrorPanel
                       guide={exportErrorGuide}
                       exportPending={exportMut.isPending}
-                      onOpenMapping={() => loadFile('mappings/cases.yaml')}
+                      onOpenMapping={(automationKey) => {
+                        if (automationKey) navigate(caseDeepLink('/mapping', automationKey))
+                        else loadFile('mappings/cases.yaml')
+                      }}
                       onOpenResults={() => {
                         const resultPath = executionDetail?.run.result_path
                         if (resultPath) window.electronAPI?.openPath(resultPath)
@@ -1462,7 +1466,7 @@ function FailureDiagnosisPanel({
               )}
               {row.diagnosis.disposition === 'unknown' && (
                 <>
-                  <button className="rounded bg-slate-700 px-3 py-1.5 text-xs" type="button" onClick={() => navigate('/mapping')}>
+                  <button className="rounded bg-slate-700 px-3 py-1.5 text-xs" type="button" onClick={() => navigate(caseDeepLink('/mapping', row.automationKey))}>
                     Open Mapping Review
                   </button>
                   <span className="text-xs text-slate-500">Manual diagnosis only; no mutation is available for unknown failures.</span>

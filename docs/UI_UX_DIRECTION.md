@@ -1,6 +1,6 @@
 # UI/UX Direction
 
-Last aligned: 2026-05-31
+Last aligned: 2026-06-13
 
 이 제품의 UI/UX는 Cursor 같은 작업 중심 IDE를 참고한다. 목표는 마케팅형 SaaS 화면이 아니라, QA 자동화 담당자가 TC를 가져오고, raw automation을 검토하고, 구조화된 프로젝트를 편집·실행하는 로컬 작업 환경이다.
 
@@ -133,6 +133,10 @@ Surface readiness using PRODUCT_PILLARS completion signals, not only HTTP succes
 - Use persistent left navigation.
 - Keep current project and selected TC visible whenever possible.
 - Allow deep linking to a case by `automation_key`.
+- Implementation note (D1-08): `?automation_key=<key>` resolves the selected
+  TC within the active project. GUI handoff links from generated-file, result,
+  export, and healing contexts should preserve that key when opening Mapping,
+  Webwright, or related IDE surfaces.
 - Screens should preserve selection state when moving between Generate Raw and Automation IDE.
 - Avoid wizard-like flows after initial setup unless the operation truly requires sequential confirmation.
 

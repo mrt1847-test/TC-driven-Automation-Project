@@ -9,6 +9,7 @@ import httpx
 from worker.core.config import MASK, mask_secrets
 from worker.models.schemas import NormalizedTestCase, SourceLocation, TestStep
 from worker.services.case_import import _generate_automation_key, _parse_steps
+from worker.services.automation_keys import reserve_automation_key
 
 
 class TestRailConnectorError(Exception):
@@ -197,10 +198,7 @@ def _automation_key(item: dict[str, Any], title: str, source_id: str, existing: 
         or item.get("custom_automation_id")
         or item.get("refs")
     )
-    key = _text(raw)
-    if key and key not in existing:
-        return key
-    return _generate_automation_key(title, source_id, existing)
+    return reserve_automation_key(raw, title=title, source_id=source_id, reserved_keys=existing)
 
 
 def _preconditions(item: dict[str, Any]) -> list[str]:

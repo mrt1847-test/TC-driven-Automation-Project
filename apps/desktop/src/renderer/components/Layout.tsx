@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LogStreamPanel } from '@/components/LogStreamPanel'
+import { useAutomationKeyDeepLink } from '@/lib/caseDeepLink'
 import { useAppStore } from '@/store/appStore'
 
 type WorkspaceId = 'generate-raw' | 'automation-ide'
@@ -49,6 +50,7 @@ function workspaceForPath(pathname: string): WorkspaceId {
 export function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
+  useAutomationKeyDeepLink()
   const currentProject = useAppStore((s) => s.currentProject)
   const selectedCase = useAppStore((s) => s.selectedCase)
   const logs = useAppStore((s) => s.logs)

@@ -427,7 +427,7 @@ Preview and write execution results back to the original TC management target fr
 
 ## Settings
 
-Checklist: D9-01, D9-02, D9-03
+Checklist: D9-01, D9-02, D9-03, D9-04
 
 ### Purpose
 
@@ -438,6 +438,7 @@ Configure Webwright, generator, runner, and integrations **at any time after Set
 - **D9-01:** integrations, runner defaults, template paths, execution mode (baseline may include raw JSON editor).
 - **D9-02:** form-level re-edit of all D2 fields (see Setup Wizard field parity table), Save via `PUT /settings`, re-validate via `/settings/validate` or `/health`.
 - **D9-03 (optional):** action to re-open Setup Wizard from Settings while keeping `setupComplete` true.
+- **D9-04:** current-project self-healing auto-apply toggle backed by `self_healing.autoApplyProjectIds`.
 
 Shared fields (D9-02 parity with D2):
 

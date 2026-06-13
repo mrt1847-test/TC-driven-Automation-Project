@@ -1,6 +1,6 @@
 # Product Workspaces
 
-Last aligned: 2026-06-12
+Last aligned: 2026-06-13
 
 이 제품은 크게 2개의 작업공간으로 나눈다. 이것은 단순한 탭 구분이 아니라 제품의 정보구조와 사용자 흐름을 결정하는 최상위 줄기다.
 
@@ -191,6 +191,11 @@ Workspace 2: Automation IDE
 ```
 
 Settings and Setup are supporting surfaces, not product workspaces. **Setup Wizard** runs on first launch; **Settings** must allow re-editing the same configuration afterward (see D9-02 in IMPLEMENTATION_CHECKLIST).
+
+Implementation note (D1-08): route handoffs may carry `?automation_key=<key>`.
+The app shell resolves that key to a `TestCase` inside the active project and
+updates the selected TC, so direct Mapping/Webwright/Runner/Results/Export
+links do not depend only on persisted local handoff state.
 
 ## Handoff Contract
 

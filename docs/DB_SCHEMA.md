@@ -19,6 +19,9 @@ The current code already has a baseline subset. The schema below is the intended
 - SQLite is the local relational store.
 - File contents live on disk; DB stores paths, relations, statuses, hashes, and structured metadata.
 - `automation_key` is a stable cross-table lookup key, but internal relations should use IDs.
+- Active `test_cases` rows must be project-unique by normalized `automation_key`;
+  `retired` and `deleted` rows are terminal audit records and may keep their old
+  keys.
 - Use JSON columns only for flexible source payloads or low-value metadata, not for core relations.
 - Every generated artifact should be traceable back to TC and raw action origins.
 - Webwright and runner artifacts are first-class metadata for review and self-healing, but file bytes stay on disk.
@@ -60,12 +63,14 @@ CREATE TABLE test_cases (
   start_url TEXT,
   status TEXT NOT NULL DEFAULT 'imported',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(project_id, automation_key)
+  updated_at TEXT NOT NULL
 );
 
 CREATE INDEX idx_test_cases_project_status ON test_cases(project_id, status);
 CREATE INDEX idx_test_cases_source ON test_cases(project_id, source_type, source_case_id);
+CREATE UNIQUE INDEX uq_test_cases_active_project_automation_key
+  ON test_cases(project_id, automation_key)
+  WHERE status NOT IN ('retired', 'deleted');
 ```
 
 Terminal maintenance states use soft status values so source intent and audit
@@ -73,6 +78,13 @@ links remain queryable:
 
 - `retired`
 - `deleted`
+
+The Worker applies the same active identity rule in a pre-migration-safe
+validation layer. Explicit import keys and generated keys are normalized with
+the same slug/snake-case policy, duplicate active keys in an import batch or
+against existing active project cases receive deterministic `_001`, `_002`, ...
+suffixes, and generation/export preflight fails if legacy active duplicates are
+already present. Retired/deleted cases are excluded from that reservation set.
 
 ## Prompt Context Layer
 

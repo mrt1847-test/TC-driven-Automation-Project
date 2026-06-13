@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
+import { caseDeepLink } from '@/lib/caseDeepLink'
 import { useAppStore } from '@/store/appStore'
 
 export function ResultsPage() {
+  const navigate = useNavigate()
   const project = useAppStore((s) => s.currentProject)
   const [selectedExec, setSelectedExec] = useState('')
 
@@ -42,13 +45,23 @@ export function ResultsPage() {
       )}
 
       <table className="w-full text-sm">
-        <thead><tr className="text-left text-slate-400"><th>Status</th><th>Key</th><th>Title</th><th>Error</th></tr></thead>
+        <thead><tr className="text-left text-slate-400"><th>Status</th><th>Key</th><th>Title</th><th>Action</th><th>Error</th></tr></thead>
         <tbody>
           {(summary?.cases || detail?.results || []).map((c: { automationKey?: string; automation_key?: string; title?: string; status: string; error?: string }, i: number) => (
             <tr key={i} className="border-t border-slate-800">
               <td className="py-2">{c.status}</td>
               <td>{c.automationKey || c.automation_key}</td>
               <td>{c.title}</td>
+              <td>
+                <button
+                  className="rounded bg-slate-700 px-2 py-1 text-xs disabled:opacity-50"
+                  disabled={!(c.automationKey || c.automation_key)}
+                  type="button"
+                  onClick={() => navigate(caseDeepLink('/mapping', c.automationKey || c.automation_key || ''))}
+                >
+                  Mapping
+                </button>
+              </td>
               <td className="text-red-400 text-xs">{c.error || '—'}</td>
             </tr>
           ))}

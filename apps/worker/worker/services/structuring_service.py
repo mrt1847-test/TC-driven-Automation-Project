@@ -6,6 +6,8 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 from sqlmodel import Session, select
 
@@ -76,6 +78,36 @@ SELECTOR_TYPE_PRIORITY = {
 }
 MIN_SELECTOR_CANDIDATE_CONFIDENCE = 0.7
 AMBIGUOUS_SELECTOR_CONFIDENCE_DELTA = 0.0001
+DEFAULT_PAGE_OBJECT_NAME = "GeneratedPage"
+DEFAULT_PAGE_OBJECT_PATH = "pages/generated_page.py"
+TRAJECTORY_COLLECTION_KEYS = (
+    "actions",
+    "events",
+    "steps",
+    "trace",
+    "items",
+    "entries",
+)
+TRAJECTORY_ORDER_KEYS = (
+    "order_index",
+    "orderIndex",
+    "action_index",
+    "actionIndex",
+    "index",
+    "step_index",
+    "stepIndex",
+)
+TRAJECTORY_URL_KEYS = {
+    "currenturl",
+    "href",
+    "pageurl",
+    "targeturl",
+    "url",
+}
+DYNAMIC_ROUTE_SEGMENT_RE = re.compile(
+    r"^(?:\d+|[0-9a-f]{8,}|[0-9a-f]{8}-[0-9a-f-]{13,})$",
+    re.IGNORECASE,
+)
 FILLABLE_ROLE_SELECTORS = {"combobox", "searchbox", "spinbutton", "textbox"}
 CHECKABLE_ROLE_SELECTORS = {"checkbox", "radio", "switch"}
 CLICKABLE_ROLE_SELECTORS = {
@@ -266,15 +298,197 @@ def _mapping_suffix(mapping: MappingItem) -> str:
     return _snake(mapping.id or f"step_{mapping.tc_step_index}")
 
 
-def _mapping_method(session: Session, page_id: str, mapping_id: str | None) -> PageObjectMethod | None:
+def _mapping_method_any_page(session: Session, mapping_id: str | None) -> PageObjectMethod | None:
     if not mapping_id:
         return None
     return session.exec(
+        select(PageObjectMethod).where(PageObjectMethod.source_mapping_id == mapping_id)
+    ).first()
+
+
+def _route_slug_part(value: str) -> str:
+    text = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    if not text:
+        return ""
+    if DYNAMIC_ROUTE_SEGMENT_RE.match(text):
+        return "item"
+    return text
+
+
+def _pascal_from_slug(slug: str) -> str:
+    return "".join(part.capitalize() for part in slug.split("_") if part)
+
+
+def _route_page_spec(url: str | None) -> tuple[str, str, str | None]:
+    if not url:
+        return DEFAULT_PAGE_OBJECT_NAME, DEFAULT_PAGE_OBJECT_PATH, None
+    text = url.strip()
+    if not text or "${" in text:
+        return DEFAULT_PAGE_OBJECT_NAME, DEFAULT_PAGE_OBJECT_PATH, None
+    try:
+        parsed = urlsplit(text)
+    except ValueError:
+        return DEFAULT_PAGE_OBJECT_NAME, DEFAULT_PAGE_OBJECT_PATH, None
+    if not (parsed.scheme or parsed.netloc or text.startswith("/")):
+        return DEFAULT_PAGE_OBJECT_NAME, DEFAULT_PAGE_OBJECT_PATH, None
+
+    path = parsed.path or "/"
+    parts = [_route_slug_part(part) for part in path.split("/") if part]
+    parts = [part for part in parts if part]
+    slug = "_".join(parts[:4])
+    if not slug:
+        slug = _route_slug_part(parsed.netloc) or "root"
+    if slug == "generated":
+        slug = "generated_route"
+    class_name = f"{_pascal_from_slug(slug)}Page"
+    return class_name, f"pages/{slug}_page.py", path
+
+
+def _coerce_int(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_trajectory_items(path: str | None) -> list[dict]:
+    if not path:
+        return []
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if isinstance(data, dict):
+        for key in TRAJECTORY_COLLECTION_KEYS:
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return [data]
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def _trajectory_order(item: dict) -> int | None:
+    for key in TRAJECTORY_ORDER_KEYS:
+        value = _coerce_int(item.get(key))
+        if value is not None:
+            return value
+    action = item.get("action")
+    if isinstance(action, dict):
+        for key in TRAJECTORY_ORDER_KEYS:
+            value = _coerce_int(action.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _trajectory_items_by_order(items: list[dict]) -> tuple[dict[int, dict], list[dict]]:
+    explicit: dict[int, dict] = {}
+    sequential: list[dict] = []
+    for item in items:
+        order = _trajectory_order(item)
+        if order is None:
+            sequential.append(item)
+        else:
+            explicit[order] = item
+    return explicit, sequential
+
+
+def _url_from_trajectory_value(value: Any, key: str | None = None) -> str | None:
+    if isinstance(value, str):
+        normalized_key = (key or "").replace("_", "").replace("-", "").lower()
+        if normalized_key in TRAJECTORY_URL_KEYS:
+            stripped = value.strip()
+            return stripped or None
+        return None
+    if isinstance(value, list):
+        for item in value:
+            found = _url_from_trajectory_value(item, key)
+            if found:
+                return found
+        return None
+    if isinstance(value, dict):
+        for item_key, item_value in value.items():
+            found = _url_from_trajectory_value(item_value, str(item_key))
+            if found:
+                return found
+    return None
+
+
+def _trajectory_url_for_action(action: RawAction, run: WebwrightRun | None) -> str | None:
+    items = _read_trajectory_items(run.trajectory_path if run else None)
+    if not items:
+        return None
+    explicit, sequential = _trajectory_items_by_order(items)
+    item = explicit.get(action.order_index)
+    if item is None and 0 < action.order_index <= len(sequential):
+        item = sequential[action.order_index - 1]
+    return _url_from_trajectory_value(item)
+
+
+def _runs_for_actions(session: Session, actions: list[RawAction]) -> dict[str, WebwrightRun]:
+    run_ids = sorted({action.webwright_run_id for action in actions if action.webwright_run_id})
+    if not run_ids:
+        return {}
+    rows = session.exec(select(WebwrightRun).where(WebwrightRun.id.in_(run_ids))).all()
+    return {row.id: row for row in rows if row.id}
+
+
+def _route_url_for_actions(
+    actions: list[RawAction],
+    runs_by_id: dict[str, WebwrightRun],
+) -> str | None:
+    for action in actions:
+        url = _trajectory_url_for_action(action, runs_by_id.get(action.webwright_run_id))
+        if url:
+            return url
+    return None
+
+
+def _ensure_page_object(
+    session: Session,
+    project_id: str,
+    route_url: str | None,
+) -> PageObject:
+    name, file_path, url_pattern = _route_page_spec(route_url)
+    page = session.exec(
+        select(PageObject).where(PageObject.project_id == project_id, PageObject.name == name)
+    ).first()
+    if not page:
+        page = PageObject(
+            id=new_id("po"),
+            project_id=project_id,
+            name=name,
+            file_path=file_path,
+            url_pattern=url_pattern,
+        )
+    else:
+        page.file_path = file_path
+        page.url_pattern = url_pattern
+        page.updated_at = datetime.utcnow()
+    session.add(page)
+    session.flush()
+    return page
+
+
+def _ensure_method_page_assignment(
+    session: Session,
+    method: PageObjectMethod,
+    page: PageObject,
+    mapping: MappingItem,
+) -> None:
+    if method.page_object_id == page.id:
+        return
+    collision = session.exec(
         select(PageObjectMethod).where(
-            PageObjectMethod.page_object_id == page_id,
-            PageObjectMethod.source_mapping_id == mapping_id,
+            PageObjectMethod.page_object_id == page.id,
+            PageObjectMethod.name == method.name,
         )
     ).first()
+    if collision and collision.id != method.id:
+        method.name = f"{method.name}__{_mapping_suffix(mapping)}"
+    method.page_object_id = page.id
 
 
 def _selector_candidates_for_actions(
@@ -624,6 +838,7 @@ def sync_structured_entities(session: Session, project_id: str, case: TestCase, 
     mappings = get_mappings(session, case.id)
     action_by_id = _actions_for_mappings(session, mappings)
     selector_candidates_by_action_id = _selector_candidates_for_actions(session, list(action_by_id))
+    runs_by_id = _runs_for_actions(session, list(action_by_id.values()))
 
     existing = session.exec(
         select(StructuredFlow).where(StructuredFlow.test_case_id == case.id).order_by(StructuredFlow.version.desc())
@@ -644,25 +859,17 @@ def sync_structured_entities(session: Session, project_id: str, case: TestCase, 
     session.add(flow)
     session.flush()
 
-    page = session.exec(
-        select(PageObject).where(PageObject.project_id == project_id, PageObject.name == "GeneratedPage")
-    ).first()
-    if not page:
-        page = PageObject(
-            id=new_id("po"),
-            project_id=project_id,
-            name="GeneratedPage",
-            file_path="pages/generated_page.py",
-        )
-        session.add(page)
-        session.flush()
-
     flow_requires_review = False
     for order_index, mapping in enumerate(mappings, start=1):
         body_plan, actions, requires_review = build_method_body_plan(
             mapping,
             action_by_id,
             selector_candidates_by_action_id,
+        )
+        page = _ensure_page_object(
+            session,
+            project_id,
+            _route_url_for_actions(actions, runs_by_id),
         )
         flow_requires_review = flow_requires_review or requires_review
         step_name = mapping.normalized_step_name or mapping.pom_method_name or f"step_{mapping.tc_step_index}"
@@ -691,10 +898,11 @@ def sync_structured_entities(session: Session, project_id: str, case: TestCase, 
                 )
             ).first()
         if not pom:
-            existing_mapping_pom = _mapping_method(session, page.id, mapping.id)
+            existing_mapping_pom = _mapping_method_any_page(session, mapping.id)
             if existing_mapping_pom and not _method_used_by_other_cases(session, existing_mapping_pom.id, case.id):
                 pom = existing_mapping_pom
                 pom.name = method_name
+                _ensure_method_page_assignment(session, pom, page, mapping)
         if not pom:
             pom = PageObjectMethod(
                 id=new_id("pom"),
@@ -1080,6 +1288,7 @@ def merge_refreshed_raw_actions(
     now = datetime.utcnow()
     new_action_by_id = {action.id: action for action in new_actions if action.id}
     selector_candidates_by_action_id = _selector_candidates_for_actions(session, list(new_action_by_id))
+    new_runs_by_id = _runs_for_actions(session, new_actions)
     flow_requires_review = False
     for mapping in mappings:
         previous_action_ids = list(mapping.action_ids)
@@ -1106,6 +1315,12 @@ def merge_refreshed_raw_actions(
             new_action_by_id,
             selector_candidates_by_action_id,
         )
+        page = _ensure_page_object(
+            session,
+            project_id,
+            _route_url_for_actions(actions, new_runs_by_id),
+        )
+        _ensure_method_page_assignment(session, method, page, mapping)
         flow_requires_review = flow_requires_review or requires_review
         method.method_type = _method_type(actions, requires_review)
         method.selector = _selector_from_plan(body_plan)

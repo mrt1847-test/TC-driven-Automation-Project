@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { WebwrightRunErrorPanel } from '@/components/WebwrightRunErrorPanel'
 import { api, getApiErrorMessage, type StructureValidationResponse, type TestCase, type WebwrightRun } from '@/lib/api'
+import { caseDeepLink, useAutomationKeyDeepLink } from '@/lib/caseDeepLink'
 import { useAppStore } from '@/store/appStore'
 
 type TestStep = {
@@ -69,16 +70,20 @@ export function MappingPage() {
     queryFn: () => api.cases.list(project!.id),
     enabled: !!project
   })
+  const deepLink = useAutomationKeyDeepLink(cases)
 
   useEffect(() => {
     if (!project || cases.length === 0) return
+    if (deepLink.requestedAutomationKey) return
     const storedInProject = storeSelectedCase?.project_id === project.id
       && cases.some((item) => item.id === storeSelectedCase.id)
     if (storedInProject) return
     setSelectedCase(cases[0])
-  }, [cases, project?.id, setSelectedCase, storeSelectedCase?.id, storeSelectedCase?.project_id])
+  }, [cases, deepLink.requestedAutomationKey, project?.id, setSelectedCase, storeSelectedCase?.id, storeSelectedCase?.project_id])
 
-  const selectedCase = cases.find((c) => c.id === selectedCaseId) || cases[0]
+  const selectedCase = cases.find((c) => c.id === selectedCaseId)
+    || deepLink.resolvedCase
+    || (deepLink.requestedAutomationKey ? undefined : cases[0])
 
   const { data: actions = [] } = useQuery({
     queryKey: ['actions', project?.id, selectedCase?.id],
@@ -198,7 +203,7 @@ export function MappingPage() {
   function rerunInGenerateRaw() {
     if (!selectedCase) return
     setSelectedCase(selectedCase)
-    navigate('/webwright')
+    navigate(caseDeepLink('/webwright', selectedCase.automation_key))
   }
 
   return (
@@ -220,6 +225,7 @@ export function MappingPage() {
             if (next) setSelectedCase(next)
           }}
         >
+          {!selectedCase && <option value="">Select a TC</option>}
           {cases.map((c) => <option key={c.id} value={c.id}>{c.automation_key} - {c.title}</option>)}
         </select>
         <button

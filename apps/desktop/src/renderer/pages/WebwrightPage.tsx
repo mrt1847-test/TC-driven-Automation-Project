@@ -9,6 +9,7 @@ import {
   type TestCase,
   type WebwrightRun
 } from '@/lib/api'
+import { useAutomationKeyDeepLink } from '@/lib/caseDeepLink'
 import { describeWebwrightRunError } from '@/lib/webwrightErrors'
 import { useAppStore } from '@/store/appStore'
 
@@ -159,6 +160,7 @@ export function WebwrightPage() {
     enabled: !!project,
     refetchInterval: 3000
   })
+  useAutomationKeyDeepLink(cases)
   const promptCase = cases.find((c) => c.id === selectedCaseId) || cases.find((c) => selected.includes(c.id))
   const caseOverride = promptCase ? casePromptOverrides[promptCase.id] || '' : ''
 

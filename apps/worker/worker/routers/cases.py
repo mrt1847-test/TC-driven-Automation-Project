@@ -16,6 +16,7 @@ from worker.models.schemas import (
     TestRailImportRequest,
 )
 from worker.services.case_import import case_to_normalized, import_excel, preview_excel
+from worker.services.automation_keys import active_automation_keys, reserve_normalized_case_keys
 from worker.services.integrations.google_sheets import GoogleSheetsConnectorError, import_from_google_sheets
 from worker.services.integrations.testrail import TestRailConnectorError, import_from_testrail
 from worker.services.integrations.testrail_clone import import_from_testrail_clone
@@ -61,7 +62,7 @@ def patch_case(project_id: str, case_id: str, payload: dict, session: Session = 
 @router.post("/import/excel/preview")
 def excel_preview(project_id: str, request: ExcelPreviewRequest, session: Session = Depends(get_session)):
     _get_project(session, project_id)
-    return preview_excel(request)
+    return preview_excel(request, active_automation_keys(session, project_id))
 
 
 @router.post("/import/excel")
@@ -79,7 +80,7 @@ async def testrail_clone_preview(project_id: str, request: TestRailCloneImportRe
 @router.post("/import/testrail-clone")
 async def testrail_clone_import(project_id: str, request: TestRailCloneImportRequest, session: Session = Depends(get_session)):
     _get_project(session, project_id)
-    existing = {c.automation_key for c in session.exec(select(TestCase).where(TestCase.project_id == project_id)).all()}
+    existing = active_automation_keys(session, project_id)
     imported = await import_from_testrail_clone(request.project_id, request.suite_id, existing)
     return _save_imported_cases(session, project_id, imported)
 
@@ -87,7 +88,7 @@ async def testrail_clone_import(project_id: str, request: TestRailCloneImportReq
 @router.post("/import/testrail/preview")
 async def testrail_preview(project_id: str, request: TestRailImportRequest, session: Session = Depends(get_session)):
     _get_project(session, project_id)
-    existing = {c.automation_key for c in session.exec(select(TestCase).where(TestCase.project_id == project_id)).all()}
+    existing = active_automation_keys(session, project_id)
     try:
         return await import_from_testrail(request.project_id, request.suite_id, _testrail_config(request), existing)
     except TestRailConnectorError as error:
@@ -97,7 +98,7 @@ async def testrail_preview(project_id: str, request: TestRailImportRequest, sess
 @router.post("/import/testrail")
 async def testrail_import(project_id: str, request: TestRailImportRequest, session: Session = Depends(get_session)):
     _get_project(session, project_id)
-    existing = {c.automation_key for c in session.exec(select(TestCase).where(TestCase.project_id == project_id)).all()}
+    existing = active_automation_keys(session, project_id)
     try:
         imported = await import_from_testrail(request.project_id, request.suite_id, _testrail_config(request), existing)
     except TestRailConnectorError as error:
@@ -117,6 +118,7 @@ def _testrail_config(request: TestRailImportRequest) -> dict:
 
 
 def _save_imported_cases(session: Session, project_id: str, imported):
+    imported = reserve_normalized_case_keys(session, project_id, imported)
     saved = []
     for item in imported:
         item.id = new_id("tc")
@@ -145,7 +147,7 @@ def _save_imported_cases(session: Session, project_id: str, imported):
 @router.post("/import/google-sheets/preview")
 async def google_sheets_preview(project_id: str, request: GoogleSheetsImportRequest, session: Session = Depends(get_session)):
     _get_project(session, project_id)
-    existing = {c.automation_key for c in session.exec(select(TestCase).where(TestCase.project_id == project_id)).all()}
+    existing = active_automation_keys(session, project_id)
     try:
         return await import_from_google_sheets(
             _google_sheets_spreadsheet_id(request),
@@ -161,7 +163,7 @@ async def google_sheets_preview(project_id: str, request: GoogleSheetsImportRequ
 @router.post("/import/google-sheets")
 async def google_sheets_import(project_id: str, request: GoogleSheetsImportRequest, session: Session = Depends(get_session)):
     _get_project(session, project_id)
-    existing = {c.automation_key for c in session.exec(select(TestCase).where(TestCase.project_id == project_id)).all()}
+    existing = active_automation_keys(session, project_id)
     try:
         imported = await import_from_google_sheets(
             _google_sheets_spreadsheet_id(request),

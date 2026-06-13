@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
-from slugify import slugify
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from worker.core.config import new_id
 from worker.models.db import TestCase, TestCaseStatus
 from worker.models.schemas import ExcelColumnMapping, ExcelImportRequest, ExcelPreviewRequest, NormalizedTestCase, SourceLocation, TestStep
+from worker.services.automation_keys import active_automation_keys, reserve_automation_key
 
 
 DEFAULT_MAPPING = ExcelColumnMapping()
@@ -43,13 +42,7 @@ def _parse_steps(raw_step: str, raw_expected: str) -> list[TestStep]:
 
 
 def _generate_automation_key(title: str, case_id: str, existing: set[str]) -> str:
-    base = slugify(case_id or title, separator="_").lower() or "case"
-    candidate = base
-    counter = 1
-    while candidate in existing:
-        candidate = f"{base}_{counter:03d}"
-        counter += 1
-    return candidate
+    return reserve_automation_key("", title=title, source_id=case_id, reserved_keys=existing)
 
 
 def _load_workbook_rows(file_path: str, sheet_name: str | None, mapping: ExcelColumnMapping) -> tuple[list[str], list[dict[str, Any]]]:
@@ -69,16 +62,26 @@ def _load_workbook_rows(file_path: str, sheet_name: str | None, mapping: ExcelCo
     return headers, data_rows
 
 
-def preview_excel(request: ExcelPreviewRequest) -> dict[str, Any]:
+def preview_excel(request: ExcelPreviewRequest, existing_keys: set[str] | None = None) -> dict[str, Any]:
     mapping = request.column_mapping or DEFAULT_MAPPING
     headers, rows = _load_workbook_rows(request.file_path, request.sheet_name, mapping)
     preview = []
+    reserved_keys = set(existing_keys or set())
     for row in rows[:50]:
+        case_id = str(row.get(mapping.case_id) or f"ROW-{row['_row_index']}")
+        title = str(row.get(mapping.title) or case_id)
+        automation_key = reserve_automation_key(
+            row.get(mapping.automation_key),
+            title=title,
+            source_id=case_id,
+            reserved_keys=reserved_keys,
+        )
+        reserved_keys.add(automation_key)
         preview.append({
             "rowIndex": row["_row_index"],
             "caseId": row.get(mapping.case_id),
             "title": row.get(mapping.title),
-            "automationKey": row.get(mapping.automation_key),
+            "automationKey": automation_key,
             "step": row.get(mapping.step),
             "expected": row.get(mapping.expected),
             "startUrl": row.get(mapping.start_url),
@@ -89,7 +92,7 @@ def preview_excel(request: ExcelPreviewRequest) -> dict[str, Any]:
 def import_excel(session: Session, project_id: str, request: ExcelImportRequest) -> list[NormalizedTestCase]:
     mapping = request.column_mapping or DEFAULT_MAPPING
     _, rows = _load_workbook_rows(request.file_path, request.sheet_name, mapping)
-    existing_keys = {tc.automation_key for tc in session.exec(select(TestCase).where(TestCase.project_id == project_id)).all()}
+    existing_keys = active_automation_keys(session, project_id)
     imported: list[NormalizedTestCase] = []
 
     for row in rows:
@@ -98,9 +101,12 @@ def import_excel(session: Session, project_id: str, request: ExcelImportRequest)
             continue
         case_id = str(row.get(mapping.case_id) or f"ROW-{row_index}")
         title = str(row.get(mapping.title) or case_id)
-        automation_key = str(row.get(mapping.automation_key) or "").strip()
-        if not automation_key:
-            automation_key = _generate_automation_key(title, case_id, existing_keys)
+        automation_key = reserve_automation_key(
+            row.get(mapping.automation_key),
+            title=title,
+            source_id=case_id,
+            reserved_keys=existing_keys,
+        )
         existing_keys.add(automation_key)
 
         preconditions = []

@@ -84,17 +84,17 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 
 
-**Checklist item:** C7-17 PageObject segmentation by URL/route
+**Checklist item:** C3-10 WSL Webwright command quoting hardening
 
 
 
-**Why this is next:** C7-14 closed safer regeneration around user-maintained
-generated code. The next open Worker structuring-depth item reduces large
-projects' dependence on a single project-wide PageObject.
+**Why this is next:** C1-10 closed the Worker identity collision task. The
+first remaining open checklist item is the Webwright subprocess hardening task
+for WSL command quoting and shell-injection resistant argument handling.
 
 
 
-**Owning spec:** [STRUCTURING_SPEC.md](./STRUCTURING_SPEC.md)
+**Owning spec:** [RUNTIME_SPEC.md](./RUNTIME_SPEC.md)
 
 
 
@@ -102,17 +102,19 @@ projects' dependence on a single project-wide PageObject.
 
 
 
-- Inspect generated file rendering, regeneration guard, generated-file status,
-  selected regeneration, origin tracking, and obsolete/retire cleanup behavior.
+- Inspect native and WSL Webwright subprocess command builders, runtime profile
+  fields, `.venv` activation behavior, config/model args, prompt/start URL/task
+  ID/output path handling, and existing subprocess compatibility tests.
 
-- Group generated PageObjects by URL/route trajectory boundaries instead of a
-  single `GeneratedPage` when route evidence is available.
+- Remove ad-hoc `bash -lc` string construction in WSL mode or constrain it with
+  deterministic `shlex.quote`/argv-safe wrapper behavior.
 
-- Update generated flows/imports, generated-file origins, selected
-  regeneration, and retire cleanup to follow the segmented page files.
+- Preserve current native execution behavior and WSL `.venv`/Python selection
+  semantics.
 
-- Add focused Worker tests for segmentation, selected regeneration, origin
-  tracking, and cleanup compatibility.
+- Add regression tests for roots, prompts, start URLs, task IDs, and output
+  paths containing spaces, quotes, parentheses, ampersands, Korean text, and
+  shell-looking strings.
 
 
 
@@ -120,12 +122,12 @@ projects' dependence on a single project-wide PageObject.
 
 
 
-- Generation no longer depends on one project-wide `GeneratedPage` where
-  route evidence is available.
+- WSL command construction preserves each argument exactly and cannot inject
+  extra shell commands through prompt/path/config fields.
 
-- Origins/status/retire cleanup follow segmented PageObject files.
+- Native subprocess tests still pass.
 
-- Checklist C7-17 marked `[x]` with verification note.
+- Checklist C3-10 marked `[x]` with verification note.
 
 
 
@@ -141,13 +143,47 @@ Pick the next item from this list after Current Batch is done:
 
 |-------|----------------|---------|
 
-| 1 | D1-08 | automation_key deep linking |
-
-| 2 | D9-04 | self-healing auto-apply Settings toggle |
+| 1 | C9-09 | run/job ID uniqueness and concurrent artifact isolation |
+| 2 | C11-05 | generated-file path containment hardening |
+| 3 | G-06 | localhost Worker trust boundary hardening |
 
 
 
 ## Completed Batch Notes
+
+- **C1-10 (2026-06-13):** Added a project-scoped active `automation_key`
+  policy across Worker import, generation, mapping merge, and export
+  validation. Excel/TestRail/TestRail-clone/Google Sheets imports now normalize
+  explicit and generated keys through the same slug/suffix rule, retired and
+  deleted cases no longer reserve keys, generation blocks legacy active
+  duplicate keys or duplicate flow/test/mapping paths before writing, and
+  export validation flags ambiguous active cases, mappings, ExecutionResult
+  rows, and results updates. Focused policy, import/export, and generation
+  regression tests passed.
+
+- **D9-04 (2026-06-13):** Added a structured desktop Settings control for
+  project-scoped selector auto-apply. The new Self-healing section toggles the
+  current project ID in canonical `self_healing.autoApplyProjectIds`, merges
+  legacy snake_case IDs into the control, preserves unrelated Settings fields
+  and advanced JSON editing, and keeps Worker C12-07 guardrails unchanged.
+  `npm run build` and focused healing proposal tests passed.
+
+- **D1-08 (2026-06-13):** Added project-scoped `automation_key` deep linking
+  in the desktop GUI. The app shell resolves `?automation_key=<key>` against
+  the active project's cases and updates selected TC state beyond persisted
+  handoff state. Cases, Mapping, and Webwright reuse loaded case lists for
+  selection; Mapping no longer silently falls back to the first TC while a
+  deeplink is pending; IDE, Results, export-error, and healing handoff actions
+  now preserve automation keys when opening Mapping/Webwright. `npm run build`
+  passed.
+
+- **C7-17 (2026-06-13):** Added route-segmented generated PageObjects. Worker
+  structuring now assigns methods to deterministic route page files from mapped
+  Webwright trajectory URLs, generated flows import/instantiate only the page
+  classes they use, mapping YAML records actual page object files, selected
+  regeneration preserves unrelated route pages, and retire cleanup rebuilds
+  shared segmented page files from remaining active origins. Focused
+  segmentation/regeneration/retire tests and the non-e2e Worker suite passed.
 
 - **C7-14 (2026-06-13):** Added generated protected regions for page, flow,
   and test Python outputs. Regeneration now merges existing protected-region

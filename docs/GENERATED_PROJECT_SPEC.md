@@ -73,7 +73,8 @@ generated-automation-project/
     cases.yaml
   pages/
     base_page.py
-    generated_page.py
+    generated_page.py        # fallback when no route evidence exists
+    {route}_page.py          # route-specific PageObject files when trajectory URLs exist
   runner/
     __init__.py
     cli.py
@@ -114,6 +115,27 @@ need to run `git init`, but every generated output must include a deterministic
 Full regeneration must preserve existing `.git`, `.gitattributes`, and
 `.gitmodules` metadata. Template copy must not bring stale local caches or
 historical run artifacts into a generated project.
+
+## Identity And Collision Contract
+
+Generated project paths, mapping rows, result rows, and write-back targets use
+`automationKey` as a project-scoped active identity. The Worker normalizes
+explicitly imported keys and generated fallback keys with the same slug/snake
+policy before generation can consume them. Duplicate active keys in one import
+batch or against existing active cases are deterministically suffixed; retired
+and deleted cases do not reserve their old keys.
+
+Generation must not silently collapse two active cases into one file or mapping
+row. Before writing `flows/{automation_key}_flow.py`,
+`tests/test_{automation_key}.py`, or `mappings/cases.yaml`, the generator
+validates active project key uniqueness, planned flow/test path uniqueness, and
+duplicate rows in existing and replacement `mappings/cases.yaml` entries.
+Any duplicate identity or path blocks generation instead of overwriting output.
+
+Export validation applies the same safety rule before result write-back. A
+result export is invalid when generated mappings, `ExecutionResult` rows,
+`results.json` update rows, or active project cases contain duplicate
+`automationKey` values that would make the target identity ambiguous.
 
 ## Runtime Manifest
 
@@ -156,7 +178,7 @@ cases:
     testFunction: test_user_login_001
     flow: flows/user_login_001_flow.py
     pageObjects:
-      - pages/generated_page.py
+      - pages/login_page.py
     tags:
       - smoke
 ```
@@ -355,6 +377,14 @@ Page object code generation normalizes persisted Playwright locator expressions:
   same-named TC steps in different cases from overwriting each other; generated
   flow files call these scoped names while mappings and step labels keep the
   shorter reviewed display text.
+- when mapped Webwright trajectory evidence contains route URLs, structuring
+  assigns methods to route-specific PageObjects/files such as `LoginPage` in
+  `pages/login_page.py` or `CheckoutPaymentPage` in
+  `pages/checkout_payment_page.py`; methods without usable route evidence keep
+  the legacy `GeneratedPage` fallback in `pages/generated_page.py`.
+- generated flow files import and instantiate every PageObject used by that
+  flow, and each generated page file contains only the methods assigned to that
+  PageObject.
 
 Generated Python files include protected regions for small user-maintained
 extensions. Regions are marked with:
@@ -364,8 +394,8 @@ extensions. Regions are marked with:
 # </tc-protected>
 ```
 
-The generator currently emits `generated-page-helpers` in
-`pages/generated_page.py`, `flow-helpers` in each flow class,
+The generator currently emits `generated-page-helpers` in each generated
+`pages/*_page.py` PageObject file, `flow-helpers` in each flow class,
 `test-imports` at the top of each generated test file, and `test-setup` inside
 each generated test function. Regeneration preserves the body of valid matching
 regions, but the markers themselves are generated content.
@@ -406,7 +436,7 @@ Value parameterization (C8-12) keeps generated code env-switchable:
   `"...{}...".format(self._env_value(...))`;
 - when placeholders are present, the generated page file emits a self-contained
   `_load_env_config()` helper (reads `config/env.{TC_ENV}.json`, default `stg`)
-  and a `GeneratedPage._env_value()` accessor that raises `KeyError` for
+  and a page-class `_env_value()` accessor that raises `KeyError` for
   missing paths; env-free pages keep the minimal class shape unchanged;
 - non-placeholder literal values keep their existing `json.dumps` rendering,
   and all rendering stays deterministic for the regeneration guards.
@@ -422,7 +452,7 @@ one failed TC must not destroy the rest of the project.
 Selected regeneration must:
 
 - update only the selected TC test, flow, mapping entry, and directly impacted
-  page object methods;
+  page object files/methods;
 - keep unrelated `tests/`, `flows/`, `pages/`, `artifacts/runs/`, and
   `mappings/cases.yaml` entries;
 - return an affected-file summary to Studio;
@@ -433,7 +463,8 @@ Selected regeneration must:
 TC retire/delete cleanup must:
 
 - remove or mark obsolete the selected TC's test and mapping entry;
-- remove shared flow/page code only when no active TC still references it;
+- remove shared flow/page code only when no active TC still references it,
+  including route-specific page files;
 - preserve historical `artifacts/runs/` and result files for audit.
 
 C8-10 implements this as an explicit human-confirmed soft terminal state

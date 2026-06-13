@@ -15,6 +15,7 @@ from sqlmodel import Session, select
 
 from worker.core.config import MASK, load_settings, mask_secret_data, mask_secrets, new_id
 from worker.models.db import ExportLog, ExecutionResult, ExecutionRun
+from worker.services.automation_keys import duplicate_active_automation_keys
 from worker.services.integrations.google_sheets import (
     GoogleSheetsConnectorError,
     SHEETS_SCOPE,
@@ -184,10 +185,20 @@ def _validate_export(
     issues = list(preload_issues or [])
 
     mapping_groups = _group_by_key(mapping_entries, lambda item: item.get("automationKey"))
+    update_groups = _group_by_key(updates, lambda item: item.get("automationKey"))
     db_results = session.exec(
         select(ExecutionResult).where(ExecutionResult.execution_run_id == execution.id)
     ).all()
     db_groups = _group_by_key(db_results, lambda item: item.automation_key)
+    active_case_duplicates = duplicate_active_automation_keys(session, execution.project_id)
+
+    for key, case_ids in active_case_duplicates.items():
+        issues.append(_issue(
+            "ambiguous_active_case",
+            "Project contains duplicate active test case automation_key values",
+            key,
+            caseIds=case_ids,
+        ))
 
     for key, rows in mapping_groups.items():
         if key is None:
@@ -206,6 +217,14 @@ def _validate_export(
             issues.append(_issue(
                 "ambiguous_execution_result",
                 "ExecutionResult rows contain duplicate automation_key values",
+                key,
+            ))
+
+    for key, rows in update_groups.items():
+        if key and len(rows) > 1:
+            issues.append(_issue(
+                "ambiguous_result_update",
+                "Result rows contain duplicate automationKey values",
                 key,
             ))
 
