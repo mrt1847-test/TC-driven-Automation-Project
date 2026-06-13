@@ -92,6 +92,7 @@ class ProjectPromptContext(SQLModel, table=True):
 
     project_id: str = Field(foreign_key="project.id", primary_key=True)
     batch_prompt: str = ""
+    selected_preset_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

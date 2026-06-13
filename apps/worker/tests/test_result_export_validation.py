@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from worker.models.db import ExecutionResult, ExecutionRun, ExportLog
+from worker.services import result_export as result_export_module
 
 
 _DEFAULT_MAPPING = object()
@@ -38,6 +39,33 @@ def _mapping_row(source_file: Path, **overrides: Any) -> dict[str, Any]:
                 "file": str(source_file),
                 "sheet": "Cases",
                 "row": 2,
+            }
+        },
+    }
+    row.update(overrides)
+    return row
+
+
+def _google_case_row(**overrides: Any) -> dict[str, Any]:
+    row = _case_row(
+        sourceType="google_sheets",
+        sourceCaseId="GS-001",
+        title="Google Sheets export validation case",
+    )
+    row.update(overrides)
+    return row
+
+
+def _google_mapping_row(**overrides: Any) -> dict[str, Any]:
+    row = {
+        "automationKey": "case_export_001",
+        "sourceType": "google_sheets",
+        "sourceCaseId": "GS-001",
+        "title": "Google Sheets export validation case",
+        "resultTargets": {
+            "googleSheets": {
+                "sheet": "Results",
+                "row": 7,
             }
         },
     }
@@ -235,3 +263,372 @@ def test_valid_export_still_persists_export_log(
     assert len(logs) == 1
     assert logs[0].target == "google-sheets"
     assert logs[0].status == "success"
+
+
+def test_google_sheets_preview_resolves_payload_without_credential_or_log(
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    execution_id, _ = _insert_export_fixture(
+        project_id,
+        tmp_path,
+        result_case=_google_case_row(),
+        mapping_case=_google_mapping_row(),
+    )
+    client.put(
+        "/settings",
+        json={
+            "integrations": {
+                "googleSheets": {
+                    "enabled": True,
+                    "spreadsheetId": "sheet-123",
+                    "sheetName": "Results",
+                }
+            }
+        },
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/google-sheets",
+        json={"preview": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview"] is True
+    assert body["validation"] == {"ok": True, "checked": 1, "issues": []}
+    assert body["targetPayload"][0]["spreadsheetId"] == "sheet-123"
+    assert body["targetPayload"][0]["sheetName"] == "Results"
+    assert body["targetPayload"][0]["row"] == 7
+    assert _export_logs(execution_id) == []
+
+
+def test_google_sheets_real_export_requires_secure_credential_when_enabled(
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    execution_id, _ = _insert_export_fixture(
+        project_id,
+        tmp_path,
+        result_case=_google_case_row(),
+        mapping_case=_google_mapping_row(),
+    )
+    client.put(
+        "/settings",
+        json={
+            "integrations": {
+                "googleSheets": {
+                    "enabled": True,
+                    "spreadsheetId": "sheet-123",
+                    "sheetName": "Results",
+                }
+            }
+        },
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/google-sheets",
+        json={"preview": False},
+    )
+
+    assert response.status_code == 400
+    assert "credentialJson" in response.json()["detail"]
+    assert _export_logs(execution_id) == []
+
+
+def test_google_sheets_real_export_posts_batch_update_and_logs_success(
+    monkeypatch,
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    import httpx
+
+    secret = "google-access-token-secret-abcdef"
+    execution_id, _ = _insert_export_fixture(
+        project_id,
+        tmp_path,
+        result_case=_google_case_row(),
+        mapping_case=_google_mapping_row(),
+    )
+    client.put(
+        "/settings",
+        json={
+            "integrations": {
+                "googleSheets": {
+                    "enabled": True,
+                    "spreadsheetId": "sheet-123",
+                    "sheetName": "Results",
+                }
+            }
+        },
+    )
+    captured: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append({
+            "method": request.method,
+            "url": str(request.url),
+            "auth": request.headers.get("Authorization"),
+            "body": json.loads(request.content.decode("utf-8")) if request.content else None,
+        })
+        if request.method == "GET":
+            return httpx.Response(200, json={"values": [["Case ID", "Title"]]})
+        return httpx.Response(200, json={"totalUpdatedCells": 8})
+
+    class FakeAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(result_export_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/google-sheets",
+        json={"preview": False, "config": {"credentialJson": json.dumps({"access_token": secret})}},
+    )
+
+    assert response.status_code == 200
+    assert secret not in response.text
+    body = response.json()
+    assert body["updated"] == 1
+    assert body["responses"][0]["response"]["totalUpdatedCells"] == 8
+    assert captured[0]["method"] == "GET"
+    assert "spreadsheets/sheet-123/values/" in captured[0]["url"]
+    assert captured[0]["auth"] == f"Bearer {secret}"
+    assert captured[1]["method"] == "POST"
+    assert captured[1]["url"].endswith("/spreadsheets/sheet-123/values:batchUpdate")
+    assert captured[1]["auth"] == f"Bearer {secret}"
+    update_ranges = {item["range"]: item["values"][0][0] for item in captured[1]["body"]["data"]}
+    assert update_ranges["'Results'!C1:C1"] == "Automation Result"
+    assert update_ranges["'Results'!D1:D1"] == "Automation Run ID"
+    assert update_ranges["'Results'!E1:E1"] == "Automation Executed At"
+    assert update_ranges["'Results'!F1:F1"] == "Automation Comment"
+    assert update_ranges["'Results'!C7:C7"] == "passed"
+    assert update_ranges["'Results'!D7:D7"] == "run_export_001"
+    assert update_ranges["'Results'!F7:F7"] == "Automation passed"
+
+    logs = _export_logs(execution_id)
+    assert len(logs) == 1
+    assert logs[0].target == "google-sheets"
+    assert logs[0].status == "success"
+    assert secret not in (logs[0].message or "")
+
+
+def test_google_sheets_real_export_api_error_is_masked_and_logged_failed(
+    monkeypatch,
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    import httpx
+
+    secret = "google-access-token-secret-abcdef"
+    execution_id, _ = _insert_export_fixture(
+        project_id,
+        tmp_path,
+        result_case=_google_case_row(),
+        mapping_case=_google_mapping_row(),
+    )
+    client.put(
+        "/settings",
+        json={
+            "integrations": {
+                "googleSheets": {
+                    "enabled": True,
+                    "spreadsheetId": "sheet-123",
+                    "sheetName": "Results",
+                }
+            }
+        },
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"values": [["Case ID", "Title"]]})
+        return httpx.Response(403, json={"error": {"message": f"denied for token {secret}"}})
+
+    class FakeAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(result_export_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/google-sheets",
+        json={"preview": False, "config": {"credentialJson": json.dumps({"access_token": secret})}},
+    )
+
+    assert response.status_code == 400
+    assert secret not in response.text
+    assert "***MASKED***" in response.text
+    logs = _export_logs(execution_id)
+    assert len(logs) == 1
+    assert logs[0].target == "google-sheets"
+    assert logs[0].status == "failed"
+    assert secret not in (logs[0].message or "")
+    assert "***MASKED***" in (logs[0].message or "")
+
+
+def test_testrail_real_export_requires_secure_token_when_enabled(
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    execution_id, _ = _insert_export_fixture(project_id, tmp_path)
+    client.put(
+        "/settings",
+        json={
+            "integrations": {
+                "testrail": {
+                    "enabled": True,
+                    "baseUrl": "https://testrail.example",
+                    "username": "qa@example.com",
+                    "resultRunId": "42",
+                }
+            }
+        },
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/testrail",
+        json={"preview": False},
+    )
+
+    assert response.status_code == 400
+    assert "apiToken" in response.json()["detail"]
+    assert _export_logs(execution_id) == []
+
+
+def test_testrail_export_defaults_to_local_mock_when_integration_disabled(
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    execution_id, _ = _insert_export_fixture(project_id, tmp_path)
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/testrail",
+        json={"preview": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["updated"] == 1
+    assert response.json()["mode"] == "local-mock"
+    logs = _export_logs(execution_id)
+    assert len(logs) == 1
+    assert logs[0].target == "testrail"
+    assert logs[0].status == "success"
+
+
+def test_testrail_real_export_posts_results_and_logs_success(
+    monkeypatch,
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    import base64
+    import httpx
+
+    secret = "tr-secret-token-value-abcdef"
+    execution_id, _ = _insert_export_fixture(project_id, tmp_path)
+    client.put(
+        "/settings",
+        json={
+            "integrations": {
+                "testrail": {
+                    "enabled": True,
+                    "baseUrl": "https://testrail.example",
+                    "username": "qa@example.com",
+                    "resultRunId": "42",
+                }
+            }
+        },
+    )
+    captured: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append({
+            "url": str(request.url),
+            "auth": request.headers.get("Authorization"),
+            "body": json.loads(request.content.decode("utf-8")),
+        })
+        return httpx.Response(200, json={"id": 9001})
+
+    class FakeAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(result_export_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/testrail",
+        json={"preview": False, "config": {"apiToken": secret}},
+    )
+
+    assert response.status_code == 200
+    assert secret not in response.text
+    body = response.json()
+    assert body["updated"] == 1
+    assert body["responses"][0]["response"]["id"] == 9001
+    assert "add_result_for_case/42/TC-001" in captured[0]["url"]
+    assert captured[0]["auth"] == "Basic " + base64.b64encode(b"qa@example.com:tr-secret-token-value-abcdef").decode()
+    assert captured[0]["body"]["status_id"] == 1
+    assert captured[0]["body"]["elapsed"] == "1s"
+    assert "case_export_001" in captured[0]["body"]["comment"]
+
+    logs = _export_logs(execution_id)
+    assert len(logs) == 1
+    assert logs[0].target == "testrail"
+    assert logs[0].status == "success"
+    assert secret not in (logs[0].message or "")
+
+
+def test_testrail_real_export_api_error_is_masked_and_logged_failed(
+    monkeypatch,
+    client: TestClient,
+    project_id: str,
+    tmp_path: Path,
+) -> None:
+    import httpx
+
+    secret = "tr-secret-token-value-abcdef"
+    execution_id, _ = _insert_export_fixture(project_id, tmp_path)
+    client.put(
+        "/settings",
+        json={
+            "integrations": {
+                "testrail": {
+                    "enabled": True,
+                    "baseUrl": "https://testrail.example",
+                    "username": "qa@example.com",
+                    "resultRunId": "42",
+                }
+            }
+        },
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": f"bad token {secret}"})
+
+    class FakeAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(result_export_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        f"/projects/{project_id}/executions/{execution_id}/export/testrail",
+        json={"preview": False, "config": {"apiToken": secret}},
+    )
+
+    assert response.status_code == 400
+    assert secret not in response.text
+    assert "***MASKED***" in response.text
+    logs = _export_logs(execution_id)
+    assert len(logs) == 1
+    assert logs[0].target == "testrail"
+    assert logs[0].status == "failed"
+    assert secret not in (logs[0].message or "")
+    assert "***MASKED***" in (logs[0].message or "")

@@ -15,8 +15,25 @@ export function ExportPage() {
     enabled: !!project
   })
 
+  async function runExport(doPreview: boolean) {
+    const executionId = execId || executions[0]?.id
+    if (!project || !executionId) throw new Error('Select an execution first.')
+    if (target === 'testrail' && window.electronAPI?.testrailExport) {
+      const result = await window.electronAPI.testrailExport(project.id, executionId, doPreview)
+      if (!result.ok) throw new Error(result.message)
+      return result.result
+    }
+    if (target === 'google-sheets' && window.electronAPI?.googleSheetsExport) {
+      const result = await window.electronAPI.googleSheetsExport(project.id, executionId, doPreview)
+      if (!result.ok) throw new Error(result.message)
+      return result.result
+    }
+    const config = ['testrail', 'google-sheets'].includes(target) && !doPreview ? { mock: true } : undefined
+    return api.executions.export(project.id, executionId, target, doPreview, config)
+  }
+
   const exportMut = useMutation({
-    mutationFn: (doPreview: boolean) => api.executions.export(project!.id, execId || executions[0]?.id, target, doPreview)
+    mutationFn: (doPreview: boolean) => runExport(doPreview)
   })
 
   if (!project) return <p>Select a project first.</p>

@@ -60,7 +60,7 @@ function getWithSafeStorage(service: string, account: string): string | null {
     return null
   }
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS encryption is not available; cannot decrypt stored API key.')
+    throw new Error('OS encryption is not available; cannot decrypt stored credential.')
   }
   return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
 }
@@ -71,10 +71,10 @@ export async function setCredential(
   password: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!password?.trim()) {
-    return { ok: false, message: 'API key is empty.' }
+    return { ok: false, message: 'Credential secret is empty.' }
   }
   if (!account?.trim()) {
-    return { ok: false, message: 'Provider is not selected.' }
+    return { ok: false, message: 'Credential account is not selected.' }
   }
 
   const errors: string[] = []
@@ -124,5 +124,5 @@ export async function getCredential(
     return { ok: false, message }
   }
 
-  return { ok: false, message: `No API key stored for ${account}.` }
+  return { ok: false, message: `No credential stored for ${account}.` }
 }

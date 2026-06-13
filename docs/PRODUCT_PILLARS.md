@@ -1,6 +1,6 @@
 # Product Workspaces
 
-Last aligned: 2026-06-05
+Last aligned: 2026-06-12
 
 이 제품은 크게 2개의 작업공간으로 나눈다. 이것은 단순한 탭 구분이 아니라 제품의 정보구조와 사용자 흐름을 결정하는 최상위 줄기다.
 
@@ -81,12 +81,14 @@ A TC is ready to move to Workspace 2 when:
 - Raw artifact inspector for `final_script.py`, `trajectory.json`, screenshots, and logs.
 
 Implementation note (C2-04..C2-07): the Worker now owns project-scoped prompt
-composer state for a batch-level shared prompt and per-case overrides, plus
-separate built-in/project prompt preset definitions. The read-only preview API
-combines the base TC prompt, optional selected preset guidance, batch context,
-and selected case override. Webwright run creation records immutable prompt
-payload snapshots for audit/history without mutating composer or preset
-definitions.
+composer state for a batch-level shared prompt, selected preset continuity, and
+per-case overrides, plus separate built-in/project prompt preset definitions.
+The read-only preview API combines the base TC prompt, optional selected preset
+guidance, batch context, and selected case override. Webwright run creation
+records immutable prompt payload snapshots for audit/history without mutating
+composer or preset definitions. D4-07 wires the Generate Raw GUI to these
+Worker prompt APIs so prompt state no longer depends on settings-only/local
+preview paths.
 
 ## Workspace 2: Automation IDE - Structure / Edit / Run
 

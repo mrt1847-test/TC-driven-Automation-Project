@@ -44,6 +44,17 @@ def _seed_failure(
     candidate_selector_value: str | None = None,
     extra_candidates: list[dict] | None = None,
     generated_page_target: bool = False,
+    body_plan: list[dict] | None = None,
+    method_type: str = "click",
+    method_selector: str | None = "page.locator('#old-submit')",
+    method_value_template: str | None = None,
+    raw_action_type: str = "click",
+    raw_action_selector: str | None = "page.locator('#old-submit')",
+    raw_action_value: str | None = None,
+    step_kind: str = "interaction",
+    assertion_json: dict | None = None,
+    wait_json: dict | None = None,
+    artifact_metadata: dict | None = None,
 ) -> str:
     case_id = f"case_heal_{key}"
     result_id = f"result_heal_{key}"
@@ -66,6 +77,7 @@ def _seed_failure(
         status="failed",
         error=error,
     ))
+    metadata = artifact_metadata if artifact_metadata is not None else {"error_category": error_category}
     artifact = ArtifactAsset(
         id=f"artifact_heal_{key}",
         project_id=project_id,
@@ -74,7 +86,7 @@ def _seed_failure(
         source_id=result_id,
         artifact_type="trace",
         file_path=f"artifacts/{key}.zip",
-        metadata_json=json.dumps({"error_category": error_category}),
+        metadata_json=json.dumps(metadata),
     )
     session.add(artifact)
     if not with_target:
@@ -88,7 +100,7 @@ def _seed_failure(
     page_id = f"page_heal_{key}"
     method_id = f"pom_heal_{key}"
     method_name = f"perform_{key}"
-    body_plan = [{
+    body_plan = body_plan or [{
         "action": "click",
         "order": 1,
         "requiresReview": False,
@@ -108,8 +120,9 @@ def _seed_failure(
         webwright_run_id=run_id,
         automation_key=key,
         order_index=1,
-        type="click",
-        selector="page.locator('#old-submit')",
+        type=raw_action_type,
+        selector=raw_action_selector,
+        value=raw_action_value,
     ))
     session.add(CaseActionMapping(
         id=mapping_id,
@@ -143,8 +156,9 @@ def _seed_failure(
         id=method_id,
         page_object_id=page_id,
         name=method_name,
-        method_type="click",
-        selector="page.locator('#old-submit')",
+        method_type=method_type,
+        selector=method_selector,
+        value_template=method_value_template,
         body_plan_json=json.dumps(body_plan, sort_keys=True, separators=(",", ":")),
         source_mapping_id=mapping_id,
         status="approved",
@@ -155,7 +169,10 @@ def _seed_failure(
         mapping_id=mapping_id,
         order_index=1,
         name=f"perform {key}",
+        kind=step_kind,
         page_object_method_id=method_id,
+        assertion_json=json.dumps(assertion_json) if assertion_json is not None else None,
+        wait_json=json.dumps(wait_json) if wait_json is not None else None,
     ))
     session.add(GeneratedFile(
         id=f"generated_heal_{key}",
@@ -570,6 +587,251 @@ def test_apply_blocks_on_generated_file_conflict_before_persisting_mutation(
         assert method.selector == "page.locator('#old-submit')"
         assert json.loads(method.body_plan_json)[0]["selector"] == "page.locator('#old-submit')"
         assert row.status == GeneratedFileStatus.conflict.value
+
+
+def test_wait_adjust_proposal_applies_timeout_patch_and_regenerates(
+    monkeypatch,
+    tmp_path,
+    client,
+    project_id: str,
+) -> None:
+    import worker.core.database as database
+
+    _patch_template(monkeypatch, tmp_path)
+    execution_id = "exec_heal_wait_adjust"
+    with Session(database.engine) as session:
+        session.add(ExecutionRun(
+            id=execution_id,
+            project_id=project_id,
+            run_id="run_heal_wait_adjust",
+            env="stg",
+            browser="chromium",
+            status="failed",
+        ))
+        result_id = _seed_failure(
+            session,
+            project_id,
+            execution_id,
+            "wait_adjust",
+            error="Timeout 5000ms exceeded while waiting in perform_wait_adjust",
+            error_category="wait_timeout",
+            with_candidate=False,
+            generated_page_target=True,
+            method_type="wait",
+            method_selector="page.locator('#ready')",
+            raw_action_type="wait",
+            raw_action_selector="page.locator('#ready')",
+            step_kind="wait",
+            wait_json={"state": "visible", "timeoutMs": 5000},
+            body_plan=[{
+                "action": "wait",
+                "order": 1,
+                "requiresReview": False,
+                "selector": "page.locator('#ready')",
+                "sourceMappingId": "mapping_heal_wait_adjust",
+                "sourceRawActionId": "raw_heal_wait_adjust",
+                "timeoutMs": 5000,
+                "value": "visible",
+            }],
+        )
+        project = session.get(Project, project_id)
+        generate_project(session, project_id, Path(project.root_path), mode="full")
+
+    create_response = client.post(
+        _execution_url(project_id, execution_id),
+        json={
+            "executionResultId": result_id,
+            "kind": "wait_adjust",
+            "proposal": {"bodyPlanIndex": 1, "timeoutMs": 15000, "confidence": 0.83},
+        },
+    )
+    assert create_response.status_code == 200
+    proposal = create_response.json()["proposal"]
+    assert create_response.json()["status"] == "created"
+    assert proposal["kind"] == "wait_adjust"
+    assert json.loads(proposal["old_value"])["timeoutMs"] is None
+    assert json.loads(proposal["new_value"])["timeoutMs"] == 15000
+
+    accept_response = client.post(f"/projects/{project_id}/healing-proposals/{proposal['id']}/accept")
+    apply_response = client.post(f"/projects/{project_id}/healing-proposals/{proposal['id']}/apply")
+
+    assert accept_response.status_code == 200
+    assert apply_response.status_code == 200
+    body = apply_response.json()
+    assert body["status"] == "applied"
+    assert body["mutation"] == {
+        "kind": "wait_adjust",
+        "pageObjectMethodId": "pom_heal_wait_adjust",
+        "structuredStepId": proposal["structured_step_id"],
+        "bodyPlanIndex": 1,
+        "oldTimeoutMs": None,
+        "newTimeoutMs": 15000,
+    }
+    with Session(database.engine) as session:
+        method = session.get(PageObjectMethod, "pom_heal_wait_adjust")
+        step = session.get(StructuredStep, proposal["structured_step_id"])
+        project = session.get(Project, project_id)
+        plan = json.loads(method.body_plan_json)
+        wait_payload = json.loads(step.wait_json)
+        page_content = (Path(project.root_path) / "generated" / "pages" / "generated_page.py").read_text(
+            encoding="utf-8",
+        )
+        assert plan[0]["timeoutMs"] == 15000
+        assert wait_payload["timeoutMs"] == 15000
+        assert "wait_for(timeout=15000)" in page_content
+
+
+def test_assertion_update_can_be_inferred_and_rejected_without_mutation(
+    client,
+    project_id: str,
+) -> None:
+    import worker.core.database as database
+
+    execution_id = "exec_heal_assertion_update"
+    with Session(database.engine) as session:
+        session.add(ExecutionRun(
+            id=execution_id,
+            project_id=project_id,
+            run_id="run_heal_assertion_update",
+            env="stg",
+            browser="chromium",
+            status="failed",
+        ))
+        result_id = _seed_failure(
+            session,
+            project_id,
+            execution_id,
+            "assertion_update",
+            error='expect failed in perform_assertion_update\nExpected string: "Pending"\nReceived string: "Ready"',
+            error_category="assertion_mismatch",
+            with_candidate=False,
+            method_type="assert",
+            method_selector="page.locator('#status')",
+            method_value_template="Pending",
+            raw_action_type="assert_text",
+            raw_action_selector="page.locator('#status')",
+            raw_action_value="Pending",
+            step_kind="assertion",
+            assertion_json={"value": "Pending"},
+            body_plan=[{
+                "action": "assert_text",
+                "order": 1,
+                "requiresReview": False,
+                "selector": "page.locator('#status')",
+                "sourceMappingId": "mapping_heal_assertion_update",
+                "sourceRawActionId": "raw_heal_assertion_update",
+                "value": "Pending",
+            }],
+        )
+
+    create_response = client.post(
+        _execution_url(project_id, execution_id),
+        json={"executionResultId": result_id},
+    )
+    assert create_response.status_code == 200
+    body = create_response.json()
+    assert body["status"] == "created"
+    assert body["diagnosis"]["disposition"] == "unknown"
+    proposal = body["proposal"]
+    assert proposal["kind"] == "assertion_update"
+    assert json.loads(proposal["new_value"])["value"] == "Ready"
+
+    first_reject = client.post(f"/projects/{project_id}/healing-proposals/{proposal['id']}/reject")
+    second_reject = client.post(f"/projects/{project_id}/healing-proposals/{proposal['id']}/reject")
+    apply_response = client.post(f"/projects/{project_id}/healing-proposals/{proposal['id']}/apply")
+
+    assert first_reject.status_code == 200
+    assert second_reject.status_code == 200
+    assert first_reject.json()["status"] == "rejected"
+    assert second_reject.json()["status"] == "rejected"
+    assert apply_response.status_code == 400
+    with Session(database.engine) as session:
+        method = session.get(PageObjectMethod, "pom_heal_assertion_update")
+        step = session.get(StructuredStep, "step_heal_assertion_update")
+        assert json.loads(method.body_plan_json)[0]["value"] == "Pending"
+        assert json.loads(step.assertion_json)["value"] == "Pending"
+
+
+def test_pom_method_patch_replaces_body_plan_and_regenerates(
+    monkeypatch,
+    tmp_path,
+    client,
+    project_id: str,
+) -> None:
+    import worker.core.database as database
+
+    _patch_template(monkeypatch, tmp_path)
+    execution_id = "exec_heal_pom_patch"
+    with Session(database.engine) as session:
+        session.add(ExecutionRun(
+            id=execution_id,
+            project_id=project_id,
+            run_id="run_heal_pom_patch",
+            env="stg",
+            browser="chromium",
+            status="failed",
+        ))
+        result_id = _seed_failure(
+            session,
+            project_id,
+            execution_id,
+            "pom_patch",
+            error="manual patch proposed for perform_pom_patch",
+            error_category="pom_method_patch",
+            with_candidate=False,
+            generated_page_target=True,
+        )
+        project = session.get(Project, project_id)
+        generate_project(session, project_id, Path(project.root_path), mode="full")
+
+    new_plan = [
+        {
+            "action": "click",
+            "order": 1,
+            "requiresReview": False,
+            "selector": "page.get_by_role('button', name='Save')",
+        },
+        {
+            "action": "assert_visible",
+            "order": 2,
+            "requiresReview": False,
+            "selector": "page.get_by_text('Saved')",
+        },
+    ]
+    create_response = client.post(
+        _execution_url(project_id, execution_id),
+        json={
+            "executionResultId": result_id,
+            "kind": "pom_method_patch",
+            "proposal": {
+                "bodyPlan": new_plan,
+                "methodType": "composite",
+                "selector": "page.get_by_role('button', name='Save')",
+                "confidence": 0.66,
+            },
+        },
+    )
+    assert create_response.status_code == 200
+    proposal = create_response.json()["proposal"]
+    assert proposal["kind"] == "pom_method_patch"
+    assert json.loads(proposal["new_value"])["bodyPlan"] == new_plan
+
+    accept_response = client.post(f"/projects/{project_id}/healing-proposals/{proposal['id']}/accept")
+    apply_response = client.post(f"/projects/{project_id}/healing-proposals/{proposal['id']}/apply")
+
+    assert accept_response.status_code == 200
+    assert apply_response.status_code == 200
+    assert apply_response.json()["mutation"]["changedFields"] == ["bodyPlan", "methodType", "selector"]
+    with Session(database.engine) as session:
+        method = session.get(PageObjectMethod, "pom_heal_pom_patch")
+        project = session.get(Project, project_id)
+        page_content = (Path(project.root_path) / "generated" / "pages" / "generated_page.py").read_text(
+            encoding="utf-8",
+        )
+        assert method.method_type == "composite"
+        assert json.loads(method.body_plan_json) == new_plan
+        assert "get_by_role('button', name='Save').click()" in page_content
+        assert "expect(self.page.get_by_text('Saved')).to_be_visible()" in page_content
 
 
 def test_auto_apply_applies_eligible_selector_proposal_through_existing_apply_path(

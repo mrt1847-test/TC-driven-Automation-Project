@@ -14,6 +14,26 @@ export interface ElectronAPI {
     service: string,
     account: string
   ) => Promise<{ ok: true; hasCredential: true } | { ok: false; message: string }>
+  testrailImport: (
+    projectId: string,
+    action: 'preview' | 'import',
+    body: Record<string, unknown>
+  ) => Promise<{ ok: true; cases: unknown } | { ok: false; message: string }>
+  googleSheetsImport: (
+    projectId: string,
+    action: 'preview' | 'import',
+    body: Record<string, unknown>
+  ) => Promise<{ ok: true; cases: unknown } | { ok: false; message: string }>
+  testrailExport: (
+    projectId: string,
+    executionId: string,
+    preview: boolean
+  ) => Promise<{ ok: true; result: unknown } | { ok: false; message: string }>
+  googleSheetsExport: (
+    projectId: string,
+    executionId: string,
+    preview: boolean
+  ) => Promise<{ ok: true; result: unknown } | { ok: false; message: string }>
   providerModels: (
     provider: string
   ) => Promise<{ ok: true; provider: string; models: string[] } | { ok: false; provider: string; message: string }>

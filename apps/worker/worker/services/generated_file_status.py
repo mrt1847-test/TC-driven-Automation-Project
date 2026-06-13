@@ -7,16 +7,20 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from worker.models.db import GeneratedFile, GeneratedFileStatus
+from worker.services.protected_regions import normalize_protected_regions
 
 
 def hash_text(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return hashlib.sha256(normalize_protected_regions(content).encode("utf-8")).hexdigest()
 
 
 def hash_file(path: Path) -> str | None:
     if not path.is_file():
         return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        return hash_text(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def latest_generated_files_by_path(
@@ -49,6 +53,7 @@ def refresh_generated_file_statuses(
     relative_paths: set[str] | None = None,
     planned_contents: dict[str, str] | None = None,
     planned_deletions: set[str] | None = None,
+    preserve_source_statuses: bool = False,
     commit: bool = False,
 ) -> dict[str, dict]:
     planned_contents = planned_contents or {}
@@ -77,11 +82,18 @@ def refresh_generated_file_statuses(
             row.content_hash
             and (current_hash is None or current_hash != row.content_hash)
         )
-        source_changed = bool(
+        planned_source_changed = bool(
             row.content_hash
             and (planned_hash is not None or relative_path in planned_deletions)
             and planned_hash != row.content_hash
         )
+        preserved_source_changed = (
+            preserve_source_statuses
+            and row.status in {GeneratedFileStatus.stale.value, GeneratedFileStatus.conflict.value}
+            and planned_hash is None
+            and relative_path not in planned_deletions
+        )
+        source_changed = planned_source_changed or preserved_source_changed
 
         if source_changed and file_changed:
             next_status = GeneratedFileStatus.conflict.value

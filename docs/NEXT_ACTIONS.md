@@ -2,7 +2,7 @@
 
 
 
-Last aligned: 2026-06-11
+Last aligned: 2026-06-13
 
 
 
@@ -84,14 +84,13 @@ blocker in the final response and leave `Current Batch` unchanged.
 
 
 
-**Checklist item:** C7-16 selector candidate ranking in body plans
+**Checklist item:** C7-17 PageObject segmentation by URL/route
 
 
 
-**Why this is next:** C6-08 now seeds ordered multi-action chunks, so the next
-structuring quality gap is selector choice inside body plans. The planner still
-copies raw selectors directly even when `SelectorCandidate` rows contain more
-stable alternatives.
+**Why this is next:** C7-14 closed safer regeneration around user-maintained
+generated code. The next open Worker structuring-depth item reduces large
+projects' dependence on a single project-wide PageObject.
 
 
 
@@ -103,17 +102,17 @@ stable alternatives.
 
 
 
-- Rank selector candidates while building PageObjectMethod body plans, preferring
-  stable selectors such as test id, role, and text over brittle CSS/XPath when
-  confidence and evidence support the replacement.
+- Inspect generated file rendering, regeneration guard, generated-file status,
+  selected regeneration, origin tracking, and obsolete/retire cleanup behavior.
 
-- Preserve raw selector fallback when candidates are missing, low-confidence, or
-  ambiguous.
+- Group generated PageObjects by URL/route trajectory boundaries instead of a
+  single `GeneratedPage` when route evidence is available.
 
-- Keep source traceability from body-plan entries back to RawAction and
-  SelectorCandidate evidence.
+- Update generated flows/imports, generated-file origins, selected
+  regeneration, and retire cleanup to follow the segmented page files.
 
-- Reuse the same ranking path for selected raw refresh merge.
+- Add focused Worker tests for segmentation, selected regeneration, origin
+  tracking, and cleanup compatibility.
 
 
 
@@ -121,12 +120,12 @@ stable alternatives.
 
 
 
-- Focused pytest for selector priority ordering, low-confidence/ambiguous
-  fallback, body-plan traceability, and selected raw refresh merge.
+- Generation no longer depends on one project-wide `GeneratedPage` where
+  route evidence is available.
 
-- Existing structuring/codegen/regeneration guard tests still pass.
+- Origins/status/retire cleanup follow segmented PageObject files.
 
-- Checklist C7-16 marked `[x]` with verification note.
+- Checklist C7-17 marked `[x]` with verification note.
 
 
 
@@ -142,29 +141,187 @@ Pick the next item from this list after Current Batch is done:
 
 |-------|----------------|---------|
 
-| 1 | C3-09 | Webwright subprocess cancel |
+| 1 | D1-08 | automation_key deep linking |
 
-| 2 | C9-08 | Execution `runner.cli` subprocess cancel |
-
-| 3 | D4-07 | Generate Raw Worker C2 prompt API GUI wiring |
-
-| 4 | C12-11 | Artifact read API |
-
-| 5 | C12-12 | Selector-candidates read API |
-
-| 6 | C7-13 | Project-level stale/conflict API |
-
-| 7 | C1-08, C1-09, C10-07, C10-08, G-04 | Real TestRail/Sheets connector depth |
-
-| 8 | D5-08 | Worker structure validate in Mapping |
-
-| 9 | I-10 | Third-party legal packaging gate |
-
-| 10 | J.* | Optional Post-MVP extensions (`C7-17` page segmentation lives here) |
+| 2 | D9-04 | self-healing auto-apply Settings toggle |
 
 
 
 ## Completed Batch Notes
+
+- **C7-14 (2026-06-13):** Added generated protected regions for page, flow,
+  and test Python outputs. Regeneration now merges existing protected-region
+  bodies into planned content before preflight/dry-run/write paths, status
+  hashing normalizes protected bodies so valid region-only edits remain
+  generated, retire control-file rewrites preserve protected content, and
+  unprotected edits still surface as edited/conflict. Focused regeneration/
+  status/codegen/retire tests and the non-e2e Worker suite passed.
+
+- **C12-13 (2026-06-13):** Extended Worker healing proposals beyond
+  `selector_replace`. The create endpoint now accepts explicit `kind` plus a
+  structured `proposal` payload and can infer wait/assertion proposals from
+  resolved failure evidence or artifact metadata hints. `wait_adjust`,
+  `assertion_update`, and `pom_method_patch` persist compact JSON old/new patch
+  payloads with diagnosis/target/artifact evidence, share accept/reject status
+  transitions, require accepted status before apply, patch targeted
+  wait/assertion/POM body-plan state through guarded selected regeneration with
+  conflict rollback, keep auto-apply selector-only, and render wait timeouts
+  into generated Playwright waits. Focused healing proposal tests, target/
+  diagnosis/codegen regressions, and targeted `py_compile` passed.
+
+- **I-10 (2026-06-13):** Strengthened the third-party legal packaging gate.
+  `scripts/validate-third-party.ps1 -Strict` now validates vendored Webwright
+  notice/license/version metadata, Electron `runtime-staging` to
+  `resources/runtime` packaging config, staged and packaged
+  `THIRD_PARTY_NOTICES.txt`, live runtime manifests, required notice sections,
+  vendored commit consistency, and notice freshness against source
+  attribution/license files before distribution. The direct PowerShell command,
+  `npm.cmd run validate:third-party`, and `git diff --check` passed.
+
+- **D5-08 (2026-06-13):** Mapping Review now calls the Worker
+  `structure/validate` endpoint for the selected case through the Desktop API
+  client, merges saved Worker structure/generated-file issues with local draft
+  preflight issues, labels issue source as draft or worker, surfaces
+  generated-file edited/stale/conflict and Worker validation request failures
+  inline without clearing unsaved mapping edits, and refreshes Worker
+  validation after Auto Map or Save Edits. `npm run build`, focused Worker
+  structure/generated-file validation tests, and `git diff --check` passed.
+
+- **C10-08 (2026-06-13):** Replaced Google Sheets result export local-mock
+  with authenticated Sheets API v4 `values:batchUpdate` when the Google Sheets
+  integration is enabled. Worker export resolves non-secret spreadsheet, sheet,
+  header-row, and result-column config from settings or request config, receives
+  one-time credential JSON through desktop main-process secure credential
+  mediation, keeps preview read-only with target payloads, validates
+  mapping/ExecutionResult identity plus spreadsheet/sheet/row targets before
+  mutation, creates missing result headers, writes per-row result cells, logs
+  API failures as failed masked `ExportLog` rows, and keeps disabled/mock mode
+  available for local/dev tests. Generated mappings now include
+  `resultTargets.googleSheets` for Google Sheets sourced cases, Desktop
+  Export/IDE panels route non-preview Google Sheets export through secure IPC,
+  focused export/import/log/settings tests passed, generated runtime/status
+  regressions passed, and `npm run build` passed.
+
+- **C10-07 (2026-06-13):** Replaced TestRail result export local-mock with
+  authenticated API v2 `add_result_for_case/{run_id}/{case_id}` when the
+  TestRail integration is enabled. Worker export resolves non-secret
+  base URL/username/result run ID from settings or request config, receives the
+  one-time API token through desktop main-process secure credential mediation,
+  keeps preview read-only, validates mapping/ExecutionResult identity before
+  mutation, writes status/duration/comment payloads with automation-key
+  traceability, logs API failures as failed masked `ExportLog` rows, and keeps
+  disabled/mock mode available for local/dev tests. Focused export, log masking,
+  settings secret tests, and `npm run build` passed; the broader MVP4 e2e still
+  failed before export because its prerequisite Webwright run returned `failed`.
+
+- **C1-09 (2026-06-13):** Replaced the Google Sheets placeholder import with
+  authenticated Sheets API v4 values preview/import paths. Worker requests
+  receive a one-time OAuth/access-token JSON or service-account JSON from the
+  desktop main process secure credential account
+  `connector:googleSheets:serviceAccountJson`, keeping plaintext credential JSON
+  out of renderer and `settings.json`. Sheet rows normalize through the
+  Excel-compatible column mapping into `NormalizedTestCase`, durable import
+  saves source location/preconditions/tags/priority/start URL, explicit `mock`
+  mode keeps local/dev connector flow usable, and credential-bearing API errors
+  are masked. Focused Google Sheets import tests, existing TestRail/import/
+  settings/log masking tests, result export validation tests, and `npm run
+  build` passed.
+
+- **C1-08 (2026-06-13):** Replaced the TestRail placeholder import with
+  authenticated API v2 `get_cases` preview/import paths. Worker requests merge
+  non-secret TestRail settings with a one-time token supplied by desktop main
+  process from secure credential account `connector:testrail:apiToken`, keeping
+  plaintext tokens out of renderer and `settings.json`. TestRail legacy and
+  paginated payloads normalize into `NormalizedTestCase`, durable import saves
+  source location/preconditions/tags/priority/start URL, explicit `mock` mode
+  keeps local/dev connector flow usable, and token-bearing API errors are
+  masked. Focused TestRail import tests, existing import/settings/log masking
+  tests, result export validation tests, and `npm run build` passed.
+
+- **G-04 (2026-06-13):** Added connector credential metadata via
+  `GET /settings/connector-credentials` for TestRail and Google Sheets secure
+  store service/account names without returning plaintext secrets. Desktop
+  Settings now stores TestRail API tokens and Google Sheets service-account JSON
+  through Electron keytar/safeStorage IPC while keeping only non-secret
+  integration config in `settings.json`. Settings sanitization now strips
+  `serviceAccountJson`, connector metadata masks loggable secret-looking values,
+  focused settings/security tests passed, related secret masking suites passed,
+  and `npm run build` passed.
+
+- **C7-13 (2026-06-13):** Added project-scoped
+  `GET /projects/{project_id}/generated-files/status` for generated-file
+  maintenance state. Responses refresh tracked file hashes, preserve known
+  source-change `stale`/`conflict` states, include
+  edited/stale/conflict/obsolete counts, severity-ordered file rows,
+  automation key, primary source, resolved origins, hash/edit/source-change
+  flags, and GUI guidance. Focused endpoint tests passed, and existing
+  generated-file status, regeneration guard, incremental generation, origin,
+  and retire cleanup suites passed.
+
+- **C12-12 (2026-06-13):** Added selected-case
+  `GET /projects/{project_id}/cases/{case_id}/selector-candidates` for
+  persisted selector candidate evidence. Responses validate case project
+  ownership, include stable selector IDs/type/value/confidence/metadata,
+  selected-case raw-action and PageObjectMethod review context, grouped
+  raw-action/POM candidate IDs, and project-owned source artifact metadata with
+  the same safe path suppression used by the artifact API. Focused endpoint
+  tests passed, selector ranking and failure diagnosis tests passed, and
+  proposal/retire/model self-healing suites passed. The broader live queued
+  Webwright selector extraction e2e still fails before this read API because
+  local raw generation returns `failed`.
+
+- **C12-11 (2026-06-12):** Added project-scoped
+  `GET /projects/{project_id}/artifacts` for indexed Webwright/execution
+  evidence with automation-key, source/source-id, artifact-type, Webwright run,
+  and execution filters. Responses include stable artifact IDs,
+  source/kind/title/hash/timestamps, parsed metadata, and `filePath` only when
+  the path is inside known Webwright output or execution result artifact roots.
+  Focused API tests passed, self-healing diagnosis/proposal/target resolver
+  tests passed, and direct artifact model/indexing tests passed. Broader live
+  queued Webwright artifact e2e still fails before the read API because local
+  raw generation returns `failed`.
+
+- **D4-07 (2026-06-12):** Generate Raw prompt composer now uses Worker
+  `prompt-composer`, `prompt-presets`, and `prompt-preview` APIs instead of
+  settings-only/local prompt state. Worker composer state stores selected
+  preset continuity, the desktop API client exposes prompt endpoints, project
+  presets can be saved/deleted through Worker state, run requests include the
+  selected preset, and Worker API failures preserve local draft prompt
+  selection. Focused prompt composer/preset/preview tests passed, targeted
+  Python compile passed, and `npm run build` passed.
+
+- **C9-08 (2026-06-12):** Execution runs and `rerun-failed` now register active
+  `runner.cli` subprocesses by `ExecutionRun.id` and returned `jobId`; cancel
+  performs graceful terminate with kill fallback, writes masked cancellation
+  diagnostics to stdout/stderr/results artifacts, marks the log stream
+  cancelled, and preserves `cancelled` against background overwrite. Cancelled
+  runs delete stale `ExecutionResult` rows, index log/metadata artifacts, and a
+  later rerun uses a fresh run directory. Focused fake runner cancel tests
+  passed, generated-runtime/runner-contract tests passed, and the non-e2e
+  Worker suite passed with 164 tests. Two broader live-Webwright-dependent e2e
+  runner tests still fail before runner execution because their Webwright raw
+  generation setup returns `failed`.
+
+- **C3-09 (2026-06-12):** Webwright live runs now register active
+  subprocesses by `WebwrightRun.id` and returned `jobId`; cancel performs
+  graceful terminate with kill fallback, stops heartbeat/pipe tasks, writes
+  masked cancellation diagnostics to stdout/stderr/log streams, and preserves
+  run/case `cancelled` during background artifact harvest. Cancelled runs keep
+  harvested log/metadata artifacts, completed-path action extraction is skipped
+  for cancelled runs, and retry creates a fresh run row. Focused fake
+  long-running Webwright cancel tests passed, existing Webwright/action
+  extraction tests passed, and the non-e2e Worker suite passed with 161 tests.
+
+- **C7-16 (2026-06-12):** Structuring now ranks extraction-time
+  `SelectorCandidate` rows before writing body-plan selectors, choosing
+  compatible high-confidence candidates with stability order
+  `test_id > role > text > css > xpath`. Body-plan entries keep raw selector,
+  selected candidate, runner-up confidence/provenance, and fallback metadata;
+  low-confidence, ambiguous, incompatible, missing, and healing-only candidates
+  preserve raw selectors. The same path is used during selected raw refresh
+  merge, and generated code consumes the ranked selector. Focused selector
+  ranking tests passed, targeted structuring/codegen/raw-refresh/regeneration
+  tests passed, and the non-e2e Worker suite passed with 159 tests.
 
 - **C6-08 (2026-06-11):** `auto_map_case` now plans contiguous ordered
   RawAction chunks per TC step using selected-run order plus trajectory

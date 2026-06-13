@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { WebwrightRunErrorPanel } from '@/components/WebwrightRunErrorPanel'
-import { api, getApiErrorMessage, type TestCase, type WebwrightRun } from '@/lib/api'
+import { api, getApiErrorMessage, type StructureValidationResponse, type TestCase, type WebwrightRun } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 type TestStep = {
@@ -40,7 +40,10 @@ type MappingDraftRow = {
 
 type ValidationIssue = {
   severity: 'error' | 'warning' | 'info'
+  source?: 'draft' | 'worker'
   step?: number
+  file?: string
+  kind?: string
   message: string
 }
 
@@ -89,6 +92,16 @@ export function MappingPage() {
     enabled: !!project && !!selectedCase
   })
 
+  const {
+    data: workerValidation,
+    error: workerValidationError,
+    isFetching: workerValidationFetching
+  } = useQuery({
+    queryKey: ['structure-validation', project?.id, selectedCase?.id],
+    queryFn: () => api.mapping.validateStructure(project!.id, selectedCase!.id),
+    enabled: !!project && !!selectedCase
+  })
+
   const { data: runs = [] } = useQuery({
     queryKey: ['webwright-runs', project?.id],
     queryFn: () => api.webwright.list(project!.id),
@@ -107,6 +120,7 @@ export function MappingPage() {
       qc.invalidateQueries({ queryKey: ['mappings', project?.id, selectedCase?.id] })
       qc.invalidateQueries({ queryKey: ['actions', project?.id, selectedCase?.id] })
       qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+      qc.invalidateQueries({ queryKey: ['structure-validation', project?.id, selectedCase?.id] })
     },
     onError: (error) => {
       setMappingApiNotice(null)
@@ -162,6 +176,7 @@ export function MappingPage() {
       qc.invalidateQueries({ queryKey: ['mappings', project?.id, selectedCase?.id] })
       qc.invalidateQueries({ queryKey: ['actions', project?.id, selectedCase?.id] })
       qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+      qc.invalidateQueries({ queryKey: ['structure-validation', project?.id, selectedCase?.id] })
     },
     onError: (error) => {
       setMappingApiNotice(null)
@@ -174,7 +189,9 @@ export function MappingPage() {
   const flowReadyCount = mappingDraft.filter((mapping) => mapping.status === 'mapped' && mapping.action_id).length
   const pomReadyCount = mappingDraft.filter((mapping) => mapping.pom_method_name.trim()).length
   const pageObjectName = selectedCase ? `${pascalName(selectedCase.automation_key)}Page` : 'PageObject'
-  const validationIssues = validateStructureDraft(mappingDraft, steps)
+  const localValidationIssues = validateStructureDraft(mappingDraft, steps)
+  const workerValidationIssues = buildWorkerValidationIssues(workerValidation, workerValidationError)
+  const validationIssues = [...localValidationIssues, ...workerValidationIssues]
   const errorCount = validationIssues.filter((issue) => issue.severity === 'error').length
   const warningCount = validationIssues.filter((issue) => issue.severity === 'warning').length
 
@@ -336,22 +353,39 @@ export function MappingPage() {
                   <h4 className="text-sm font-medium text-slate-100">Structure Validation</h4>
                   <div className="mt-1 text-xs text-slate-500">
                     {errorCount} error(s), {warningCount} warning(s)
+                    {workerValidationFetching
+                      ? ' - Worker checking'
+                      : workerValidation
+                        ? ` - Worker ${workerValidation.ok ? 'ready' : 'issues'}`
+                        : ''}
                   </div>
                 </div>
-                <span className={`rounded px-2 py-1 text-xs ${errorCount ? 'bg-red-700 text-white' : warningCount ? 'bg-yellow-700 text-white' : 'bg-green-700 text-white'}`}>
-                  {errorCount ? 'blocked' : warningCount ? 'review' : 'ready'}
+                <span className={`rounded px-2 py-1 text-xs ${validationStatusClass(errorCount, warningCount, workerValidationFetching)}`}>
+                  {workerValidationFetching ? 'checking' : errorCount ? 'blocked' : warningCount ? 'review' : 'ready'}
                 </span>
               </div>
               <div className="mt-3 space-y-2">
                 {validationIssues.map((issue, index) => (
                   <div key={`${issue.severity}-${issue.step || 'global'}-${index}`} className={`rounded border p-2 text-xs ${validationIssueClass(issue.severity)}`}>
-                    <div className="font-medium">{issue.step ? `Step ${issue.step}` : 'Flow'}</div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-medium">{validationIssueTitle(issue)}</div>
+                      {issue.source && (
+                        <span className="rounded bg-slate-950 px-1.5 py-0.5 text-[10px] uppercase text-slate-400">
+                          {issue.source}
+                        </span>
+                      )}
+                    </div>
                     <div className="mt-1">{issue.message}</div>
                   </div>
                 ))}
-                {!validationIssues.length && (
+                {!validationIssues.length && workerValidationFetching && (
+                  <div className="rounded border border-slate-800 bg-slate-950 p-2 text-xs text-slate-300">
+                    Checking saved structure and generated-file status.
+                  </div>
+                )}
+                {!validationIssues.length && !workerValidationFetching && (
                   <div className="rounded border border-green-800 bg-green-950/30 p-2 text-xs text-green-200">
-                    Flow, raw action links, normalized names, and POM method names are ready at the current GUI baseline.
+                    Draft flow and Worker structure validation are ready for the selected TC.
                   </div>
                 )}
               </div>
@@ -678,13 +712,20 @@ function validateStructureDraft(mappings: MappingDraftRow[], steps: TestStep[]):
   const issues: ValidationIssue[] = []
 
   if (!mappings.length) {
-    issues.push({ severity: 'error', message: 'No normalized flow exists. Run Auto Map before structure review.' })
+    issues.push({
+      severity: 'error',
+      source: 'draft',
+      kind: 'draft_flow_missing',
+      message: 'No normalized flow exists. Run Auto Map before structure review.'
+    })
     return issues
   }
 
   if (steps.length && mappings.length !== steps.length) {
     issues.push({
       severity: 'warning',
+      source: 'draft',
+      kind: 'draft_step_count_mismatch',
       message: `TC has ${steps.length} step(s), but the normalized flow has ${mappings.length} step(s).`
     })
   }
@@ -693,41 +734,127 @@ function validateStructureDraft(mappings: MappingDraftRow[], steps: TestStep[]):
     if (!mapping.action_id) {
       issues.push({
         severity: 'error',
+        source: 'draft',
         step: mapping.tc_step_index,
+        kind: 'draft_raw_action_missing',
         message: 'Missing raw action link.'
       })
     }
     if (!mapping.normalized_step_name.trim()) {
       issues.push({
         severity: 'error',
+        source: 'draft',
         step: mapping.tc_step_index,
+        kind: 'draft_step_name_missing',
         message: 'Normalized step name is empty.'
       })
     }
     if (!mapping.pom_method_name.trim()) {
       issues.push({
         severity: 'warning',
+        source: 'draft',
         step: mapping.tc_step_index,
+        kind: 'draft_pom_method_missing',
         message: 'Page Object method name is empty.'
       })
     }
     if (mapping.status === 'needs_review') {
       issues.push({
         severity: 'warning',
+        source: 'draft',
         step: mapping.tc_step_index,
+        kind: 'draft_step_needs_review',
         message: 'Step is marked needs_review.'
       })
     }
     if (mapping.status === 'unmapped') {
       issues.push({
         severity: 'error',
+        source: 'draft',
         step: mapping.tc_step_index,
+        kind: 'draft_step_unmapped',
         message: 'Step is marked unmapped.'
       })
     }
   }
 
   return issues
+}
+
+function buildWorkerValidationIssues(
+  validation: StructureValidationResponse | undefined,
+  error: unknown,
+): ValidationIssue[] {
+  if (error) {
+    return [{
+      severity: 'warning',
+      source: 'worker',
+      kind: 'worker_validation_unavailable',
+      message: `Worker structure validation unavailable: ${getApiErrorMessage(error, 'Request failed.')}`
+    }]
+  }
+  if (!validation) return []
+  return (validation.issues || []).map(workerIssueToValidationIssue)
+}
+
+function workerIssueToValidationIssue(rawIssue: string): ValidationIssue {
+  const separator = rawIssue.indexOf(':')
+  const kind = separator >= 0 ? rawIssue.slice(0, separator) : rawIssue
+  const detail = separator >= 0 ? rawIssue.slice(separator + 1) : ''
+  const step = stepFromIssue(rawIssue)
+  const file = generatedFileFromIssue(kind, detail)
+  const severity = workerIssueSeverity(kind)
+  return {
+    severity,
+    source: 'worker',
+    step,
+    file,
+    kind,
+    message: workerIssueMessage(kind, detail)
+  }
+}
+
+function workerIssueSeverity(kind: string): ValidationIssue['severity'] {
+  if (kind === 'flow_needs_review' || kind === 'mapping_needs_review') return 'warning'
+  if (kind === 'generated_file_stale') return 'warning'
+  if (kind.startsWith('generated_file_') && kind !== 'generated_file_generated') return 'error'
+  if (kind === 'unsupported_action_requires_review') return 'warning'
+  return 'error'
+}
+
+function workerIssueMessage(kind: string, detail: string) {
+  if (kind === 'structured_flow_missing') return 'Saved Worker structure is missing a structured flow. Generate or sync structure before running generated tests.'
+  if (kind === 'flow_needs_review') return 'Saved Worker structure is marked needs_review.'
+  if (kind === 'mappings_missing') return 'Saved mappings are missing for this TC.'
+  if (kind === 'mapping_needs_review') return 'Saved mapping row is marked needs_review.'
+  if (kind === 'missing_step_name') return 'Saved mapping row is missing a normalized step or Page Object method name.'
+  if (kind === 'step_count_mismatch') return 'Saved structured steps and mapping rows have different counts.'
+  if (kind === 'generated_file_edited') return `Generated file has manual edits: ${detail || 'unknown file'}.`
+  if (kind === 'generated_file_stale') return `Generated file is stale against newer source data: ${detail || 'unknown file'}.`
+  if (kind === 'generated_file_conflict') return `Generated file has conflicting manual edits and source changes: ${detail || 'unknown file'}.`
+  return detail ? `${kind}: ${detail}` : kind
+}
+
+function stepFromIssue(issue: string) {
+  const match = issue.match(/step_(\d+)/)
+  return match ? Number(match[1]) : undefined
+}
+
+function generatedFileFromIssue(kind: string, detail: string) {
+  return kind.startsWith('generated_file_') && detail ? detail : undefined
+}
+
+function validationIssueTitle(issue: ValidationIssue) {
+  if (issue.step) return `Step ${issue.step}`
+  if (issue.file) return issue.file
+  return issue.source === 'worker' ? 'Worker structure' : 'Flow'
+}
+
+function validationStatusClass(errorCount: number, warningCount: number, pending: boolean) {
+  if (pending) return 'bg-slate-700 text-white'
+  if (errorCount) return 'bg-red-700 text-white'
+  if (warningCount) return 'bg-yellow-700 text-white'
+  return 'bg-green-700 text-white'
 }
 
 function mappingApiFailureMessage(action: string, error: unknown) {

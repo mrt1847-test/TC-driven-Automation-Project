@@ -4,8 +4,10 @@ import asyncio
 import json
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from worker.core.config import mask_secrets, new_id
@@ -33,6 +35,24 @@ MOCK_START_URL = "data:text/html,%3Ca%20href%3D%22%23done%22%3EMore%20informatio
 HEARTBEAT_INTERVAL_SECONDS = 15
 PIPE_DRAIN_TIMEOUT_SECONDS = 2
 PROCESS_STOP_TIMEOUT_SECONDS = 10
+CANCELLED_CASE_STATUS = "cancelled"
+
+
+@dataclass
+class ActiveWebwrightRun:
+    run_id: str
+    job_id: str
+    process: Any
+    stdout_path: Path
+    stderr_path: Path
+    stream_tasks: list[asyncio.Task[Any]]
+    heartbeat_task: asyncio.Task[Any] | None = None
+    cancel_requested: bool = False
+
+
+_active_runs: dict[str, ActiveWebwrightRun] = {}
+_active_job_runs: dict[str, set[str]] = {}
+_active_runs_lock = RLock()
 
 
 def classify_error(stderr: str) -> str:
@@ -82,6 +102,56 @@ def _append_log(path: Path, text: str) -> None:
         handle.write(text)
 
 
+def _register_active_run(active_run: ActiveWebwrightRun) -> None:
+    with _active_runs_lock:
+        _active_runs[active_run.run_id] = active_run
+        _active_job_runs.setdefault(active_run.job_id, set()).add(active_run.run_id)
+
+
+def _update_active_run_tasks(
+    run_id: str,
+    stream_tasks: list[asyncio.Task[Any]],
+    heartbeat_task: asyncio.Task[Any] | None,
+) -> None:
+    with _active_runs_lock:
+        active_run = _active_runs.get(run_id)
+        if active_run is None:
+            return
+        active_run.stream_tasks = stream_tasks
+        active_run.heartbeat_task = heartbeat_task
+
+
+def _mark_active_run_cancel_requested(run_id: str) -> ActiveWebwrightRun | None:
+    with _active_runs_lock:
+        active_run = _active_runs.get(run_id)
+        if active_run is None:
+            return None
+        active_run.cancel_requested = True
+        return active_run
+
+
+def _active_run_cancel_requested(run_id: str | None) -> bool:
+    if not run_id:
+        return False
+    with _active_runs_lock:
+        active_run = _active_runs.get(run_id)
+        return bool(active_run and active_run.cancel_requested)
+
+
+def _unregister_active_run(run_id: str | None) -> None:
+    if not run_id:
+        return
+    with _active_runs_lock:
+        active_run = _active_runs.pop(run_id, None)
+        if active_run is None:
+            return
+        job_runs = _active_job_runs.get(active_run.job_id)
+        if job_runs is not None:
+            job_runs.discard(run_id)
+            if not job_runs:
+                _active_job_runs.pop(active_run.job_id, None)
+
+
 async def _stream_pipe(
     stream: asyncio.StreamReader,
     job_id: str,
@@ -115,16 +185,44 @@ async def _publish_heartbeat(
             await log_streams.publish(job_id, f"[webwright] {automation_key} still running ({elapsed}s elapsed)")
 
 
-async def _stop_process(process: Any) -> None:
-    if process.returncode is None:
+async def _terminate_process(process: Any, timeout: float | None = None) -> str:
+    timeout = PROCESS_STOP_TIMEOUT_SECONDS if timeout is None else timeout
+    if process.returncode is not None:
+        return "already_exited"
+
+    graceful_sent = False
+    terminate = getattr(process, "terminate", None)
+    if callable(terminate):
+        try:
+            terminate()
+            graceful_sent = True
+        except ProcessLookupError:
+            return "already_exited"
+    else:
         try:
             process.kill()
         except ProcessLookupError:
-            pass
+            return "already_exited"
+
     try:
-        await asyncio.wait_for(process.wait(), timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+        await asyncio.wait_for(process.wait(), timeout=timeout)
     except asyncio.TimeoutError:
-        return
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                return "already_exited"
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return "kill_timeout"
+        return "killed"
+
+    return "terminated" if graceful_sent else "killed"
+
+
+async def _stop_process(process: Any) -> None:
+    await _terminate_process(process)
 
 
 async def _finish_background_tasks(tasks: list[asyncio.Task[Any]], timeout: float) -> bool:
@@ -135,6 +233,76 @@ async def _finish_background_tasks(tasks: list[asyncio.Task[Any]], timeout: floa
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     return not pending
+
+
+async def _append_cancellation_diagnostic(
+    *,
+    job_id: str,
+    stdout_path: Path,
+    stderr_path: Path,
+    message: str,
+) -> None:
+    diagnostic = mask_secrets(message)
+    line = diagnostic + "\n"
+    _append_log(stdout_path, line)
+    _append_log(stderr_path, line)
+    await log_streams.publish(job_id, diagnostic)
+
+
+async def cancel_webwright_run(run_id: str, job_id: str | None = None) -> bool:
+    active_run = _mark_active_run_cancel_requested(run_id)
+    if active_run is None:
+        if job_id:
+            await log_streams.publish(job_id, f"[webwright] Cancellation requested for inactive run {run_id}")
+        return False
+
+    stream_job_id = job_id or active_run.job_id
+    await _append_cancellation_diagnostic(
+        job_id=stream_job_id,
+        stdout_path=active_run.stdout_path,
+        stderr_path=active_run.stderr_path,
+        message=f"[cancelled] Webwright cancellation requested for run {run_id}",
+    )
+    stop_result = await _terminate_process(active_run.process)
+
+    if active_run.heartbeat_task is not None:
+        active_run.heartbeat_task.cancel()
+    await _finish_background_tasks(
+        [
+            *active_run.stream_tasks,
+            *([active_run.heartbeat_task] if active_run.heartbeat_task is not None else []),
+        ],
+        PIPE_DRAIN_TIMEOUT_SECONDS,
+    )
+    await _append_cancellation_diagnostic(
+        job_id=stream_job_id,
+        stdout_path=active_run.stdout_path,
+        stderr_path=active_run.stderr_path,
+        message=f"[cancelled] Webwright process stop result for run {run_id}: {stop_result}; log stream marked cancelled",
+    )
+    return True
+
+
+def _refresh_cancelled_state(session: Session, run: WebwrightRun, case: TestCase) -> bool:
+    try:
+        session.refresh(run)
+    except Exception:
+        pass
+    try:
+        session.refresh(case)
+    except Exception:
+        pass
+    return (
+        run.status == WebwrightRunStatus.cancelled.value
+        or case.status == CANCELLED_CASE_STATUS
+        or _active_run_cancel_requested(run.id)
+    )
+
+
+def _mark_run_cancelled(run: WebwrightRun, case: TestCase) -> None:
+    run.status = WebwrightRunStatus.cancelled.value
+    run.error_message = "cancelled"
+    case.status = CANCELLED_CASE_STATUS
 
 
 async def run_webwright_for_case(
@@ -251,6 +419,16 @@ async def run_webwright_for_case(
                 env=subprocess_env,
             )
 
+        _register_active_run(
+            ActiveWebwrightRun(
+                run_id=run.id or "",
+                job_id=job_id,
+                process=process,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                stream_tasks=[],
+            )
+        )
         await log_streams.publish(
             job_id,
             f"[webwright] Process started for {case.automation_key} (pid={process.pid}, timeout={profile.webwright_run_timeout_seconds}s)",
@@ -262,6 +440,11 @@ async def run_webwright_for_case(
             asyncio.create_task(_stream_pipe(process.stderr, job_id, stderr_path, stderr_chunks)),
         ]
         heartbeat_task = asyncio.create_task(_publish_heartbeat(process, job_id, case.automation_key))
+        _update_active_run_tasks(run.id or "", stream_tasks, heartbeat_task)
+
+        if _refresh_cancelled_state(session, run, case):
+            _mark_active_run_cancel_requested(run.id or "")
+            await cancel_webwright_run(run.id or "", job_id)
 
         try:
             return_code = await asyncio.wait_for(
@@ -300,7 +483,19 @@ async def run_webwright_for_case(
         final_script = _find_webwright_artifact(output_root, "final_script.py")
         trajectory = _find_webwright_artifact(output_root, "trajectory.json")
 
-        if not final_script:
+        if _refresh_cancelled_state(session, run, case):
+            cancellation_message = "[cancelled] Webwright run cancelled; harvesting available artifacts."
+            stderr_text += ("\n" if stderr_text and not stderr_text.endswith("\n") else "") + cancellation_message + "\n"
+            await _append_cancellation_diagnostic(
+                job_id=job_id,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                message=cancellation_message,
+            )
+            _mark_run_cancelled(run, case)
+            run.final_script_path = str(final_script) if final_script else None
+            run.trajectory_path = str(trajectory) if trajectory else None
+        elif not final_script:
             run.status = WebwrightRunStatus.failed.value
             if not stderr_text:
                 missing_artifact_message = "[error] Webwright exited without final_script.py or diagnostic output."
@@ -344,12 +539,15 @@ async def run_webwright_for_case(
             [*stream_tasks, *([heartbeat_task] if heartbeat_task is not None else [])],
             PIPE_DRAIN_TIMEOUT_SECONDS,
         )
-        run.status = WebwrightRunStatus.failed.value
-        run.error_message = "webwright_not_found"
-        case.status = "webwright_failed"
         error_message = f"[error] {exc}"
         _append_log(stderr_path, error_message + "\n")
         await log_streams.publish(job_id, error_message)
+        if _refresh_cancelled_state(session, run, case):
+            _mark_run_cancelled(run, case)
+        else:
+            run.status = WebwrightRunStatus.failed.value
+            run.error_message = "webwright_not_found"
+            case.status = "webwright_failed"
     except Exception as exc:
         if process is not None:
             await _stop_process(process)
@@ -362,10 +560,14 @@ async def run_webwright_for_case(
         error_message = mask_secrets(f"[error] {type(exc).__name__}: {exc}")
         _append_log(stderr_path, error_message + "\n")
         await log_streams.publish(job_id, error_message)
-        run.status = WebwrightRunStatus.failed.value
-        run.error_message = classify_error(error_message)
-        case.status = "webwright_failed"
+        if _refresh_cancelled_state(session, run, case):
+            _mark_run_cancelled(run, case)
+        else:
+            run.status = WebwrightRunStatus.failed.value
+            run.error_message = classify_error(error_message)
+            case.status = "webwright_failed"
 
+    _unregister_active_run(run.id)
     run.ended_at = datetime.utcnow()
     session.add(run)
     session.add(case)

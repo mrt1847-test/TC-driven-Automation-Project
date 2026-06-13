@@ -1,11 +1,16 @@
 ﻿import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, type ConnectorCredentialsResponse } from '@/lib/api'
 import { useAppStore } from '@/store/appStore'
 
 type IntegrationConfig = {
   baseUrl?: string
   enabled?: boolean
+  username?: string
+  spreadsheetId?: string
+  serviceAccountEmail?: string
+  [key: string]: unknown
 }
 
 type HealthCheck = {
@@ -54,12 +59,17 @@ type AppSettings = {
   integrations?: {
     testrailClone?: IntegrationConfig
     testrail?: IntegrationConfig
-    googleSheets?: { enabled?: boolean }
+    googleSheets?: IntegrationConfig
     [key: string]: unknown
   }
   [key: string]: unknown
 }
 
+const DEFAULT_CREDENTIAL_SERVICE = 'tc-studio'
+const DEFAULT_CONNECTOR_ACCOUNTS = {
+  testrail: { apiToken: 'connector:testrail:apiToken' },
+  googleSheets: { serviceAccountJson: 'connector:googleSheets:serviceAccountJson' }
+}
 const inputClass = 'w-full p-2 rounded bg-slate-950 border border-slate-700 text-sm'
 const sectionClass = 'rounded border border-slate-800 bg-slate-900 p-4 space-y-3'
 
@@ -72,22 +82,48 @@ export function SettingsPage() {
   const [validation, setValidation] = useState<HealthResponse | null>(null)
   const [availableModels, setAvailableModels] = useState<string[]>([])
   const [modelStatus, setModelStatus] = useState('Load available models to verify access for the selected provider key.')
+  const [testRailApiToken, setTestRailApiToken] = useState('')
+  const [googleSheetsCredential, setGoogleSheetsCredential] = useState('')
+  const [connectorCredentialPresence, setConnectorCredentialPresence] = useState<Record<string, boolean>>({})
   const qc = useQueryClient()
 
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.settings.get })
+  const { data: connectorCredentials } = useQuery({
+    queryKey: ['settings', 'connector-credentials'],
+    queryFn: api.settings.connectorCredentials
+  })
   useEffect(() => {
     if (settings) setSettingsText(JSON.stringify(settings, null, 2))
   }, [settings])
+  useEffect(() => {
+    let cancelled = false
+
+    async function refreshPresence() {
+      if (!connectorCredentials || !window.electronAPI?.credentialGet) {
+        setConnectorCredentialPresence({})
+        return
+      }
+      const entries = Object.values(connectorCredentials.connectors).flatMap((connector) => connector.credentials)
+      const next: Record<string, boolean> = {}
+      await Promise.all(entries.map(async (credential) => {
+        const result = await window.electronAPI.credentialGet(connectorCredentials.service, credential.account)
+        next[credential.account] = result?.ok === true && result.hasCredential === true
+      }))
+      if (!cancelled) setConnectorCredentialPresence(next)
+    }
+
+    refreshPresence()
+    return () => {
+      cancelled = true
+    }
+  }, [connectorCredentials])
 
   const saveMut = useMutation({
     mutationFn: async () => {
       const body = JSON.parse(settingsText) as AppSettings
-      const saved = await api.settings.update(body)
-      const provider = (saved as AppSettings).webwright?.apiProvider || body.webwright?.apiProvider
-      if (apiKey && provider) {
-        await window.electronAPI?.credentialSet('tc-studio', provider, apiKey)
-        setApiKey('')
-      }
+      const saved = await api.settings.update(body) as AppSettings
+      await saveProviderCredential(saved, body)
+      await saveConnectorCredentials()
       return saved
     },
     onSuccess: (saved) => {
@@ -99,12 +135,9 @@ export function SettingsPage() {
   const validateMut = useMutation({
     mutationFn: async () => {
       const body = JSON.parse(settingsText) as AppSettings
-      const saved = await api.settings.update(body)
-      const provider = (saved as AppSettings).webwright?.apiProvider || body.webwright?.apiProvider
-      if (apiKey && provider) {
-        await window.electronAPI?.credentialSet('tc-studio', provider, apiKey)
-        setApiKey('')
-      }
+      const saved = await api.settings.update(body) as AppSettings
+      await saveProviderCredential(saved, body)
+      await saveConnectorCredentials()
       setSettingsText(JSON.stringify(saved, null, 2))
       return api.settings.validate() as Promise<HealthResponse>
     },
@@ -120,7 +153,7 @@ export function SettingsPage() {
       const body = JSON.parse(settingsText) as AppSettings
       const provider = body.webwright?.apiProvider || 'openai'
       if (apiKey) {
-        const stored = await window.electronAPI?.credentialSet('tc-studio', provider, apiKey)
+        const stored = await window.electronAPI?.credentialSet(DEFAULT_CREDENTIAL_SERVICE, provider, apiKey)
         if (!stored?.ok) {
           throw new Error(stored?.message || 'Could not store the API key before loading models.')
         }
@@ -150,9 +183,52 @@ export function SettingsPage() {
   const browserCheck = getHealthCheck(validation, 'playwrightBrowser')
   const smokeTestRan = typeof validation?.allOk === 'boolean'
   const smokeTestPassed = validation?.allOk === true
+  const credentialService = connectorCredentials?.service || DEFAULT_CREDENTIAL_SERVICE
+  const testRailApiTokenAccount = getConnectorCredentialAccount(connectorCredentials, 'testrail', 'apiToken')
+  const googleSheetsCredentialAccount = getConnectorCredentialAccount(
+    connectorCredentials,
+    'googleSheets',
+    'serviceAccountJson'
+  )
 
   function applyPatch(patch: (draft: AppSettings) => void) {
     setSettingsText((current) => patchSettings(current, settings as AppSettings | undefined, patch))
+  }
+
+  async function saveProviderCredential(saved: AppSettings, body: AppSettings) {
+    const provider = saved.webwright?.apiProvider || body.webwright?.apiProvider
+    if (!apiKey || !provider) return
+    const stored = await window.electronAPI?.credentialSet(DEFAULT_CREDENTIAL_SERVICE, provider, apiKey)
+    if (!stored?.ok) {
+      throw new Error(stored?.message || 'Could not store the API key.')
+    }
+    setApiKey('')
+  }
+
+  async function saveConnectorCredentials(): Promise<string[]> {
+    const storedAccounts: string[] = []
+    if (testRailApiToken.trim()) {
+      await storeCredentialDraft(credentialService, testRailApiTokenAccount, testRailApiToken, 'TestRail API token')
+      storedAccounts.push(testRailApiTokenAccount)
+      setTestRailApiToken('')
+    }
+    if (googleSheetsCredential.trim()) {
+      await storeCredentialDraft(
+        credentialService,
+        googleSheetsCredentialAccount,
+        googleSheetsCredential,
+        'Google Sheets service account JSON'
+      )
+      storedAccounts.push(googleSheetsCredentialAccount)
+      setGoogleSheetsCredential('')
+    }
+    if (storedAccounts.length) {
+      setConnectorCredentialPresence((current) => ({
+        ...current,
+        ...Object.fromEntries(storedAccounts.map((account) => [account, true]))
+      }))
+    }
+    return storedAccounts
   }
 
   function updateExecutionMode(mode: 'native' | 'wsl') {
@@ -496,23 +572,110 @@ export function SettingsPage() {
           onChange={(next) => applyPatch((draft) => {
             draft.integrations = {
               ...(draft.integrations || {}),
-              testrail: next
+              testrail: { ...(draft.integrations?.testrail || {}), ...next }
             }
           })}
-        />
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input
-            checked={integrations.googleSheets?.enabled === true}
-            type="checkbox"
-            onChange={(e) => applyPatch((draft) => {
-              draft.integrations = {
-                ...(draft.integrations || {}),
-                googleSheets: { enabled: e.target.checked }
-              }
-            })}
-          />
-          Google Sheets export enabled
-        </label>
+        >
+          <label className="block text-xs text-slate-400">
+            Username
+            <input
+              className={`${inputClass} mt-1`}
+              value={integrations.testrail?.username || ''}
+              onChange={(e) => applyPatch((draft) => {
+                draft.integrations = {
+                  ...(draft.integrations || {}),
+                  testrail: {
+                    ...(draft.integrations?.testrail || {}),
+                    enabled: integrations.testrail?.enabled === true,
+                    baseUrl: integrations.testrail?.baseUrl || '',
+                    username: e.target.value
+                  }
+                }
+              })}
+              placeholder="TestRail username or email"
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            API token
+            <input
+              className={`${inputClass} mt-1`}
+              type="password"
+              value={testRailApiToken}
+              onChange={(e) => setTestRailApiToken(e.target.value)}
+              placeholder={connectorCredentialPresence[testRailApiTokenAccount] ? 'Stored. Enter to replace.' : 'Enter token to store securely'}
+            />
+            <span className="mt-1 block text-xs text-slate-500">
+              {credentialStatusText(testRailApiTokenAccount, connectorCredentialPresence, testRailApiToken)}
+            </span>
+          </label>
+        </IntegrationRow>
+        <div className="rounded border border-slate-800 p-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              checked={integrations.googleSheets?.enabled === true}
+              type="checkbox"
+              onChange={(e) => applyPatch((draft) => {
+                draft.integrations = {
+                  ...(draft.integrations || {}),
+                  googleSheets: {
+                    ...(draft.integrations?.googleSheets || {}),
+                    enabled: e.target.checked
+                  }
+                }
+              })}
+            />
+            Google Sheets export enabled
+          </label>
+          <label className="block text-xs text-slate-400">
+            Default spreadsheet ID
+            <input
+              className={`${inputClass} mt-1`}
+              value={integrations.googleSheets?.spreadsheetId || ''}
+              onChange={(e) => applyPatch((draft) => {
+                draft.integrations = {
+                  ...(draft.integrations || {}),
+                  googleSheets: {
+                    ...(draft.integrations?.googleSheets || {}),
+                    enabled: integrations.googleSheets?.enabled === true,
+                    spreadsheetId: e.target.value
+                  }
+                }
+              })}
+              placeholder="Spreadsheet ID"
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            Service account email
+            <input
+              className={`${inputClass} mt-1`}
+              value={integrations.googleSheets?.serviceAccountEmail || ''}
+              onChange={(e) => applyPatch((draft) => {
+                draft.integrations = {
+                  ...(draft.integrations || {}),
+                  googleSheets: {
+                    ...(draft.integrations?.googleSheets || {}),
+                    enabled: integrations.googleSheets?.enabled === true,
+                    spreadsheetId: integrations.googleSheets?.spreadsheetId || '',
+                    serviceAccountEmail: e.target.value
+                  }
+                }
+              })}
+              placeholder="service-account@example.iam.gserviceaccount.com"
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            Service account JSON
+            <textarea
+              className={`${inputClass} mt-1 h-24 font-mono`}
+              value={googleSheetsCredential}
+              onChange={(e) => setGoogleSheetsCredential(e.target.value)}
+              placeholder={connectorCredentialPresence[googleSheetsCredentialAccount] ? 'Stored. Paste JSON to replace.' : 'Paste JSON to store securely'}
+            />
+            <span className="mt-1 block text-xs text-slate-500">
+              {credentialStatusText(googleSheetsCredentialAccount, connectorCredentialPresence, googleSheetsCredential)}
+            </span>
+          </label>
+        </div>
       </section>
 
       <section className={sectionClass}>
@@ -557,7 +720,7 @@ export function SettingsPage() {
         </div>
       )}
       {health && <pre className="text-xs bg-slate-900 p-3 rounded overflow-auto">{health}</pre>}
-      <p className="text-xs text-slate-500">API keys are stored in OS credential store via keytar, not in settings.json.</p>
+      <p className="text-xs text-slate-500">API keys and connector tokens are stored in the OS credential store via keytar, not in settings.json.</p>
       <div className="rounded border border-slate-800 p-3 text-sm text-slate-300">
         <div className="font-medium text-slate-200">Third-party notices</div>
         <p className="mt-1 text-xs text-slate-500">
@@ -586,12 +749,14 @@ function IntegrationRow({
   label,
   enabled,
   baseUrl,
-  onChange
+  onChange,
+  children
 }: {
   label: string
   enabled: boolean
   baseUrl: string
   onChange: (next: IntegrationConfig) => void
+  children?: ReactNode
 }) {
   return (
     <div className="rounded border border-slate-800 p-3 space-y-2">
@@ -609,8 +774,35 @@ function IntegrationRow({
         onChange={(e) => onChange({ enabled, baseUrl: e.target.value })}
         placeholder="Base URL"
       />
+      {children}
     </div>
   )
+}
+
+async function storeCredentialDraft(service: string, account: string, password: string, label: string): Promise<void> {
+  if (!window.electronAPI?.credentialSet) {
+    throw new Error(`${label} can be stored only in the desktop app secure credential store.`)
+  }
+  const result = await window.electronAPI.credentialSet(service, account, password)
+  if (!result.ok) {
+    throw new Error(result.message || `Could not store ${label}.`)
+  }
+}
+
+function getConnectorCredentialAccount(
+  metadata: ConnectorCredentialsResponse | undefined,
+  connectorId: 'testrail' | 'googleSheets',
+  kind: 'apiToken' | 'serviceAccountJson'
+): string {
+  const fromWorker = metadata?.connectors[connectorId]?.credentials.find((credential) => credential.kind === kind)
+  if (fromWorker?.account) return fromWorker.account
+  if (connectorId === 'testrail') return DEFAULT_CONNECTOR_ACCOUNTS.testrail.apiToken
+  return DEFAULT_CONNECTOR_ACCOUNTS.googleSheets.serviceAccountJson
+}
+
+function credentialStatusText(account: string, presence: Record<string, boolean>, draftValue: string): string {
+  if (draftValue.trim()) return 'Ready to store in OS credential store on save.'
+  return presence[account] ? 'Stored in OS credential store.' : 'No credential stored.'
 }
 
 function getHealthCheck(health: HealthResponse | null, key: string): HealthCheck | null {

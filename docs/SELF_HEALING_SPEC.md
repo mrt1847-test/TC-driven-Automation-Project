@@ -1,6 +1,6 @@
 # Self-Healing And Failure Disposition Spec
 
-Last aligned: 2026-06-06
+Last aligned: 2026-06-13
 
 Webwright produces raw code, logs, screenshots, trajectory, and run metadata.
 Generated pytest runs produce logs, screenshots, traces, videos, and
@@ -80,6 +80,10 @@ Classification is read-only and conservative:
 ## Selector Healing
 
 Selector healing is a reviewable patch, not a silent rewrite.
+SelectorCandidate rows already bound to a PageObjectMethod as failure/healing
+evidence must remain proposal evidence until accepted; structuring-time selector
+ranking may use extraction-time RawAction candidates, but it must not silently
+apply post-failure healing-only candidates.
 
 ```json
 {
@@ -157,6 +161,38 @@ C12-07 implementation behavior:
 - low-confidence, ambiguous, stale, unsafe evidence, semantic mismatch, edited
   file, or generation-conflict cases return a concrete `blocked` reason and do
   not persist selector/body-plan changes or rewrite generated files.
+
+## Extended Proposal Kinds
+
+C12-13 extends the same reviewable proposal table and decision flow beyond
+selector replacement. The create endpoint may receive an explicit `kind` and
+structured `proposal` payload for `wait_adjust`, `assertion_update`, or
+`pom_method_patch`; it may also infer wait/assertion proposals from a resolved
+failure target and error evidence when no selector proposal applies. Artifact
+metadata may provide a `healing_proposal`, `healingProposal`, or `proposal`
+object with one of those kinds.
+
+Extended proposal values are stored in `old_value` and `new_value` as compact
+JSON patch payloads, while `evidence_json` stores the proposal kind, diagnosis
+reason/disposition, target POM/step IDs, diagnosis artifact IDs, and source
+artifact hint when available. Duplicate requests for the same result, target,
+kind, old value, and new value return the existing row.
+
+Supported apply behavior:
+
+- `wait_adjust` patches the targeted wait body-plan entry with `timeoutMs`,
+  mirrors the timeout into `StructuredStep.wait_json`, and regenerates the
+  selected case so generated Playwright waits include `timeout=...`;
+- `assertion_update` patches the targeted assertion body-plan value, mirrors it
+  into `StructuredStep.assertion_json`, and regenerates selected files;
+- `pom_method_patch` accepts a bounded body-plan/method patch payload, validates
+  supported generated actions, updates the targeted `PageObjectMethod`, and
+  regenerates selected files.
+
+All extended kinds reuse accept/reject status transitions, require `accepted`
+before apply, preserve `selector_replace` compatibility, and use the same
+selected incremental regeneration and generated-file conflict rollback path.
+Auto-apply remains selector-only; extended proposal kinds require review.
 
 ## Selected TC Raw Refresh
 
@@ -258,6 +294,12 @@ Done:
 - Webwright artifacts are indexed.
 - raw action selector candidates are persisted.
 - execution failure artifacts are indexed.
+- C12-11 artifact read API returns project-scoped Webwright/execution evidence
+  rows with automation-key, source/run filters, metadata, and safe path
+  suppression for paths outside known artifact roots.
+- C12-12 selector-candidates read API returns project-scoped persisted
+  raw-action and PageObjectMethod selector candidates for the selected case,
+  including source artifact metadata links and grouped review context.
 - C12-04 failure-to-structured target resolver returns linked target/evidence
   IDs with deterministic resolved, missing, or ambiguous status.
 - C12-08 failure disposition classifier and execution diagnosis API return one
@@ -285,6 +327,13 @@ Done:
 - C12-07 safe auto-apply guardrails keep proposal creation review-only by
   default and allow project-enabled selector auto-apply only under conservative
   evidence, confidence, semantic, stale-target, and generation-conflict checks.
+- C12-13 extended proposal kinds persist and apply reviewed `wait_adjust`,
+  `assertion_update`, and `pom_method_patch` proposals with JSON patch payloads,
+  evidence metadata, guarded selected regeneration, stale-target checks, and
+  selector proposal compatibility.
+- C7-16 structuring-time selector ranking uses extraction-time RawAction
+  candidates for body-plan selectors while preserving PageObjectMethod-bound
+  failure/healing candidates as proposal evidence until accepted.
 - baseline GUI diagnosis panel exists.
 - D6-09 Automation IDE disposition actions are wired to existing diagnosis,
   healing proposal, selected raw refresh/regeneration, and diagnosis-bound

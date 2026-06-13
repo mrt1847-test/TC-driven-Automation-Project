@@ -1,6 +1,6 @@
 # API Spec
 
-Last aligned: 2026-06-05
+Last aligned: 2026-06-13
 
 Base URL in development: `http://127.0.0.1:8765`
 
@@ -67,6 +67,7 @@ message before falling back to status text.
 | GET | `/health` | Implemented | RuntimeProfile 기반 Worker/Python/Webwright/Playwright 검증 | A3-05, I-07 |
 | GET | `/settings` | Implemented | `settings.json` 로드 (`runtime` 포함) | A3-04 |
 | PUT | `/settings` | Implemented | 앱 설정 저장 | A3-04 |
+| GET | `/settings/connector-credentials` | Implemented | TestRail/Google Sheets secure credential account metadata; no plaintext secrets | G-04 |
 | POST | `/settings/validate` | Implemented | `/health`와 동일한 RuntimeProfile 검증 | A3-05, I-07 |
 | POST | `/projects/{project_id}/health` | Implemented | generated project 경로 상태 점검 | I-01 |
 | POST | `/projects/{project_id}/install-dependencies` | Implemented | generated project pip + chromium (`RuntimeProfile.python`) with C9-07 readiness cache | I-02, I-07, C9-07 |
@@ -145,6 +146,34 @@ return or persist plaintext secret fields. Secret-looking keys such as
 recursively before `settings.json` is written or returned. Non-secret provider
 and model config values remain persistable.
 
+G-04 connector credential rule: connector settings may persist non-secret
+configuration such as TestRail `baseUrl`/`username` and Google Sheets
+`spreadsheetId`/`serviceAccountEmail`, but TestRail tokens and Google Sheets
+OAuth/service-account secrets must be stored through the desktop secure
+credential path. `GET /settings/connector-credentials` returns only account
+metadata for that path:
+
+```json
+{
+  "service": "tc-studio",
+  "storage": "osCredentialStore",
+  "secretsReturned": false,
+  "connectors": {
+    "testrail": {
+      "credentials": [{ "kind": "apiToken", "account": "connector:testrail:apiToken" }]
+    },
+    "googleSheets": {
+      "credentials": [{ "kind": "serviceAccountJson", "account": "connector:googleSheets:serviceAccountJson" }]
+    }
+  }
+}
+```
+
+Renderer code uses those `service`/`account` values with the Electron
+credential IPC. The IPC returns presence only to the renderer; plaintext
+credential values remain available only inside the main process path that will
+mediate real connector calls.
+
 ## Projects
 
 | Method | Path | Status | Purpose | Checklist |
@@ -176,8 +205,80 @@ and model config values remain persistable.
 | POST | `/projects/{project_id}/cases/import/excel` | Implemented | Excel import | C1-03 |
 | POST | `/projects/{project_id}/cases/import/testrail-clone/preview` | Implemented | testrail-clone preview | C1-04 |
 | POST | `/projects/{project_id}/cases/import/testrail-clone` | Implemented | testrail-clone import | C1-04 |
-| POST | `/projects/{project_id}/cases/import/testrail` | Partial | TestRail import | C1-05 |
-| POST | `/projects/{project_id}/cases/import/google-sheets` | Partial | Google Sheets import | C1-06 |
+| POST | `/projects/{project_id}/cases/import/testrail/preview` | Implemented | Authenticated TestRail API v2 preview | C1-08 |
+| POST | `/projects/{project_id}/cases/import/testrail` | Implemented | Authenticated TestRail API v2 import | C1-08 |
+| POST | `/projects/{project_id}/cases/import/google-sheets/preview` | Implemented | Authenticated Google Sheets preview | C1-09 |
+| POST | `/projects/{project_id}/cases/import/google-sheets` | Implemented | Authenticated Google Sheets import | C1-09 |
+
+### TestRail Import
+
+C1-08 replaces the placeholder TestRail import with API v2 `get_cases`.
+Requests use non-secret settings (`integrations.testrail.baseUrl` and
+`integrations.testrail.username`) plus a one-time `apiToken` supplied by the
+desktop main process from the G-04 secure credential account
+`connector:testrail:apiToken`. Worker request bodies may include `apiToken`,
+but the value is not persisted or returned. Desktop renderer code must call the
+Electron-mediated TestRail import IPC so plaintext tokens remain in the main
+process boundary.
+
+```json
+{
+  "project_id": 12,
+  "suite_id": 3,
+  "baseUrl": "https://example.testrail.io",
+  "username": "qa@example.com",
+  "apiToken": "<one-time secret>"
+}
+```
+
+`mock: true` remains available for local/dev tests without external TestRail
+credentials. API responses normalize TestRail cases into the same
+`NormalizedTestCase` shape used by Excel and testrail-clone, including
+`source_type: "testrail"`, TestRail case `source_id`, `source_location.api_endpoint`,
+preconditions, separated steps, expected result, priority, start URL, and a
+stable automation key from TestRail custom automation fields or generated from
+the case identity. TestRail API and auth errors are returned as safe HTTP
+details with token values masked.
+
+### Google Sheets Import
+
+C1-09 replaces the placeholder Google Sheets import with Google Sheets API v4
+`spreadsheets.values.get`. Requests use non-secret settings such as
+`integrations.googleSheets.spreadsheetId` plus a one-time credential JSON
+supplied by the desktop main process from the G-04 secure credential account
+`connector:googleSheets:serviceAccountJson`. Worker request bodies may include
+`credentialJson`, but the value is not persisted or returned. Desktop renderer
+code must call the Electron-mediated Google Sheets import IPC so plaintext
+credential JSON remains in the main process boundary.
+
+```json
+{
+  "spreadsheet_id": "1abc...",
+  "sheet_name": "Cases",
+  "credentialJson": "{...one-time OAuth token or service account JSON...}",
+  "column_mapping": {
+    "case_id": "Case ID",
+    "title": "Title",
+    "precondition": "Precondition",
+    "step": "Step",
+    "expected": "Expected Result",
+    "priority": "Priority",
+    "automation_key": "Automation Key",
+    "start_url": "Start URL"
+  }
+}
+```
+
+Credential JSON may be an OAuth/access-token payload or a service-account JSON
+with `client_email` and `private_key`; service-account credentials are exchanged
+for a read-only Sheets access token. `mock: true` remains available for
+local/dev tests without external Google credentials. Sheet rows normalize into
+the same `NormalizedTestCase` shape as Excel import, including
+`source_type: "google_sheets"`, row-derived `source_id`,
+`source_location.sheet_name`, `source_location.row_index`,
+`source_location.api_endpoint`, preconditions, mapped steps, expected result,
+priority, start URL, and explicit or generated automation key. Google API and
+auth errors are returned as safe HTTP details with credential values masked.
 
 ## Webwright Runs
 
@@ -187,7 +288,7 @@ and model config values remain persistable.
 | GET | `/projects/{project_id}/webwright-runs` | Implemented | Webwright run 목록 | C4-04 |
 | GET | `/projects/{project_id}/webwright-runs/{run_id}` | Implemented | Webwright run 상세 | C4-04 |
 | POST | `/projects/{project_id}/webwright-runs/{run_id}/retry` | Implemented | 특정 run 재시도 | C4-04 |
-| POST | `/projects/{project_id}/webwright-runs/{run_id}/cancel` | Partial | DB status만 `cancelled`. subprocess kill 미구현 | C4-04 |
+| POST | `/projects/{project_id}/webwright-runs/{run_id}/cancel` | Implemented | Mark run/case `cancelled`, terminate the active Webwright subprocess when present, and preserve cancellation during artifact harvest | C3-09, C4-04 |
 
 Live run requires the full Webwright readiness probe from [RUNTIME_SPEC.md](./RUNTIME_SPEC.md), not just `RuntimeProfile.has_webwright_cli == true`. If mock mode is used, the API/logs must make that visible.
 
@@ -218,25 +319,27 @@ reviewable as `custom_code`.
 
 | Method | Path | Status | Purpose | Checklist |
 |--------|------|--------|---------|-----------|
-| GET | `/projects/{project_id}/prompt-composer` | Implemented | Read project batch prompt and per-case overrides | C2-04 |
-| PUT | `/projects/{project_id}/prompt-composer` | Implemented | Replace project batch prompt and per-case overrides | C2-04 |
+| GET | `/projects/{project_id}/prompt-composer` | Implemented | Read project batch prompt, selected preset, and per-case overrides | C2-04, D4-07 |
+| PUT | `/projects/{project_id}/prompt-composer` | Implemented | Replace project batch prompt, selected preset, and per-case overrides | C2-04, D4-07 |
 | GET | `/projects/{project_id}/prompt-presets` | Implemented | Read built-in and project prompt presets | C2-05 |
 | PUT | `/projects/{project_id}/prompt-presets` | Implemented | Replace project prompt presets; built-ins are immutable | C2-05 |
 | POST | `/projects/{project_id}/prompt-preview` | Implemented | Preview effective prompt from case, optional preset, and saved prompt context without running Webwright | C2-06 |
 | GET | `/projects/{project_id}/prompt-payloads?caseId=...&runId=...` | Implemented | List immutable Webwright prompt payload snapshots by project/case/run | C2-07 |
 | GET | `/projects/{project_id}/prompt-payloads/{payload_id}` | Implemented | Read one immutable prompt payload snapshot | C2-07 |
 
-C2-04 persists editable prompt composer state only. C2-05 persists reusable
-prompt preset definitions separately. C2-06 previews the effective prompt
-read-only from the selected case, optional preset, and saved prompt context.
-C2-07 records immutable per-run prompt payload history when Webwright runs are
-created.
+C2-04 persists editable prompt composer state only, including the GUI's selected
+preset ID for continuity. C2-05 persists reusable prompt preset definitions
+separately. C2-06 previews the effective prompt read-only from the selected
+case, optional preset, and saved prompt context. C2-07 records immutable per-run
+prompt payload history when Webwright runs are created. D4-07 wires the Generate
+Raw GUI to these Worker APIs instead of settings-only prompt state.
 
 ### PromptComposerUpdateRequest
 
 ```json
 {
   "batchPrompt": "Use the signed-in admin workspace and prefer stable labels.",
+  "selectedPresetId": "preset_builtin_login",
   "caseOverrides": {
     "tc_123": "Open the billing tab before asserting totals."
   }
@@ -249,6 +352,7 @@ created.
 {
   "projectId": "proj_123",
   "batchPrompt": "Use the signed-in admin workspace and prefer stable labels.",
+  "selectedPresetId": "preset_builtin_login",
   "caseOverrides": {
     "tc_123": "Open the billing tab before asserting totals."
   },
@@ -266,7 +370,9 @@ created.
 Effective Webwright prompts remain the original TC prompt when no composer data
 exists. When saved context exists, the Worker appends the project batch prompt
 and the selected case override in that order. Prompt preview can additionally
-insert selected preset guidance before saved batch and case context.
+insert selected preset guidance before saved batch and case context. The
+composer's `selectedPresetId` is UI state for persistence; preview and run
+requests still pass the desired `presetId` explicitly.
 
 ### PromptPresetUpdateRequest
 
@@ -316,7 +422,8 @@ insert selected preset guidance before saved batch and case context.
 Built-in presets have stable IDs and are returned with project presets in
 deterministic order. `PUT /prompt-presets` replaces only project-owned presets;
 built-ins and presets owned by another project are rejected. C2-05 does not
-apply preset guidance to Webwright runs.
+apply preset guidance by itself; preview and Webwright run requests apply
+guidance when they include a `presetId`.
 
 ### PromptPreviewRequest
 
@@ -479,7 +586,7 @@ types, missing Webwright runs, and unmapped/review-required states.
 | Method | Path | Status | Purpose | Checklist |
 |--------|------|--------|---------|-----------|
 | POST | `/projects/{project_id}/cases/{case_id}/structure/sync` | Implemented | mapping → StructuredFlow/Step/PageObjectMethod DB persist | C7-06..C7-08 |
-| GET | `/projects/{project_id}/cases/{case_id}/structure/validate` | Implemented | structure issues list | C7-09 |
+| GET | `/projects/{project_id}/cases/{case_id}/structure/validate` | Implemented | structure issues list consumed by Mapping Review | C7-09, D5-08 |
 
 ### Structure validate response
 
@@ -491,6 +598,13 @@ types, missing Webwright runs, and unmapped/review-required states.
 }
 ```
 
+D5-08 wires Mapping Review to this endpoint for the selected case. The GUI
+keeps its local draft validation as an immediate preflight, then merges Worker
+validation issues from the saved structured flow, mappings, and generated-file
+status. Mapping Review must preserve unsaved draft edits when the validation
+request fails and surface stale/edited/conflict generated-file issues with the
+same blocking severity used by generation conflict panels.
+
 ## Project Generation And IDE
 
 | Method | Path | Status | Purpose | Checklist |
@@ -499,6 +613,7 @@ types, missing Webwright runs, and unmapped/review-required states.
 | POST | `/projects/{project_id}/generate/selected` | Implemented | selected TC incremental regeneration; preserve unrelated generated cases | C8-09 |
 | POST | `/projects/{project_id}/cases/{case_id}/retire` | Implemented | human-confirmed TC retire/delete generated artifact cleanup foundation | C8-10 |
 | GET | `/projects/{project_id}/generated-files` | Implemented | generated project 파일 트리 | C11-01 |
+| GET | `/projects/{project_id}/generated-files/status` | Implemented | project-level generated-file edited/stale/conflict summary | C7-10, C7-13 |
 | GET | `/projects/{project_id}/generated-files/content?path=...` | Implemented | 파일 내용 읽기 | C11-02 |
 | PUT | `/projects/{project_id}/generated-files/content` | Implemented | 파일 내용 저장 | C11-02 |
 | POST | `/projects/{project_id}/generated-files/create` | Implemented | 파일 생성 | C11-02 |
@@ -594,6 +709,75 @@ rewritten. Edited or conflicting generated files stop with HTTP 409 before any
 rewrite or delete. The response `detail` contains `message`, `affectedFiles`,
 `preservedFiles`, `editedFiles`, `staleFiles`, and `conflictFiles`.
 
+### GeneratedFileStatusResponse
+
+`GET /projects/{project_id}/generated-files/status` returns a project-level
+summary of tracked generated-file state without walking through each case's
+`structure/validate` endpoint. It reuses the generated-file hash/status refresh
+logic to detect local edits, preserves already-known source-change
+`stale`/`conflict` states, and commits any status transitions.
+
+The response is ordered by severity (`conflict`, `edited`, `stale`, `obsolete`,
+then `generated`) and then by path. Each file includes its tracked path,
+automation key, primary source, resolved origins when available, hashes,
+edit/source-change flags, and guidance for GUI panels.
+
+```json
+{
+  "projectId": "proj_123",
+  "generatedProjectPath": "C:/work/project/generated",
+  "ok": false,
+  "counts": {
+    "total": 4,
+    "generated": 1,
+    "edited": 1,
+    "stale": 1,
+    "conflict": 1,
+    "obsolete": 0
+  },
+  "editedFiles": ["tests/test_login.py"],
+  "staleFiles": ["pages/generated_page.py"],
+  "conflictFiles": ["mappings/cases.yaml"],
+  "obsoleteFiles": [],
+  "files": [
+    {
+      "id": "gf_123",
+      "path": "mappings/cases.yaml",
+      "relativePath": "mappings/cases.yaml",
+      "status": "conflict",
+      "automationKey": null,
+      "sourceType": "structured_flow",
+      "sourceId": "flow_123",
+      "source": {
+        "type": "structured_flow",
+        "id": "flow_123",
+        "automationKey": "login_required_flow",
+        "testCaseId": "tc_123"
+      },
+      "origins": [
+        {
+          "type": "test_case",
+          "id": "tc_123",
+          "automationKey": "login_required_flow",
+          "title": "Login required flow"
+        }
+      ],
+      "contentHash": "sha256...",
+      "currentHash": "sha256...",
+      "onDiskChanged": true,
+      "sourceChanged": true,
+      "plannedDeletion": false,
+      "exists": true,
+      "guidance": {
+        "severity": "error",
+        "blocksGeneration": true,
+        "action": "resolve_conflict"
+      }
+    }
+  ]
+}
+```
+
 ### Generate Request
 
 ```json
@@ -645,7 +829,7 @@ diagnosis-bound execution-result endpoint below.
 | GET | `/projects/{project_id}/executions/{execution_id}` | Implemented | run + results | C9-04 |
 | POST | `/projects/{project_id}/executions/{execution_id}/rerun-failed` | Implemented | failed cases rerun | C9-05 |
 | POST | `/projects/{project_id}/executions/{execution_id}/results/{result_id}/retire` | Implemented | human-confirmed `feature_removed_retire_tc` action bound to the resolved selected TC | C12-10, C8-10 |
-| POST | `/projects/{project_id}/executions/{execution_id}/cancel` | Partial | status cancel only | C9-05 |
+| POST | `/projects/{project_id}/executions/{execution_id}/cancel` | Implemented | Mark execution `cancelled`, terminate the active `runner.cli` subprocess when present, and preserve cancellation during artifact harvest | C9-05, C9-08 |
 | POST | `/projects/{project_id}/executions/{execution_id}/export/{target}` | Implemented | result export | C10-06 |
 
 Subprocess env includes `TC_HEADLESS`, `PLAYWRIGHT_BROWSERS_PATH` when configured.
@@ -658,6 +842,14 @@ of launching `runner.cli`.
 C9-07 adds per-project runtime install-state reuse before `runner.cli`: cache
 hits skip redundant pip/Playwright install commands, while stale or missing
 cache entries fall back to the same fail-fast bootstrap path.
+
+C9-08 tracks active normal execution and `rerun-failed` subprocesses by
+`ExecutionRun.id` and returned `jobId`. Cancelling an in-flight execution sends
+a graceful terminate with kill fallback, writes masked cancellation diagnostics
+to stdout/stderr logs and a cancelled `results.json`, preserves final
+`ExecutionRun.status=cancelled`, and does not persist stale `ExecutionResult`
+rows from partial runner output. Cancelled run log/metadata artifacts remain
+indexed for review.
 
 ### Export Preview And Validation
 
@@ -687,20 +879,223 @@ target mutation. Excel target file I/O failures after validation remain visible
 as target-specific failed entries, preserving the existing non-corrupting
 write-back behavior.
 
+### TestRail Result Export
+
+C10-07 replaces the TestRail local-mock write-back with API v2
+`add_result_for_case/{run_id}/{case_id}` when `integrations.testrail.enabled`
+is true. Non-secret settings provide `baseUrl`, `username`, and a result
+`runId`/`resultRunId`; the desktop main process supplies a one-time `apiToken`
+from the G-04 secure credential account `connector:testrail:apiToken`.
+
+```json
+{
+  "preview": false,
+  "config": {
+    "apiToken": "<one-time secret>",
+    "runId": "42"
+  }
+}
+```
+
+Preview mode never calls TestRail and may include `targetPayload` showing the
+resolved TestRail run/case IDs and request body. Non-preview export validates
+the generated mapping and `ExecutionResult` identities before any mutation,
+then posts each result with status mapping (`passed` -> 1, `failed` -> 5,
+blocked/skipped/cancelled -> 2 by default), automation key/comment context, and
+elapsed duration. Per-row mapping metadata may override the destination through
+`resultTargets.testrail.runId` and `resultTargets.testrail.caseId`; otherwise
+the configured run ID and result `sourceCaseId` are used. API failures insert a
+failed `ExportLog` with masked details and return a safe HTTP 400. When the
+TestRail integration is disabled or `config.mock` is true, the existing
+`local-mock` success flow remains available for local/dev tests.
+
+### Google Sheets Result Export
+
+C10-08 replaces the Google Sheets local-mock write-back with authenticated
+Google Sheets API v4 `spreadsheets.values.batchUpdate` calls when
+`integrations.googleSheets.enabled` is true. Non-secret settings provide
+`spreadsheetId`, optional `sheetName`/`resultSheetName`, optional `headerRow`,
+and optional result column header names. The desktop main process supplies a
+one-time credential JSON from the G-04 secure credential account
+`connector:googleSheets:serviceAccountJson`.
+
+```json
+{
+  "preview": false,
+  "config": {
+    "credentialJson": "<one-time secret>"
+  }
+}
+```
+
+Preview mode never calls Google Sheets and may include `targetPayload` showing
+the resolved spreadsheet, sheet, row, and header/value payload. Non-preview
+export validates generated mapping and `ExecutionResult` identities before any
+mutation, then reads the configured header row, creates missing result headers
+(`Automation Result`, `Automation Run ID`, `Automation Executed At`,
+`Automation Comment` by default), and updates only those result cells for each
+mapped row. Per-row mapping metadata may override the destination through
+`resultTargets.googleSheets.spreadsheetId`, `sheet`/`sheetName`, and `row`;
+Google Sheets sourced cases generated by C10-08 include that target from their
+source location. API failures insert a failed `ExportLog` with masked details
+and return a safe HTTP 400. When the Google Sheets integration is disabled or
+`config.mock` is true, the existing `local-mock` success flow remains available
+for local/dev tests.
+
 ## Artifacts And Self-Healing
 
 | Method | Path | Status | Purpose | Checklist |
 |--------|------|--------|---------|-----------|
-| GET | `/projects/{project_id}/artifacts?automation_key=...` | Planned | Webwright/execution artifacts 조회 | C12-01, C12-03 |
-| GET | `/projects/{project_id}/cases/{case_id}/selector-candidates` | Planned | raw action/POM selector candidates 조회 | C12-02 |
-| POST | `/projects/{project_id}/executions/{execution_id}/diagnose` | Implemented | failed cases를 disposition으로 분류하고 evidence/confidence 반환 | C12-08 |
+| GET | `/projects/{project_id}/artifacts?automation_key=...` | Implemented | Project-scoped Webwright/execution artifact evidence read API | C12-01, C12-03, C12-11 |
+| GET | `/projects/{project_id}/cases/{case_id}/selector-candidates` | Implemented | Project-scoped persisted raw-action/PageObjectMethod selector candidate read API | C12-02, C12-12 |
+| POST | `/projects/{project_id}/executions/{execution_id}/diagnose` | Implemented | classify failed cases into dispositions with evidence/confidence | C12-08 |
 | POST | `/projects/{project_id}/executions/{execution_id}/healing-proposals` | Implemented | failed execution result -> selector healing proposal generation; project-enabled safe auto-apply | C12-05, C12-07 |
 | GET | `/projects/{project_id}/healing-proposals?automation_key=...` | Implemented | proposal list by project/key | C12-05 |
 | GET | `/projects/{project_id}/healing-proposals/{proposal_id}` | Implemented | proposal detail with evidence JSON | C12-05 |
-| POST | `/projects/{project_id}/healing-proposals/{proposal_id}/accept` | Implemented | proposal 수락 및 evidence 보존 | C12-06 |
-| POST | `/projects/{project_id}/healing-proposals/{proposal_id}/reject` | Implemented | proposal 거절, mutation 없음 | C12-06 |
-| POST | `/projects/{project_id}/healing-proposals/{proposal_id}/apply` | Implemented | 수락된 selector proposal 적용, guarded selected regeneration, rerun context 반환 | C12-06 |
+| POST | `/projects/{project_id}/healing-proposals/{proposal_id}/accept` | Implemented | accept proposal and preserve evidence | C12-06 |
+| POST | `/projects/{project_id}/healing-proposals/{proposal_id}/reject` | Implemented | reject proposal without mutation | C12-06 |
+| POST | `/projects/{project_id}/healing-proposals/{proposal_id}/apply` | Implemented | apply accepted selector proposal with guarded selected regeneration and rerun context | C12-06 |
 | POST | `/projects/{project_id}/cases/{case_id}/refresh-webwright-and-regenerate` | Implemented | selected already-structured TC Webwright refresh -> raw merge into existing structure -> incremental regeneration | C12-09, C7-12, C8-09 |
+
+### ArtifactResponse
+
+`GET /projects/{project_id}/artifacts` returns indexed artifact metadata without
+reading file bytes. The endpoint is project-scoped and supports both camelCase
+and snake_case query aliases for:
+
+- `automationKey` / `automation_key`
+- `sourceType` / `source_type`
+- `sourceId` / `source_id`
+- `artifactType` / `artifact_type`
+- `runId` / `run_id`
+- `webwrightRunId` / `webwright_run_id`
+- `executionId` / `execution_id`
+
+`executionId` returns both execution-run artifacts and artifacts attached to
+results from that execution. `filePath` is populated only when the indexed path
+is inside the related Webwright output directory or execution result directory,
+or matches a known source artifact path; otherwise the row remains visible with
+`pathAvailable: false` and `filePath: null`.
+
+```json
+{
+  "projectId": "proj_123",
+  "artifacts": [
+    {
+      "id": "art_123",
+      "projectId": "proj_123",
+      "automationKey": "login_required_flow",
+      "sourceType": "execution_result",
+      "sourceId": "result_123",
+      "artifactType": "trace",
+      "kind": "trace",
+      "title": "trace.zip",
+      "filePath": "C:/tc-studio/runs/exec_123/trace.zip",
+      "pathAvailable": true,
+      "fileName": "trace.zip",
+      "relativePath": "trace.zip",
+      "contentHash": "sha256:...",
+      "metadata": {
+        "file_name": "trace.zip",
+        "relative_path": "trace.zip",
+        "size_bytes": 1234
+      },
+      "createdAt": "2026-06-12T00:00:00"
+    }
+  ]
+}
+```
+
+### SelectorCandidatesResponse
+
+`GET /projects/{project_id}/cases/{case_id}/selector-candidates` is read-only.
+It validates that the selected case belongs to the project, then returns only
+persisted `SelectorCandidate` rows linked to that selected case. Candidate
+scope includes raw actions from Webwright runs for the case and PageObject
+methods linked through selected-case mappings or structured steps. PageObject
+methods must also belong to project-owned PageObjects.
+
+The flat `candidates` list includes stable candidate IDs, selector type/value,
+confidence, parsed metadata, raw-action context when linked, PageObjectMethod
+context when linked, and source artifact metadata when the artifact belongs to
+the project. `sourceArtifact.filePath` follows the same safe-path rules as
+`ArtifactResponse`; unsafe absolute paths are omitted with `pathAvailable:
+false`.
+
+`groups.rawActions` and `groups.pageObjectMethods` provide review-panel
+grouping without duplicating candidate payloads.
+
+```json
+{
+  "projectId": "proj_123",
+  "caseId": "tc_123",
+  "automationKey": "login_required_flow",
+  "candidateCount": 2,
+  "rawActionIds": ["act_001"],
+  "pageObjectMethodIds": ["pom_001"],
+  "candidates": [
+    {
+      "id": "sel_001",
+      "selectorType": "role",
+      "selectorValue": "button[name='Log in']",
+      "type": "role",
+      "value": "button[name='Log in']",
+      "confidence": 0.91,
+      "sourceArtifactId": "art_001",
+      "metadata": {"source": "trajectory"},
+      "createdAt": "2026-06-13T00:00:00",
+      "rawAction": {
+        "id": "act_001",
+        "webwrightRunId": "ww_001",
+        "webwrightRunStatus": "completed",
+        "automationKey": "login_required_flow",
+        "orderIndex": 1,
+        "type": "click",
+        "target": "Log in",
+        "selector": "page.locator('#login')",
+        "value": null,
+        "sourceLine": 12
+      },
+      "pageObjectMethod": {
+        "id": "pom_001",
+        "name": "login_required_flow__step_1_log_in",
+        "methodType": "click",
+        "selector": "page.locator('#login')",
+        "sourceMappingId": "map_001",
+        "status": "approved",
+        "pageObjectId": "po_001",
+        "pageObjectName": "LoginPage",
+        "mapping": {"id": "map_001", "tcStepIndex": 1},
+        "structuredSteps": [{"id": "step_001", "orderIndex": 1}],
+        "tcStepIndexes": [1]
+      },
+      "sourceArtifact": {
+        "id": "art_001",
+        "sourceType": "webwright_run",
+        "sourceId": "ww_001",
+        "artifactType": "trajectory",
+        "pathAvailable": true
+      }
+    }
+  ],
+  "groups": {
+    "rawActions": [
+      {
+        "rawAction": {"id": "act_001", "orderIndex": 1, "type": "click"},
+        "candidateIds": ["sel_001"],
+        "candidateCount": 1
+      }
+    ],
+    "pageObjectMethods": [
+      {
+        "pageObjectMethod": {"id": "pom_001", "name": "login_required_flow__step_1_log_in"},
+        "candidateIds": ["sel_001"],
+        "candidateCount": 1
+      }
+    ]
+  }
+}
+```
 
 ### Execution Diagnosis
 
@@ -779,14 +1174,20 @@ return `status=generation_failed` while preserving the run and merge context.
 C12-05 creates proposals only. It does not mutate structured metadata,
 regenerate files, or rerun tests. The create endpoint accepts an
 `executionResultId`, reuses execution diagnosis, and creates a
-`selector_replace` proposal only for resolved `selector_changed` failures with
+`selector_replace` proposal for resolved `selector_changed` failures with
 linked selector candidates. Non-selector or unresolved diagnoses return
-`status=not_applicable` and do not create rows. Repeated matching calls return
-the existing proposal.
+`status=not_applicable` unless an extended C12-13 proposal can be safely built.
+Repeated matching calls return the existing proposal.
 
 ```json
 {
-  "executionResultId": "result_123"
+  "executionResultId": "result_123",
+  "kind": "wait_adjust",
+  "proposal": {
+    "bodyPlanIndex": 1,
+    "timeoutMs": 15000,
+    "confidence": 0.83
+  }
 }
 ```
 
@@ -827,6 +1228,18 @@ Unsafe cases return `status=blocked` with `autoApply.reason` and leave the
 proposal reviewable without selector/body-plan or generated-file content
 mutation.
 
+C12-13 extends `kind` beyond `selector_replace` to `wait_adjust`,
+`assertion_update`, and `pom_method_patch`. For those kinds the create request
+may pass `kind` plus a structured `proposal` object, or Worker may use
+artifact metadata hints (`healing_proposal`, `healingProposal`, or `proposal`)
+and conservative wait/assertion error inference. Extended proposals store
+compact JSON patch payloads in `old_value`/`new_value` and evidence metadata in
+`evidence`. `accept`/`reject` are shared with selector proposals. `apply`
+requires `accepted`, checks the resolved POM/step target, patches the targeted
+wait/assertion/body-plan method state, runs selected incremental generation,
+and rolls back DB changes if the generated-file guard reports a conflict.
+Auto-apply remains selector-only.
+
 ## WebSocket
 
 | Path | Status | Purpose |
@@ -837,5 +1250,3 @@ mutation.
 
 | Area | Item |
 |------|------|
-| Webwright | subprocess cancel for in-flight CLI |
-| Structuring | stale/conflict API beyond validate issues list |

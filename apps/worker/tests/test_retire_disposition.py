@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from worker.models.db import (
     TestCase as DbTestCase,
     WebwrightRun,
 )
+from worker.services.generated_file_status import hash_file
 
 
 def _seed_failure(
@@ -149,7 +149,7 @@ def _seed_failure(
             automation_key=key,
             source_type="structured_flow",
             source_id=flow_id,
-            content_hash=hashlib.sha256(generated_path.read_bytes()).hexdigest(),
+            content_hash=hash_file(generated_path),
         ))
         session.add(GeneratedFileOrigin(
             generated_file_id=generated_file_id,

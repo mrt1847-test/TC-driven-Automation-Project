@@ -28,10 +28,13 @@ from worker.models.db import (
     WebwrightRun,
 )
 from worker.services.generated_file_status import (
+    hash_file,
+    hash_text,
     latest_generated_files_by_path,
     refresh_generated_file_statuses,
 )
 from worker.services.mapping import get_mappings
+from worker.services.protected_regions import merge_protected_regions, protected_region_block
 from worker.services.structuring_service import get_flow_steps, get_latest_flow, sync_structured_entities
 
 
@@ -292,7 +295,21 @@ def _assertion_line(action: str, selector: str | None, value: str | None) -> str
     return None
 
 
-def _wait_line(action: str, selector: str | None, value: str | None) -> str | None:
+def _positive_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _timeout_arg(timeout_ms: int | None, *, prefix: str = "") -> str:
+    return f"{prefix}timeout={timeout_ms}" if timeout_ms is not None else ""
+
+
+def _wait_line(action: str, selector: str | None, value: str | None, timeout_ms: int | None = None) -> str | None:
     # wait_for_request/wait_for_response need to wrap the triggering action in
     # an expect_* context manager, which cannot be emitted standalone; they
     # stay as review comments.
@@ -302,10 +319,13 @@ def _wait_line(action: str, selector: str | None, value: str | None) -> str | No
     if selector:
         expression = _selector_expression(selector, action)
         if state in _LOCATOR_WAIT_STATES:
-            return f"{expression}.wait_for(state={json.dumps(state)})"
-        return f"{expression}.wait_for()"
+            timeout_arg = _timeout_arg(timeout_ms, prefix=", ")
+            return f"{expression}.wait_for(state={json.dumps(state)}{timeout_arg})"
+        timeout_arg = _timeout_arg(timeout_ms)
+        return f"{expression}.wait_for({timeout_arg})" if timeout_arg else f"{expression}.wait_for()"
     if state in _LOAD_STATES:
-        return f"self.page.wait_for_load_state({json.dumps(state)})"
+        timeout_arg = _timeout_arg(timeout_ms, prefix=", ")
+        return f"self.page.wait_for_load_state({json.dumps(state)}{timeout_arg})"
     return None
 
 
@@ -322,6 +342,11 @@ def _plan_entry_lines(entry: dict, base_url: str | None = None) -> list[str]:
     action = str(entry.get("action", ""))
     selector = entry.get("selector")
     value = entry.get("value")
+    timeout_ms = (
+        _positive_int(entry.get("timeoutMs"))
+        or _positive_int(entry.get("timeout_ms"))
+        or _positive_int(entry.get("timeout"))
+    )
     if entry.get("requiresReview"):
         reason = entry.get("reviewReason", "review_required")
         return [_entry_comment(entry, f"review required ({reason})")]
@@ -336,7 +361,7 @@ def _plan_entry_lines(entry: dict, base_url: str | None = None) -> list[str]:
     if action.startswith("assert_"):
         line = _assertion_line(action, selector, value)
     elif action == "wait" or action.startswith("wait_for_"):
-        line = _wait_line(action, selector, value)
+        line = _wait_line(action, selector, value, timeout_ms)
     else:
         line = _interaction_line(action, selector, value)
     if line:
@@ -447,7 +472,7 @@ def _replace_generated_file(
     generated_file.automation_key = automation_key
     generated_file.source_type = primary_origin[0] if primary_origin else None
     generated_file.source_id = primary_origin[1] if primary_origin else None
-    generated_file.content_hash = hashlib.sha256(content_path.read_bytes()).hexdigest()
+    generated_file.content_hash = hash_file(content_path)
     generated_file.status = "generated"
     generated_file.updated_at = datetime.utcnow()
     session.add(generated_file)
@@ -481,11 +506,12 @@ def _is_git_metadata_path(relative_path: str) -> bool:
 
 
 def _file_hashes(root: Path, relative_paths: set[str]) -> dict[str, str]:
-    return {
-        relative_path: hashlib.sha256(path.read_bytes()).hexdigest()
-        for relative_path in sorted(relative_paths)
-        if (path := root / relative_path).is_file()
-    }
+    hashes: dict[str, str] = {}
+    for relative_path in sorted(relative_paths):
+        digest = hash_file(root / relative_path)
+        if digest is not None:
+            hashes[relative_path] = digest
+    return hashes
 
 
 def _changed_files_from_hashes(root: Path, before_hashes: dict[str, str], after_files: set[str]) -> list[str]:
@@ -505,8 +531,7 @@ def _changed_files_from_planned(
     return sorted(
         relative_path
         for relative_path in relative_paths
-        if hashlib.sha256(planned_contents[relative_path].encode("utf-8")).hexdigest()
-        != before_hashes.get(relative_path)
+        if hash_text(planned_contents[relative_path]) != before_hashes.get(relative_path)
     )
 
 
@@ -563,6 +588,22 @@ def _shared_case_ids(session: Session, project_id: str, relative_path: str) -> s
 
 def _mapping_entry(case: TestCase, test_file: str, test_fn: str) -> dict:
     source_loc = json.loads(case.source_location_json or "{}")
+    result_targets = {
+        "excel": {
+            "file": source_loc.get("file_path"),
+            "sheet": source_loc.get("sheet_name"),
+            "row": source_loc.get("row_index"),
+        }
+    }
+    if case.source_type == "google_sheets":
+        google_target = {
+            "sheet": source_loc.get("sheet_name"),
+            "row": source_loc.get("row_index"),
+        }
+        spreadsheet_id = _google_spreadsheet_id_from_source_location(source_loc)
+        if spreadsheet_id:
+            google_target["spreadsheetId"] = spreadsheet_id
+        result_targets["googleSheets"] = google_target
     return {
         "automationKey": case.automation_key,
         "sourceType": case.source_type,
@@ -571,14 +612,19 @@ def _mapping_entry(case: TestCase, test_file: str, test_fn: str) -> dict:
         "testFile": test_file,
         "testFunction": test_fn,
         "tags": json.loads(case.tags_json or "[]"),
-        "resultTargets": {
-            "excel": {
-                "file": source_loc.get("file_path"),
-                "sheet": source_loc.get("sheet_name"),
-                "row": source_loc.get("row_index"),
-            }
-        },
+        "resultTargets": result_targets,
     }
+
+
+def _google_spreadsheet_id_from_source_location(source_loc: dict) -> str:
+    endpoint = str(source_loc.get("api_endpoint") or "")
+    if not endpoint:
+        return ""
+    parts = [part for part in urlsplit(endpoint).path.split("/") if part]
+    for index, part in enumerate(parts):
+        if part == "spreadsheets" and index + 1 < len(parts):
+            return parts[index + 1]
+    return ""
 
 
 def _case_generation(
@@ -600,6 +646,8 @@ def _case_generation(
         "        self.page = page",
         "        self.generated_page = GeneratedPage(page)",
         "",
+        *protected_region_block("flow-helpers", indent="    "),
+        "",
         "    def execute(self):",
     ]
     for step in steps:
@@ -609,12 +657,17 @@ def _case_generation(
         if pom:
             flow_lines.append(f"        self.generated_page.{pom.name}()")
 
-    test_content = f'''from playwright.sync_api import Page
+    test_import_region = "\n".join(protected_region_block("test-imports"))
+    test_setup_region = "\n".join(protected_region_block("test-setup", indent="    "))
+    test_content = f'''{test_import_region}
+
+from playwright.sync_api import Page
 
 from flows.{_snake(case.automation_key)}_flow import {flow_class}
 
 
 def {test_fn}(page: Page):
+{test_setup_region}
     flow = {flow_class}(page)
     flow.execute()
 '''
@@ -643,6 +696,22 @@ def _write_text_if_changed(path: Path, content: str, rewritten_files: set[str], 
         return
     path.write_text(content, encoding="utf-8")
     rewritten_files.add(path.relative_to(output).as_posix())
+
+
+def _merge_existing_protected_regions(output: Path, planned_contents: dict[str, str]) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for relative_path, planned_content in planned_contents.items():
+        target = output / relative_path
+        if not target.is_file():
+            merged[relative_path] = planned_content
+            continue
+        try:
+            current_content = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            merged[relative_path] = planned_content
+            continue
+        merged[relative_path] = merge_protected_regions(planned_content, current_content)
+    return merged
 
 
 def _manifest_string(value: object) -> str | None:
@@ -846,6 +915,8 @@ def _page_content(
             "            value = value[key]",
             "        return str(value)",
         ])
+    lines.append("")
+    lines.extend(protected_region_block("generated-page-helpers", indent="    "))
     lines.append("")
     for method_name in sorted(page_methods):
         lines.extend(page_methods[method_name])
@@ -1090,6 +1161,7 @@ def generate_project(
             for generation in generated.values()
         },
     }
+    planned_contents = _merge_existing_protected_regions(output, planned_contents)
     before_hashes = (
         _file_hashes(output, before_files)
         if not initialized
@@ -1180,11 +1252,16 @@ def generate_project(
     else:
         _ensure_git_ready_files(output)
 
-    _write_text_if_changed(output / RUNTIME_MANIFEST_PATH, runtime_manifest_content, rewritten_files, output)
+    _write_text_if_changed(
+        output / RUNTIME_MANIFEST_PATH,
+        planned_contents[RUNTIME_MANIFEST_PATH],
+        rewritten_files,
+        output,
+    )
 
     for generation in generated.values():
-        _write_text(output / generation.flow_file, generation.flow_content, rewritten_files, output)
-        _write_text(output / generation.test_file, generation.test_content, rewritten_files, output)
+        _write_text(output / generation.flow_file, planned_contents[generation.flow_file], rewritten_files, output)
+        _write_text(output / generation.test_file, planned_contents[generation.test_file], rewritten_files, output)
         primary_origin = (
             ("structured_flow", generation.flow.id)
             if generation.flow and generation.flow.id
@@ -1200,8 +1277,8 @@ def generate_project(
             generation.flow.status = StructuredFlowStatus.generated.value
             session.add(generation.flow)
 
-    _write_text(output / page_relative_path, page_content, rewritten_files, output)
-    _write_text(mapping_path, mapping_content, rewritten_files, output)
+    _write_text(output / page_relative_path, planned_contents[page_relative_path], rewritten_files, output)
+    _write_text(mapping_path, planned_contents[mapping_relative_path], rewritten_files, output)
 
     for relative_path in sorted(file_origins):
         automation_keys = file_automation_keys[relative_path]
@@ -1338,7 +1415,7 @@ def retire_generated_case(
         if row.status in {GeneratedFileStatus.edited.value, GeneratedFileStatus.conflict.value}:
             conflict_files.add(relative_path)
         if target.is_file():
-            current_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+            current_hash = hash_file(target)
             if not row.content_hash or current_hash != row.content_hash:
                 conflict_files.add(relative_path)
         elif target.exists():
@@ -1400,6 +1477,15 @@ def retire_generated_case(
                 if generation.flow and generation.flow.id
                 else ("test_case", generation.case.id)
             )
+        target = output / relative_path
+        if target.is_file():
+            try:
+                content = merge_protected_regions(
+                    content,
+                    target.read_text(encoding="utf-8"),
+                )
+            except (OSError, UnicodeDecodeError):
+                pass
         control_plans[relative_path] = (
             content,
             refreshed_origins,

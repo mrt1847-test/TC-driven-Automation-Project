@@ -18,6 +18,7 @@ from worker.models.schemas import (
 )
 from worker.services.generated_runtime import ensure_generated_runtime
 from worker.services.generated_file_status import refresh_generated_file_statuses
+from worker.services.generated_file_status_summary import project_generated_file_status_summary
 from worker.services.project_generator import (
     GenerationConflictError,
     GenerationResult,
@@ -288,6 +289,14 @@ def generated_files(project_id: str, session: Session = Depends(get_session)):
         if item["type"] == "file" and item["path"] in metadata:
             item.update(metadata[item["path"]])
     return items
+
+
+@router.get("/generated-files/status")
+def generated_file_status(project_id: str, session: Session = Depends(get_session)):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return project_generated_file_status_summary(session, project)
 
 
 @router.get("/generated-files/content")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +22,7 @@ from worker.models.db import (
     TestCase as DbTestCase,
     WebwrightRun,
 )
+from worker.services.generated_file_status import hash_file
 from worker.services.project_generator import generate_project
 
 
@@ -401,7 +401,7 @@ def test_unproven_shared_file_stops_retire_cleanup(
             id="gf_unproven_shared",
             project_id=project_id,
             relative_path="helpers/custom_shared.py",
-            content_hash=hashlib.sha256(shared_file.read_bytes()).hexdigest(),
+            content_hash=hash_file(shared_file),
             status="generated",
         )
         session.add(shared_row)

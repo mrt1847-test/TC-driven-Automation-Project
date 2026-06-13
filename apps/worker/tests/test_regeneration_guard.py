@@ -120,6 +120,16 @@ def _hashes(root: Path) -> dict[str, str]:
     }
 
 
+def _replace_protected_region(content: str, name: str, body: str) -> str:
+    begin = f'# <tc-protected name="{name}">'
+    end = "# </tc-protected>"
+    begin_index = content.index(begin)
+    body_start = content.index("\n", begin_index) + 1
+    end_index = content.index(end, body_start)
+    end_line_start = content.rfind("\n", 0, end_index) + 1
+    return content[:body_start] + body + content[end_line_start:]
+
+
 def test_full_regeneration_is_byte_stable_when_inputs_are_unchanged(
     monkeypatch,
     tmp_path,
@@ -322,6 +332,57 @@ def test_selected_generation_updates_runtime_manifest_only_for_runtime_input_cha
         blocked_files = exc_info.value.edited_files + exc_info.value.conflict_files
         assert "config/runtime-manifest.json" in blocked_files
         assert manifest_path.read_text(encoding="utf-8") == edited_manifest
+
+
+def test_protected_region_edits_survive_selected_regeneration(
+    monkeypatch,
+    tmp_path,
+    project_id: str,
+    imported_case: dict,
+) -> None:
+    import worker.core.database as database
+
+    _patch_template(monkeypatch, tmp_path)
+    project_root = tmp_path / "protected-region-output"
+
+    with Session(database.engine) as session:
+        case = session.get(DbTestCase, imported_case["id"])
+        _seed_case(session, project_id=project_id, case=case, suffix="protected")
+        session.commit()
+        generated = generate_project(session, project_id, project_root, mode="full")
+        page_path = generated.output / "pages" / "generated_page.py"
+        helper_body = (
+            "    def manual_helper(self):\n"
+            "        return \"kept across regeneration\"\n"
+        )
+        page_path.write_text(
+            _replace_protected_region(
+                page_path.read_text(encoding="utf-8"),
+                "generated-page-helpers",
+                helper_body,
+            ),
+            encoding="utf-8",
+        )
+
+        _change_first_method_selector(session, "page.locator('#protected-refresh')")
+        session.commit()
+
+        result = generate_project(session, project_id, project_root, [case.id])
+
+        assert "pages/generated_page.py" in result.stale_files
+        assert result.edited_files == []
+        assert result.conflict_files == []
+        page_content = page_path.read_text(encoding="utf-8")
+        assert helper_body in page_content
+        assert "protected-refresh" in page_content
+        row = session.exec(
+            select(GeneratedFile).where(
+                GeneratedFile.project_id == project_id,
+                GeneratedFile.relative_path == "pages/generated_page.py",
+            )
+        ).first()
+        assert row.status == "generated"
+        assert row.content_hash == hash_file(page_path)
 
 
 def test_full_and_selected_generation_preserve_existing_git_metadata(

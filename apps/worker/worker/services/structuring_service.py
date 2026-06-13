@@ -19,6 +19,7 @@ from worker.models.db import (
     PageObjectMethodType,
     Project,
     RawAction,
+    SelectorCandidate,
     StructuredFlow,
     StructuredFlowStatus,
     StructuredStep,
@@ -65,12 +66,53 @@ ATTRIBUTE_TEXT_RE = re.compile(
     r"\[(?:name|id|aria-label|placeholder|type)\s*=\s*['\"]?([^'\"\]]+)",
     re.IGNORECASE,
 )
+ROLE_SELECTOR_RE = re.compile(r"^(?P<role>[^\[]+)(?:\[name=(?P<quote>['\"])(?P<name>.*)(?P=quote)\])?$")
+SELECTOR_TYPE_PRIORITY = {
+    "test_id": 0,
+    "role": 1,
+    "text": 2,
+    "css": 3,
+    "xpath": 4,
+}
+MIN_SELECTOR_CANDIDATE_CONFIDENCE = 0.7
+AMBIGUOUS_SELECTOR_CONFIDENCE_DELTA = 0.0001
+FILLABLE_ROLE_SELECTORS = {"combobox", "searchbox", "spinbutton", "textbox"}
+CHECKABLE_ROLE_SELECTORS = {"checkbox", "radio", "switch"}
+CLICKABLE_ROLE_SELECTORS = {
+    "button",
+    "checkbox",
+    "link",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "radio",
+    "switch",
+    "tab",
+    "treeitem",
+}
+TEXT_SELECTOR_ACTIONS = {
+    "click",
+    "hover",
+    "assert_text",
+    "assert_visible",
+    "assert_hidden",
+    "wait",
+}
 
 
 @dataclass(frozen=True)
 class CredentialPlaceholder:
     value: str
     source: str
+
+
+@dataclass(frozen=True)
+class SelectorChoice:
+    selector: str | None
+    selected: SelectorCandidate | None
+    runner_ups: list[SelectorCandidate]
+    fallback_reason: str | None = None
 
 
 def _snake(name: str) -> str:
@@ -235,9 +277,249 @@ def _mapping_method(session: Session, page_id: str, mapping_id: str | None) -> P
     ).first()
 
 
-def _plan_entry(order: int, mapping_id: str | None, action: RawAction) -> dict:
+def _selector_candidates_for_actions(
+    session: Session,
+    action_ids: list[str],
+) -> dict[str, list[SelectorCandidate]]:
+    if not action_ids:
+        return {}
+    rows = session.exec(
+        select(SelectorCandidate).where(SelectorCandidate.raw_action_id.in_(action_ids))
+    ).all()
+    grouped: dict[str, list[SelectorCandidate]] = {}
+    for row in rows:
+        if row.page_object_method_id and not _is_structuring_ranked_candidate(row):
+            continue
+        if row.raw_action_id:
+            grouped.setdefault(row.raw_action_id, []).append(row)
+    return grouped
+
+
+def _selector_rank_key(candidate: SelectorCandidate) -> tuple[int, float, str, str]:
+    return (
+        SELECTOR_TYPE_PRIORITY.get(candidate.selector_type, 99),
+        -candidate.confidence,
+        candidate.selector_value,
+        candidate.id or "",
+    )
+
+
+def _role_selector_parts(selector_value: str) -> tuple[str, str | None] | None:
+    match = ROLE_SELECTOR_RE.match(selector_value.strip())
+    if not match:
+        return None
+    role = match.group("role").strip()
+    if not role:
+        return None
+    return role, match.group("name")
+
+
+def _selector_expression(candidate: SelectorCandidate) -> str | None:
+    value = candidate.selector_value
+    if not value:
+        return None
+    if candidate.selector_type == "test_id":
+        return f"page.get_by_test_id({json.dumps(value)})"
+    if candidate.selector_type == "role":
+        parts = _role_selector_parts(value)
+        if not parts:
+            return None
+        role, name = parts
+        if name:
+            return f"page.get_by_role({json.dumps(role)}, name={json.dumps(name)})"
+        return f"page.get_by_role({json.dumps(role)})"
+    if candidate.selector_type == "text":
+        return f"page.get_by_text({json.dumps(value)})"
+    if candidate.selector_type == "css":
+        return f"page.locator({json.dumps(value)})"
+    if candidate.selector_type == "xpath":
+        selector = value if value.lower().startswith("xpath=") else f"xpath={value}"
+        return f"page.locator({json.dumps(selector)})"
+    return None
+
+
+def _role_selector_compatible(action: RawAction, candidate: SelectorCandidate) -> bool:
+    parts = _role_selector_parts(candidate.selector_value)
+    if not parts:
+        return False
+    role, _name = parts
+    normalized_role = role.lower()
+    if action.type in {"click", "hover"}:
+        return True
+    if action.type == "fill":
+        return normalized_role in FILLABLE_ROLE_SELECTORS
+    if action.type == "press":
+        return normalized_role in FILLABLE_ROLE_SELECTORS or normalized_role in CLICKABLE_ROLE_SELECTORS
+    if action.type in {"check", "uncheck"}:
+        return normalized_role in CHECKABLE_ROLE_SELECTORS
+    if action.type == "select":
+        return normalized_role in {"combobox", "listbox"}
+    if action.type.startswith("assert_") or action.type == "wait":
+        return True
+    return False
+
+
+def _selector_candidate_compatible(action: RawAction, candidate: SelectorCandidate) -> bool:
+    if not action.selector or not _selector_expression(candidate):
+        return False
+    if action.type == "goto":
+        return False
+    if candidate.selector_type in {"test_id", "css", "xpath"}:
+        return True
+    if candidate.selector_type == "role":
+        return _role_selector_compatible(action, candidate)
+    if candidate.selector_type == "text":
+        return action.type in TEXT_SELECTOR_ACTIONS or action.type.startswith("assert_")
+    return False
+
+
+def _rank_selector_choice(
+    action: RawAction,
+    candidates: list[SelectorCandidate],
+) -> SelectorChoice:
+    compatible = sorted(
+        [
+            candidate
+            for candidate in candidates
+            if _selector_candidate_compatible(action, candidate)
+        ],
+        key=_selector_rank_key,
+    )
+    if not compatible:
+        fallback = "incompatible_candidate" if candidates else None
+        return SelectorChoice(None, None, sorted(candidates, key=_selector_rank_key)[:3], fallback)
+
+    top = compatible[0]
+    runner_ups = compatible[1:4]
+    if top.confidence < MIN_SELECTOR_CANDIDATE_CONFIDENCE:
+        return SelectorChoice(None, None, [top, *runner_ups][:3], "low_confidence")
+
+    if runner_ups:
+        runner = runner_ups[0]
+        same_rank = SELECTOR_TYPE_PRIORITY.get(top.selector_type, 99) == SELECTOR_TYPE_PRIORITY.get(
+            runner.selector_type,
+            99,
+        )
+        same_confidence = abs(top.confidence - runner.confidence) <= AMBIGUOUS_SELECTOR_CONFIDENCE_DELTA
+        different_value = (top.selector_type, top.selector_value) != (runner.selector_type, runner.selector_value)
+        if same_rank and same_confidence and different_value:
+            return SelectorChoice(None, None, [top, *runner_ups][:3], "ambiguous_candidate")
+
+    return SelectorChoice(_selector_expression(top), top, runner_ups)
+
+
+def _selector_candidate_payload(candidate: SelectorCandidate) -> dict:
+    return {
+        "id": candidate.id,
+        "type": candidate.selector_type,
+        "value": candidate.selector_value,
+        "confidence": candidate.confidence,
+        "sourceArtifactId": candidate.source_artifact_id,
+    }
+
+
+def _selector_candidate_metadata_dict(candidate: SelectorCandidate) -> dict:
+    try:
+        metadata = json.loads(candidate.metadata_json or "{}")
+    except json.JSONDecodeError:
+        metadata = {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _is_structuring_ranked_candidate(candidate: SelectorCandidate) -> bool:
+    return _selector_candidate_metadata_dict(candidate).get("structuring_selector_ranked") is True
+
+
+def _mark_structuring_ranked_candidate(candidate: SelectorCandidate, method_id: str) -> None:
+    metadata = _selector_candidate_metadata_dict(candidate)
+    metadata["structuring_selector_ranked"] = True
+    metadata["page_object_method_id"] = method_id
+    candidate.metadata_json = json.dumps(metadata, sort_keys=True)
+
+
+def _selector_choice_metadata(raw_selector: str, choice: SelectorChoice) -> dict | None:
+    if not choice.selected and not choice.runner_ups and not choice.fallback_reason:
+        return None
+    metadata = {
+        "rawSelector": raw_selector,
+        "selectedCandidateId": choice.selected.id if choice.selected else None,
+        "selectedType": choice.selected.selector_type if choice.selected else None,
+        "selectedValue": choice.selected.selector_value if choice.selected else None,
+        "selectedConfidence": choice.selected.confidence if choice.selected else None,
+        "runnerUpCandidateIds": [
+            candidate.id for candidate in choice.runner_ups if candidate.id
+        ],
+        "runnerUpCandidates": [
+            _selector_candidate_payload(candidate) for candidate in choice.runner_ups
+        ],
+    }
+    if choice.selected and choice.selected.source_artifact_id:
+        metadata["sourceArtifactId"] = choice.selected.source_artifact_id
+    if choice.fallback_reason:
+        metadata["fallbackReason"] = choice.fallback_reason
+    return metadata
+
+
+def _selector_from_plan(body_plan: list[dict]) -> str | None:
+    return next(
+        (
+            str(entry["selector"])
+            for entry in body_plan
+            if isinstance(entry, dict) and entry.get("selector") is not None
+        ),
+        None,
+    )
+
+
+def _selector_candidate_ids_from_plan(body_plan: list[dict]) -> set[str]:
+    candidate_ids: set[str] = set()
+    for entry in body_plan:
+        if not isinstance(entry, dict):
+            continue
+        metadata = entry.get("selectorCandidate")
+        if not isinstance(metadata, dict):
+            continue
+        selected_id = metadata.get("selectedCandidateId")
+        if isinstance(selected_id, str):
+            candidate_ids.add(selected_id)
+        for candidate_id in metadata.get("runnerUpCandidateIds") or []:
+            if isinstance(candidate_id, str):
+                candidate_ids.add(candidate_id)
+    return candidate_ids
+
+
+def _sync_method_selector_candidate_links(
+    session: Session,
+    method_id: str | None,
+    body_plan: list[dict],
+) -> None:
+    if not method_id:
+        return
+    current_ids = _selector_candidate_ids_from_plan(body_plan)
+    existing = session.exec(
+        select(SelectorCandidate).where(SelectorCandidate.page_object_method_id == method_id)
+    ).all()
+    for candidate in existing:
+        if candidate.id not in current_ids and _is_structuring_ranked_candidate(candidate):
+            candidate.page_object_method_id = None
+            session.add(candidate)
+    for candidate_id in current_ids:
+        candidate = session.get(SelectorCandidate, candidate_id)
+        if candidate:
+            candidate.page_object_method_id = method_id
+            _mark_structuring_ranked_candidate(candidate, method_id)
+            session.add(candidate)
+
+
+def _plan_entry(
+    order: int,
+    mapping_id: str | None,
+    action: RawAction,
+    selector_candidates: list[SelectorCandidate] | None = None,
+) -> dict:
     review_reason = _review_reason(action)
     credential = _credential_placeholder(action)
+    selector_choice = _rank_selector_choice(action, selector_candidates or [])
     entry = {
         "order": order,
         "action": action.type,
@@ -246,7 +528,10 @@ def _plan_entry(order: int, mapping_id: str | None, action: RawAction) -> dict:
         "requiresReview": review_reason is not None or credential is not None,
     }
     if action.selector is not None:
-        entry["selector"] = action.selector
+        entry["selector"] = selector_choice.selector or action.selector
+        selector_metadata = _selector_choice_metadata(action.selector, selector_choice)
+        if selector_metadata:
+            entry["selectorCandidate"] = selector_metadata
     if action.value is not None:
         entry["value"] = credential.value if credential else action.value
     if action.target is not None:
@@ -280,9 +565,11 @@ def _missing_action_entry(order: int, mapping_id: str | None, action_id: str) ->
 def build_method_body_plan(
     mapping: MappingItem,
     action_by_id: dict[str, RawAction],
+    selector_candidates_by_action_id: dict[str, list[SelectorCandidate]] | None = None,
 ) -> tuple[list[dict], list[RawAction], bool]:
     plan: list[dict] = []
     actions: list[RawAction] = []
+    selector_candidates_by_action_id = selector_candidates_by_action_id or {}
     requires_review = mapping.status != "mapped"
     for order, action_id in enumerate(mapping.action_ids, start=1):
         action = action_by_id.get(action_id)
@@ -291,7 +578,7 @@ def build_method_body_plan(
             requires_review = True
             continue
         actions.append(action)
-        entry = _plan_entry(order, mapping.id, action)
+        entry = _plan_entry(order, mapping.id, action, selector_candidates_by_action_id.get(action_id, []))
         plan.append(entry)
         requires_review = requires_review or entry["requiresReview"]
     if not plan:
@@ -336,6 +623,7 @@ def _actions_for_mappings(session: Session, mappings: list[MappingItem]) -> dict
 def sync_structured_entities(session: Session, project_id: str, case: TestCase, run: WebwrightRun | None) -> StructuredFlow:
     mappings = get_mappings(session, case.id)
     action_by_id = _actions_for_mappings(session, mappings)
+    selector_candidates_by_action_id = _selector_candidates_for_actions(session, list(action_by_id))
 
     existing = session.exec(
         select(StructuredFlow).where(StructuredFlow.test_case_id == case.id).order_by(StructuredFlow.version.desc())
@@ -371,14 +659,18 @@ def sync_structured_entities(session: Session, project_id: str, case: TestCase, 
 
     flow_requires_review = False
     for order_index, mapping in enumerate(mappings, start=1):
-        body_plan, actions, requires_review = build_method_body_plan(mapping, action_by_id)
+        body_plan, actions, requires_review = build_method_body_plan(
+            mapping,
+            action_by_id,
+            selector_candidates_by_action_id,
+        )
         flow_requires_review = flow_requires_review or requires_review
         step_name = mapping.normalized_step_name or mapping.pom_method_name or f"step_{mapping.tc_step_index}"
         base_method_name = _method_base_name(mapping, step_name)
         method_name = _scoped_method_name(case, mapping, base_method_name)
 
         method_type = _method_type(actions, requires_review)
-        selector = next((action.selector for action in actions if action.selector is not None), None)
+        selector = _selector_from_plan(body_plan)
         value_template = _value_template_from_plan(body_plan)
         body_plan_json = json.dumps(body_plan, sort_keys=True, separators=(",", ":"))
         method_status = (
@@ -425,6 +717,7 @@ def sync_structured_entities(session: Session, project_id: str, case: TestCase, 
             pom.updated_at = datetime.utcnow()
         session.add(pom)
         session.flush()
+        _sync_method_selector_candidate_links(session, pom.id, body_plan)
 
         session.add(StructuredStep(
             id=new_id("ss"),
@@ -786,6 +1079,7 @@ def merge_refreshed_raw_actions(
 
     now = datetime.utcnow()
     new_action_by_id = {action.id: action for action in new_actions if action.id}
+    selector_candidates_by_action_id = _selector_candidates_for_actions(session, list(new_action_by_id))
     flow_requires_review = False
     for mapping in mappings:
         previous_action_ids = list(mapping.action_ids)
@@ -807,10 +1101,14 @@ def merge_refreshed_raw_actions(
 
         step = steps_by_mapping[mapping.id]
         method = methods_by_mapping[mapping.id]
-        body_plan, actions, requires_review = build_method_body_plan(mapping, new_action_by_id)
+        body_plan, actions, requires_review = build_method_body_plan(
+            mapping,
+            new_action_by_id,
+            selector_candidates_by_action_id,
+        )
         flow_requires_review = flow_requires_review or requires_review
         method.method_type = _method_type(actions, requires_review)
-        method.selector = next((action.selector for action in actions if action.selector is not None), None)
+        method.selector = _selector_from_plan(body_plan)
         method.value_template = _value_template_from_plan(body_plan)
         method.body_plan_json = json.dumps(body_plan, sort_keys=True, separators=(",", ":"))
         method.source_mapping_id = mapping.id
@@ -821,6 +1119,7 @@ def merge_refreshed_raw_actions(
         )
         method.updated_at = now
         session.add(method)
+        _sync_method_selector_candidate_links(session, method.id, body_plan)
 
         metadata = _step_metadata(step)
         metadata["raw_action_ids"] = mapping.action_ids

@@ -47,11 +47,15 @@ class _FakeProcess:
         self.stderr.feed_eof()
 
     async def wait(self) -> int:
-        self.returncode = 0
-        return 0
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
 
     def kill(self) -> None:
         self.returncode = -1
+
+    def terminate(self) -> None:
+        self.returncode = -15
 
 
 def _session_with_case(tmp_path: Path) -> tuple[Session, DbTestCase]:

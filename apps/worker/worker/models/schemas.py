@@ -108,14 +108,42 @@ class TestRailCloneImportRequest(BaseModel):
 
 
 class TestRailImportRequest(BaseModel):
-    project_id: int
-    suite_id: Optional[int] = None
+    model_config = ConfigDict(populate_by_name=True)
+
+    project_id: int = Field(validation_alias=AliasChoices("projectId", "project_id"))
+    suite_id: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("suiteId", "suite_id"),
+    )
+    base_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("baseUrl", "base_url"),
+    )
+    username: Optional[str] = None
+    api_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("apiToken", "api_token", "token"),
+    )
+    mock: bool = False
 
 
 class GoogleSheetsImportRequest(BaseModel):
-    spreadsheet_id: str
-    sheet_name: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    spreadsheet_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("spreadsheetId", "spreadsheet_id"),
+    )
+    sheet_name: str = Field(
+        default="Cases",
+        validation_alias=AliasChoices("sheetName", "sheet_name"),
+    )
     column_mapping: Optional[ExcelColumnMapping] = None
+    credential_json: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("credentialJson", "credential_json", "serviceAccountJson", "service_account_json"),
+    )
+    mock: bool = False
 
 
 class WebwrightRunRequest(BaseModel):
@@ -138,6 +166,10 @@ class PromptComposerUpdateRequest(BaseModel):
     batch_prompt: str = Field(
         default="",
         validation_alias=AliasChoices("batchPrompt", "batch_prompt"),
+    )
+    selected_preset_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("selectedPresetId", "selected_preset_id", "presetId", "preset_id"),
     )
     case_overrides: dict[str, str] = Field(
         default_factory=dict,
@@ -283,6 +315,13 @@ class HealingProposalCreateRequest(BaseModel):
             "result_id",
         )
     )
+    kind: Optional[Literal[
+        "selector_replace",
+        "wait_adjust",
+        "assertion_update",
+        "pom_method_patch",
+    ]] = None
+    proposal: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExecutionRequest(BaseModel):

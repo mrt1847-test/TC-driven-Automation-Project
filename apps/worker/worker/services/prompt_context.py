@@ -4,8 +4,9 @@ from datetime import datetime
 
 from sqlmodel import Session, select
 
-from worker.models.db import CasePromptOverride, Project, ProjectPromptContext, TestCase
+from worker.models.db import CasePromptOverride, Project, ProjectPromptContext, PromptPreset, TestCase
 from worker.models.schemas import PromptComposerUpdateRequest
+from worker.services.prompt_presets import BUILT_IN_PROMPT_PRESETS, ensure_builtin_prompt_presets
 
 
 def _override_payload(row: CasePromptOverride) -> dict:
@@ -27,6 +28,7 @@ def get_prompt_composer(session: Session, project: Project) -> dict:
     return {
         "projectId": project.id,
         "batchPrompt": context.batch_prompt if context else "",
+        "selectedPresetId": context.selected_preset_id if context else None,
         "caseOverrides": {
             row.case_id: row.prompt_override
             for row in overrides
@@ -42,6 +44,16 @@ def update_prompt_composer(
     request: PromptComposerUpdateRequest,
 ) -> dict:
     project_id = project.id or ""
+    selected_preset_id = (request.selected_preset_id or "").strip() or None
+    if selected_preset_id:
+        ensure_builtin_prompt_presets(session)
+        builtin_ids = {preset["id"] for preset in BUILT_IN_PROMPT_PRESETS}
+        preset = session.get(PromptPreset, selected_preset_id)
+        if selected_preset_id not in builtin_ids and (
+            preset is None or preset.project_id != project_id or preset.is_builtin
+        ):
+            raise ValueError(f"Prompt preset does not belong to project: {selected_preset_id}")
+
     requested_overrides = {
         case_id: value
         for case_id, value in request.case_overrides.items()
@@ -71,6 +83,7 @@ def update_prompt_composer(
             created_at=now,
         )
     context.batch_prompt = request.batch_prompt
+    context.selected_preset_id = selected_preset_id
     context.updated_at = now
     session.add(context)
 

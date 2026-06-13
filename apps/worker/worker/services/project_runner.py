@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import RLock
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from worker.core.config import mask_secret_data, mask_secrets, new_id
 from worker.core.log_stream import log_streams
@@ -22,6 +24,143 @@ RUNNER_ENTRYPOINT = (
     "from runner.cli import main; "
     "raise SystemExit(main())"
 )
+PROCESS_STOP_TIMEOUT_SECONDS = 10
+
+
+@dataclass
+class ActiveExecutionRun:
+    execution_id: str
+    job_id: str
+    process: object
+    generated_path: Path
+    run_id: str
+    stdout_path: Path
+    stderr_path: Path
+    result_path: Path
+    cancel_requested: bool = False
+
+
+_active_executions: dict[str, ActiveExecutionRun] = {}
+_active_job_executions: dict[str, set[str]] = {}
+_active_executions_lock = RLock()
+
+
+def _register_active_execution(active_execution: ActiveExecutionRun) -> None:
+    with _active_executions_lock:
+        _active_executions[active_execution.execution_id] = active_execution
+        _active_job_executions.setdefault(active_execution.job_id, set()).add(active_execution.execution_id)
+
+
+def _mark_active_execution_cancel_requested(execution_id: str) -> ActiveExecutionRun | None:
+    with _active_executions_lock:
+        active_execution = _active_executions.get(execution_id)
+        if active_execution is None:
+            return None
+        active_execution.cancel_requested = True
+        return active_execution
+
+
+def _active_execution_cancel_requested(execution_id: str | None) -> bool:
+    if not execution_id:
+        return False
+    with _active_executions_lock:
+        active_execution = _active_executions.get(execution_id)
+        return bool(active_execution and active_execution.cancel_requested)
+
+
+def _unregister_active_execution(execution_id: str | None) -> None:
+    if not execution_id:
+        return
+    with _active_executions_lock:
+        active_execution = _active_executions.pop(execution_id, None)
+        if active_execution is None:
+            return
+        job_executions = _active_job_executions.get(active_execution.job_id)
+        if job_executions is not None:
+            job_executions.discard(execution_id)
+            if not job_executions:
+                _active_job_executions.pop(active_execution.job_id, None)
+
+
+def _append_log(path: Path, text: str) -> None:
+    if not text:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+async def _terminate_process(process: object, timeout: float | None = None) -> str:
+    timeout = PROCESS_STOP_TIMEOUT_SECONDS if timeout is None else timeout
+    if getattr(process, "returncode", None) is not None:
+        return "already_exited"
+
+    graceful_sent = False
+    terminate = getattr(process, "terminate", None)
+    if callable(terminate):
+        try:
+            terminate()
+            graceful_sent = True
+        except ProcessLookupError:
+            return "already_exited"
+    else:
+        kill = getattr(process, "kill", None)
+        if callable(kill):
+            try:
+                kill()
+            except ProcessLookupError:
+                return "already_exited"
+
+    wait = getattr(process, "wait", None)
+    if not callable(wait):
+        return "terminated" if graceful_sent else "killed"
+
+    try:
+        await asyncio.wait_for(wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        if getattr(process, "returncode", None) is None:
+            kill = getattr(process, "kill", None)
+            if callable(kill):
+                try:
+                    kill()
+                except ProcessLookupError:
+                    return "already_exited"
+        try:
+            await asyncio.wait_for(wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return "kill_timeout"
+        return "killed"
+
+    return "terminated" if graceful_sent else "killed"
+
+
+async def _append_cancellation_diagnostic(active_execution: ActiveExecutionRun, message: str) -> None:
+    diagnostic = mask_secrets(message)
+    line = diagnostic + "\n"
+    _append_log(active_execution.stdout_path, line)
+    _append_log(active_execution.stderr_path, line)
+    await log_streams.publish(active_execution.job_id, diagnostic)
+
+
+async def cancel_execution_run(execution_id: str, job_id: str | None = None) -> bool:
+    active_execution = _mark_active_execution_cancel_requested(execution_id)
+    if active_execution is None:
+        if job_id:
+            await log_streams.publish(job_id, f"[runner] Cancellation requested for inactive execution {execution_id}")
+        return False
+
+    if job_id:
+        active_execution.job_id = job_id
+    await _append_cancellation_diagnostic(
+        active_execution,
+        f"[cancelled] Execution cancellation requested for run {execution_id}",
+    )
+    stop_result = await _terminate_process(active_execution.process)
+    await _append_cancellation_diagnostic(
+        active_execution,
+        f"[cancelled] runner.cli process stop result for run {execution_id}: {stop_result}; log stream marked cancelled",
+    )
+    return True
 
 
 async def run_project(session: Session, project: Project, request: ExecutionRequest, job_id: str) -> ExecutionRun:
@@ -49,6 +188,9 @@ async def run_project(session: Session, project: Project, request: ExecutionRequ
         project_id=project.id,
         browser=request.browser,
     )
+    if _refresh_cancelled_state(session, exec_run):
+        await _finish_cancelled_execution(session, exec_run, generated_path, run_id, job_id)
+        return exec_run
     if not bootstrap.get("ok"):
         await _finish_bootstrap_failure(session, exec_run, generated_path, run_id, job_id, bootstrap, request.automation_key)
         return exec_run
@@ -71,38 +213,8 @@ async def run_project(session: Session, project: Project, request: ExecutionRequ
     else:
         cmd.append("--all")
 
-    await log_streams.publish(job_id, f"[runner] {' '.join(cmd)}")
-
     runner_env = profile.subprocess_env({"TC_HEADLESS": "false" if request.headed else "true"})
-    process = await create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=str(generated_path),
-        env=runner_env,
-    )
-    stdout, stderr = await process.communicate()
-    stdout_text = mask_secrets(stdout.decode("utf-8", errors="replace"), runner_env)
-    stderr_text = mask_secrets(stderr.decode("utf-8", errors="replace"), runner_env)
-    _write_runner_logs(generated_path, run_id, stdout_text, stderr_text)
-    if stdout_text:
-        await log_streams.publish(job_id, stdout_text)
-    if stderr_text:
-        await log_streams.publish(job_id, stderr_text)
-
-    result_path = generated_path / "artifacts" / "runs" / run_id / "results.json"
-    exec_run.status = _execution_status(process.returncode, result_path)
-    exec_run.ended_at = datetime.utcnow()
-    exec_run.result_path = str(result_path) if result_path.exists() else None
-    session.add(exec_run)
-
-    if result_path.exists():
-        _persist_results(session, exec_run, result_path)
-
-    session.commit()
-    session.refresh(exec_run)
-    index_execution_failure_artifacts(session, exec_run)
-    return exec_run
+    return await _run_runner_command(session, exec_run, generated_path, run_id, job_id, cmd, runner_env)
 
 
 async def rerun_failed(session: Session, project: Project, execution_id: str, job_id: str) -> ExecutionRun:
@@ -111,35 +223,6 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
         raise ValueError("Execution not found")
     generated_path = Path(project.generated_project_path or (Path(project.root_path) / "generated"))
     run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    bootstrap = ensure_generated_runtime(
-        generated_path,
-        install=True,
-        session=session,
-        project_id=project.id,
-        browser=prev.browser,
-    )
-    if not bootstrap.get("ok"):
-        exec_run = ExecutionRun(
-            id=new_id("exec"),
-            project_id=project.id,
-            run_id=run_id,
-            env=prev.env,
-            browser=prev.browser,
-            headed=prev.headed,
-            status="running",
-            started_at=datetime.utcnow(),
-        )
-        session.add(exec_run)
-        session.commit()
-        session.refresh(exec_run)
-        await _finish_bootstrap_failure(session, exec_run, generated_path, run_id, job_id, bootstrap)
-        return exec_run
-
-    profile = resolve_runtime()
-    cmd = [
-        profile.python, "-c", RUNNER_ENTRYPOINT, str(generated_path),
-        "rerun-failed", "--from-run-id", prev.run_id, "--run-id", run_id,
-    ]
     exec_run = ExecutionRun(
         id=new_id("exec"),
         project_id=project.id,
@@ -152,10 +235,42 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
     )
     session.add(exec_run)
     session.commit()
+    session.refresh(exec_run)
 
+    bootstrap = ensure_generated_runtime(
+        generated_path,
+        install=True,
+        session=session,
+        project_id=project.id,
+        browser=prev.browser,
+    )
+    if _refresh_cancelled_state(session, exec_run):
+        await _finish_cancelled_execution(session, exec_run, generated_path, run_id, job_id)
+        return exec_run
+    if not bootstrap.get("ok"):
+        await _finish_bootstrap_failure(session, exec_run, generated_path, run_id, job_id, bootstrap)
+        return exec_run
+
+    profile = resolve_runtime()
+    cmd = [
+        profile.python, "-c", RUNNER_ENTRYPOINT, str(generated_path),
+        "rerun-failed", "--from-run-id", prev.run_id, "--run-id", run_id,
+    ]
+    runner_env = profile.subprocess_env()
+    return await _run_runner_command(session, exec_run, generated_path, run_id, job_id, cmd, runner_env)
+
+
+async def _run_runner_command(
+    session: Session,
+    exec_run: ExecutionRun,
+    generated_path: Path,
+    run_id: str,
+    job_id: str,
+    cmd: list[str],
+    runner_env: dict[str, str],
+) -> ExecutionRun:
     await log_streams.publish(job_id, f"[runner] {' '.join(cmd)}")
 
-    runner_env = profile.subprocess_env()
     process = await create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -163,26 +278,99 @@ async def rerun_failed(session: Session, project: Project, execution_id: str, jo
         cwd=str(generated_path),
         env=runner_env,
     )
-    stdout, stderr = await process.communicate()
-    stdout_text = mask_secrets(stdout.decode("utf-8", errors="replace"), runner_env)
-    stderr_text = mask_secrets(stderr.decode("utf-8", errors="replace"), runner_env)
-    _write_runner_logs(generated_path, run_id, stdout_text, stderr_text)
-    if stdout_text:
-        await log_streams.publish(job_id, stdout_text)
-    if stderr_text:
-        await log_streams.publish(job_id, stderr_text)
-
     result_path = generated_path / "artifacts" / "runs" / run_id / "results.json"
-    exec_run.status = _execution_status(process.returncode, result_path)
+    artifact_dir = result_path.parent
+    active_execution = ActiveExecutionRun(
+        execution_id=exec_run.id or "",
+        job_id=job_id,
+        process=process,
+        generated_path=generated_path,
+        run_id=run_id,
+        stdout_path=artifact_dir / "stdout.log",
+        stderr_path=artifact_dir / "stderr.log",
+        result_path=result_path,
+    )
+    _register_active_execution(active_execution)
+    try:
+        if _refresh_cancelled_state(session, exec_run):
+            _mark_active_execution_cancel_requested(exec_run.id or "")
+            await cancel_execution_run(exec_run.id or "", job_id)
+
+        stdout, stderr = await process.communicate()
+        stdout_text = mask_secrets(stdout.decode("utf-8", errors="replace"), runner_env)
+        stderr_text = mask_secrets(stderr.decode("utf-8", errors="replace"), runner_env)
+        if stdout_text:
+            await log_streams.publish(job_id, stdout_text)
+        if stderr_text:
+            await log_streams.publish(job_id, stderr_text)
+
+        if _refresh_cancelled_state(session, exec_run):
+            await _finish_cancelled_execution(
+                session,
+                exec_run,
+                generated_path,
+                run_id,
+                job_id,
+                stdout_text=stdout_text,
+                stderr_text=stderr_text,
+                return_code=getattr(process, "returncode", None),
+            )
+            return exec_run
+
+        _write_runner_logs(generated_path, run_id, stdout_text, stderr_text)
+        exec_run.status = _execution_status(getattr(process, "returncode", None), result_path)
+        exec_run.ended_at = datetime.utcnow()
+        exec_run.result_path = str(result_path) if result_path.exists() else None
+        session.add(exec_run)
+        if result_path.exists():
+            _persist_results(session, exec_run, result_path)
+        session.commit()
+        session.refresh(exec_run)
+        index_execution_failure_artifacts(session, exec_run)
+        return exec_run
+    finally:
+        _unregister_active_execution(exec_run.id)
+
+
+def _refresh_cancelled_state(session: Session, exec_run: ExecutionRun) -> bool:
+    try:
+        session.refresh(exec_run)
+    except Exception:
+        pass
+    return exec_run.status == "cancelled" or _active_execution_cancel_requested(exec_run.id)
+
+
+async def _finish_cancelled_execution(
+    session: Session,
+    exec_run: ExecutionRun,
+    generated_path: Path,
+    run_id: str,
+    job_id: str,
+    *,
+    stdout_text: str = "",
+    stderr_text: str = "",
+    return_code: int | None = None,
+) -> None:
+    message = "[cancelled] Execution run cancelled; harvesting available artifacts."
+    stdout_text = _append_line(stdout_text, message)
+    stderr_text = _append_line(stderr_text, message)
+    _write_runner_logs(generated_path, run_id, stdout_text, stderr_text)
+    result_path = _write_cancelled_results(generated_path, run_id, exec_run, return_code)
+
+    existing_results = session.exec(
+        select(ExecutionResult).where(ExecutionResult.execution_run_id == exec_run.id)
+    ).all()
+    for result in existing_results:
+        session.delete(result)
+
+    exec_run.status = "cancelled"
     exec_run.ended_at = datetime.utcnow()
-    exec_run.result_path = str(result_path) if result_path.exists() else None
+    exec_run.result_path = str(result_path)
     session.add(exec_run)
-    if result_path.exists():
-        _persist_results(session, exec_run, result_path)
     session.commit()
     session.refresh(exec_run)
+    await log_streams.publish(job_id, message)
     index_execution_failure_artifacts(session, exec_run)
-    return exec_run
 
 
 async def _finish_bootstrap_failure(
@@ -279,6 +467,45 @@ def _write_bootstrap_results(
     }
     result_path.write_text(json.dumps(mask_secret_data(payload), ensure_ascii=False, indent=2), encoding="utf-8")
     return result_path
+
+
+def _write_cancelled_results(
+    generated_path: Path,
+    run_id: str,
+    exec_run: ExecutionRun,
+    return_code: int | None,
+) -> Path:
+    artifact_dir = generated_path / "artifacts" / "runs" / run_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    result_path = artifact_dir / "results.json"
+    payload = {
+        "runId": run_id,
+        "projectName": generated_path.name,
+        "env": exec_run.env,
+        "browser": exec_run.browser,
+        "startedAt": exec_run.started_at.isoformat() if exec_run.started_at else None,
+        "endedAt": datetime.utcnow().isoformat(),
+        "status": "cancelled",
+        "summary": {
+            "total": 0,
+            "passed": 0,
+            "failed": 0,
+            "skipped": 0,
+        },
+        "cancellation": {
+            "reason": "user_cancelled",
+            "returnCode": return_code,
+        },
+        "cases": [],
+    }
+    result_path.write_text(json.dumps(mask_secret_data(payload), ensure_ascii=False, indent=2), encoding="utf-8")
+    return result_path
+
+
+def _append_line(text: str, line: str) -> str:
+    if not text:
+        return line + "\n"
+    return text + ("" if text.endswith("\n") else "\n") + line + "\n"
 
 
 def _write_runner_logs(generated_path: Path, run_id: str, stdout_text: str, stderr_text: str) -> None:

@@ -84,7 +84,7 @@ def _proposal_from_error(error: str) -> dict:
         kind = "selector_replace"
         message = "Compare the failed locator against the screenshot/trace evidence and prepare a selector replacement before regeneration."
     elif "timeout" in lower:
-        kind = "wait_adjustment"
+        kind = "wait_adjust"
         message = "Inspect the trace timing and screenshot state, then consider a more stable wait or selector in the generated step."
     else:
         kind = "manual_review"
@@ -119,7 +119,7 @@ def test_self_healing_proposal_workflow(client: TestClient, project_id: str, imp
     assert failed_result["error"]
 
     proposal = _proposal_from_error(failed_result["error"])
-    assert proposal["kind"] in {"selector_replace", "wait_adjustment", "manual_review"}
+    assert proposal["kind"] in {"selector_replace", "wait_adjust", "manual_review"}
     assert proposal["status"] == "proposed"
 
     accepted = {**proposal, "status": "accepted"}

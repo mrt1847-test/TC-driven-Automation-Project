@@ -196,6 +196,13 @@ Release policy:
   `prepare-runtime.ps1` fails before staging a live-labeled runtime.
 - Mock/dev placeholder staging is allowed only with `-WebwrightMode mock` or
   `WEBWRIGHT_MODE=mock`.
+- Before distribution, `npm run validate:third-party` must pass. The strict
+  gate runs `prepare-runtime.ps1 -ValidateOnly -WebwrightMode live`, verifies
+  that Electron packaging copies `runtime-staging` into `resources/runtime`,
+  checks staged `THIRD_PARTY_NOTICES.txt` and `runtime-manifest.json`, verifies
+  notice freshness against Webwright license/version/notice sources, and also
+  checks packaged `win-unpacked/resources/runtime` notices when that unpacked
+  app already exists locally.
 
 Product `dist:win:full` validation must use real Webwright. Mock/dev staging is
 only for demos and local smoke checks.
@@ -381,6 +388,7 @@ Minimum runtime gates:
 - E-09: live Webwright runtime E2E.
 - E-10: generated pytest/browser contract E2E.
 - I-08: clean Windows `dist:win:full` validation.
+- I-10: third-party legal packaging gate.
 
 ## Implementation Status
 
@@ -429,6 +437,11 @@ Done:
 - The packaged generated-template passed a deterministic Chromium case using
   the packaged embedded Python, browser cache, and the same generated-project
   entrypoint used by the in-app Worker runner.
+- I-10 adds the release legal gate: `scripts/validate-third-party.ps1 -Strict`
+  now verifies vendored Webwright attribution, Electron runtime resource
+  packaging, staged and unpacked packaged `THIRD_PARTY_NOTICES.txt`, live
+  runtime manifests, required notice sections, vendored commit consistency, and
+  notice freshness against source attribution/license files.
 - I-08 clean-install evidence is complete: the final NSIS installer
   (`SHA256 4E4A3222348809FA69394512AF58A1F9A342313A0D993BA10E7C10724E8D923F`)
   installed silently with exit code 0 into a new directory, containing the app,

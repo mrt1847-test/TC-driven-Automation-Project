@@ -120,6 +120,16 @@ def _generated_by_path(session: Session, project_id: str) -> dict[str, Generated
     }
 
 
+def _replace_protected_region(content: str, name: str, body: str) -> str:
+    begin = f'# <tc-protected name="{name}">'
+    end = "# </tc-protected>"
+    begin_index = content.index(begin)
+    body_start = content.index("\n", begin_index) + 1
+    end_index = content.index(end, body_start)
+    end_line_start = content.rfind("\n", 0, end_index) + 1
+    return content[:body_start] + body + content[end_line_start:]
+
+
 def test_same_method_text_across_cases_creates_case_scoped_poms(project_id: str) -> None:
     import worker.core.database as database
 
@@ -340,6 +350,18 @@ def test_scoped_methods_survive_selected_generation_and_retire_cleanup(
         page_source = page_path.read_text(encoding="utf-8")
         assert "def identity_retire_selected__step_1_shared_submit" in page_source
         assert "def identity_retire_unrelated__step_1_shared_submit" in page_source
+        helper_body = (
+            "    def manual_retire_helper(self):\n"
+            "        return \"preserved during retire\"\n"
+        )
+        page_path.write_text(
+            _replace_protected_region(
+                page_source,
+                "generated-page-helpers",
+                helper_body,
+            ),
+            encoding="utf-8",
+        )
 
         retire_result = retire_generated_case(
             session,
@@ -356,5 +378,6 @@ def test_scoped_methods_survive_selected_generation_and_retire_cleanup(
         assert "pages/generated_page.py" in retire_result["updatedFiles"]
         assert "def identity_retire_selected__step_1_shared_submit" not in page_source
         assert "def identity_retire_unrelated__step_1_shared_submit" in page_source
+        assert helper_body in page_source
         assert ("test_case", selected.id) not in page_origins
         assert ("test_case", unrelated.id) in page_origins

@@ -55,7 +55,7 @@ def _write_settings(settings: AppSettings) -> None:
 MASK = "***MASKED***"
 
 SECRET_NAME_RE = re.compile(
-    r"(api[_-]?key|token|secret|password|passwd|credential|private[_-]?key|bearer|session[_-]?cookie|cookie)",
+    r"(api[_-]?key|service[_-]?account[_-]?json|token|secret|password|passwd|credential|private[_-]?key|bearer|session[_-]?cookie|cookie)",
     re.IGNORECASE,
 )
 

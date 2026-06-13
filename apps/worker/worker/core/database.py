@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, create_engine, Session
 
 from worker.core.config import get_db_path
@@ -33,8 +34,8 @@ from worker.models.db import (
 )
 
 SCHEMA_VERSION_ID = "tc_studio"
-SCHEMA_VERSION = 1
-SCHEMA_VERSION_DESCRIPTION = "Phase 1 SQLModel create_all baseline"
+SCHEMA_VERSION = 2
+SCHEMA_VERSION_DESCRIPTION = "Prompt composer selected preset schema"
 
 engine = create_engine(f"sqlite:///{get_db_path()}", echo=False)
 
@@ -61,8 +62,18 @@ def record_schema_version(session: Session) -> SchemaVersion:
     return current
 
 
+def apply_lightweight_schema_upgrades() -> None:
+    inspector = inspect(engine)
+    if "project_prompt_contexts" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("project_prompt_contexts")}
+        if "selected_preset_id" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE project_prompt_contexts ADD COLUMN selected_preset_id TEXT"))
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
+    apply_lightweight_schema_upgrades()
     with Session(engine) as session:
         record_schema_version(session)
 

@@ -90,6 +90,16 @@ def _change_planned_page_source(session: Session, selector: str) -> None:
     session.add(method)
 
 
+def _replace_protected_region(content: str, name: str, body: str) -> str:
+    begin = f'# <tc-protected name="{name}">'
+    end = "# </tc-protected>"
+    begin_index = content.index(begin)
+    body_start = content.index("\n", begin_index) + 1
+    end_index = content.index(end, body_start)
+    end_line_start = content.rfind("\n", 0, end_index) + 1
+    return content[:body_start] + body + content[end_line_start:]
+
+
 def test_generated_file_hash_mismatch_is_edited_and_visible_in_validation(
     monkeypatch,
     tmp_path,
@@ -130,6 +140,52 @@ def test_generated_file_hash_mismatch_is_edited_and_visible_in_validation(
             )
         ).first()
         assert row.status == "edited"
+
+
+def test_protected_region_only_edit_is_not_marked_edited(
+    monkeypatch,
+    tmp_path,
+    project_id: str,
+    imported_case: dict,
+) -> None:
+    import worker.core.database as database
+
+    _patch_template(monkeypatch, tmp_path)
+    project_root = tmp_path / "protected-status-project"
+
+    with Session(database.engine) as session:
+        case = session.get(DbTestCase, imported_case["id"])
+        _seed_case(session, project_id=project_id, case=case, suffix="protected_status")
+        session.commit()
+        result = generate_project(session, project_id, project_root, mode="full")
+        page_path = result.output / "pages" / "generated_page.py"
+        page_path.write_text(
+            _replace_protected_region(
+                page_path.read_text(encoding="utf-8"),
+                "generated-page-helpers",
+                "    def manual_status_helper(self):\n"
+                "        return \"still generated\"\n",
+            ),
+            encoding="utf-8",
+        )
+
+        statuses = refresh_generated_file_statuses(
+            session,
+            project_id,
+            result.output,
+            relative_paths={"pages/generated_page.py"},
+            commit=True,
+        )
+
+        assert statuses["pages/generated_page.py"]["status"] == "generated"
+        assert statuses["pages/generated_page.py"]["onDiskChanged"] is False
+        row = session.exec(
+            select(GeneratedFile).where(
+                GeneratedFile.project_id == project_id,
+                GeneratedFile.relative_path == "pages/generated_page.py",
+            )
+        ).first()
+        assert row.status == "generated"
 
 
 def test_source_changed_untouched_file_is_stale_before_incremental_rewrite(

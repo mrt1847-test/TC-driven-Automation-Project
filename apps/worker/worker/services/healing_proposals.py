@@ -39,6 +39,28 @@ _AUTO_APPLY_FAILURE_CATEGORIES = {
     "strict_mode_violation",
 }
 _AUTO_APPLY_SELECTOR_TYPES = {"role", "text", "test_id"}
+_EXTENDED_PROPOSAL_KINDS = {
+    HealingProposalKind.wait_adjust.value,
+    HealingProposalKind.assertion_update.value,
+    HealingProposalKind.pom_method_patch.value,
+}
+_POM_PATCH_ACTIONS = {
+    "goto",
+    "click",
+    "fill",
+    "select",
+    "check",
+    "uncheck",
+    "press",
+    "set_input_files",
+    "drag_to",
+    "wait",
+    "assert_text",
+    "assert_url",
+    "assert_visible",
+    "assert_hidden",
+    "assert_count",
+}
 _SIGNAL_METADATA_KEYS = {
     "category",
     "disposition",
@@ -109,6 +131,48 @@ def _proposal_payload(proposal: HealingProposal) -> dict:
 
 def healing_proposal_payload(proposal: HealingProposal) -> dict:
     return _proposal_payload(proposal)
+
+
+def _json_payload(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _load_json_object(value: str | None, field_name: str) -> dict:
+    try:
+        payload = json.loads(value or "{}")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Healing proposal {field_name} is invalid") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Healing proposal {field_name} must be an object")
+    return payload
+
+
+def _load_json_list(value: str | None, field_name: str) -> list:
+    try:
+        payload = json.loads(value or "[]")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Healing proposal {field_name} is invalid") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"Healing proposal {field_name} must be a list")
+    return payload
+
+
+def _clamped_confidence(value: object, default: float) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        confidence = default
+    return max(0.0, min(1.0, confidence))
+
+
+def _as_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _generation_payload(generation: GenerationResult) -> dict:
@@ -462,6 +526,158 @@ def _patch_method_selector(method: PageObjectMethod, old_value: str | None, new_
     }
 
 
+def _entry_timeout_ms(entry: dict) -> int | None:
+    for key in ("timeoutMs", "timeout_ms", "timeout"):
+        timeout = _as_int(entry.get(key))
+        if timeout is not None:
+            return timeout
+    return None
+
+
+def _target_method_step_flow(
+    session: Session,
+    project: Project,
+    proposal: HealingProposal,
+) -> tuple[PageObjectMethod, StructuredStep, StructuredFlow]:
+    if not proposal.page_object_method_id or not proposal.structured_step_id:
+        raise ValueError("Healing proposal target is incomplete")
+    method = session.get(PageObjectMethod, proposal.page_object_method_id)
+    step = session.get(StructuredStep, proposal.structured_step_id)
+    if not method or not step or step.page_object_method_id != method.id:
+        raise ValueError("Healing proposal target is missing")
+    flow = session.get(StructuredFlow, step.structured_flow_id)
+    if not flow or flow.project_id != project.id:
+        raise ValueError("Healing proposal target flow is missing")
+    return method, step, flow
+
+
+def _patch_wait_adjust(method: PageObjectMethod, step: StructuredStep, proposal: HealingProposal) -> dict:
+    old = _load_json_object(proposal.old_value, "old_value")
+    new = _load_json_object(proposal.new_value, "new_value")
+    index = _as_int(new.get("bodyPlanIndex"))
+    if index is None:
+        raise ValueError("Healing proposal wait patch is incomplete")
+    index -= 1
+    new_timeout = _as_int(new.get("timeoutMs"))
+    if new_timeout is None:
+        raise ValueError("Healing proposal wait timeout is invalid")
+
+    plan = _load_body_plan(method)
+    if index < 0 or index >= len(plan):
+        raise ValueError("Healing proposal target is stale")
+    entry = plan[index]
+    if entry.get("action") != "wait":
+        raise ValueError("Healing proposal target is stale")
+    old_timeout = old.get("timeoutMs")
+    if _entry_timeout_ms(entry) != old_timeout:
+        raise ValueError("Healing proposal target is stale")
+
+    entry["timeoutMs"] = new_timeout
+    wait_payload = _load_json_object(step.wait_json, "step wait_json") if step.wait_json else {}
+    wait_payload["timeoutMs"] = new_timeout
+    wait_payload["sourceProposalId"] = proposal.id
+    step.wait_json = _json_payload(wait_payload)
+    step.updated_at = datetime.utcnow()
+    method.body_plan_json = _json_payload(plan)
+    method.status = PageObjectMethodStatus.approved.value
+    method.updated_at = datetime.utcnow()
+    return {
+        "kind": HealingProposalKind.wait_adjust.value,
+        "pageObjectMethodId": method.id,
+        "structuredStepId": step.id,
+        "bodyPlanIndex": index + 1,
+        "oldTimeoutMs": old_timeout,
+        "newTimeoutMs": new_timeout,
+    }
+
+
+def _patch_assertion_update(method: PageObjectMethod, step: StructuredStep, proposal: HealingProposal) -> dict:
+    old = _load_json_object(proposal.old_value, "old_value")
+    new = _load_json_object(proposal.new_value, "new_value")
+    index = _as_int(new.get("bodyPlanIndex"))
+    if index is None:
+        raise ValueError("Healing proposal assertion patch is incomplete")
+    index -= 1
+    if "value" not in new:
+        raise ValueError("Healing proposal assertion value is missing")
+
+    plan = _load_body_plan(method)
+    if index < 0 or index >= len(plan):
+        raise ValueError("Healing proposal target is stale")
+    entry = plan[index]
+    if not str(entry.get("action", "")).startswith("assert_"):
+        raise ValueError("Healing proposal target is stale")
+    if entry.get("value") != old.get("value"):
+        raise ValueError("Healing proposal target is stale")
+
+    new_value = str(new.get("value"))
+    entry["value"] = new_value
+    assertion_payload = _load_json_object(step.assertion_json, "step assertion_json") if step.assertion_json else {}
+    assertion_payload["value"] = new_value
+    assertion_payload["expected"] = new_value
+    assertion_payload["sourceProposalId"] = proposal.id
+    step.assertion_json = _json_payload(assertion_payload)
+    step.updated_at = datetime.utcnow()
+    method.value_template = new_value
+    method.body_plan_json = _json_payload(plan)
+    method.status = PageObjectMethodStatus.approved.value
+    method.updated_at = datetime.utcnow()
+    return {
+        "kind": HealingProposalKind.assertion_update.value,
+        "pageObjectMethodId": method.id,
+        "structuredStepId": step.id,
+        "bodyPlanIndex": index + 1,
+        "oldValue": old.get("value"),
+        "newValue": new_value,
+    }
+
+
+def _validated_patch_body_plan(value: object) -> list[dict]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("POM method patch bodyPlan must be a non-empty list")
+    body_plan: list[dict] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("POM method patch bodyPlan entries must be objects")
+        action = str(entry.get("action", "")).strip()
+        if action not in _POM_PATCH_ACTIONS:
+            raise ValueError("POM method patch contains unsupported action")
+        body_plan.append(dict(entry))
+    return body_plan
+
+
+def _patch_pom_method(method: PageObjectMethod, proposal: HealingProposal) -> dict:
+    old = _load_json_object(proposal.old_value, "old_value")
+    new = _load_json_object(proposal.new_value, "new_value")
+    old_plan = old.get("bodyPlan")
+    current_plan = _load_body_plan(method)
+    if isinstance(old_plan, list) and current_plan != old_plan:
+        raise ValueError("Healing proposal target is stale")
+
+    changed_fields: list[str] = []
+    if "bodyPlan" in new:
+        method.body_plan_json = _json_payload(_validated_patch_body_plan(new["bodyPlan"]))
+        changed_fields.append("bodyPlan")
+    if "methodType" in new:
+        method.method_type = str(new["methodType"])
+        changed_fields.append("methodType")
+    if "selector" in new:
+        method.selector = str(new["selector"]) if new["selector"] is not None else None
+        changed_fields.append("selector")
+    if "valueTemplate" in new:
+        method.value_template = str(new["valueTemplate"]) if new["valueTemplate"] is not None else None
+        changed_fields.append("valueTemplate")
+    if not changed_fields:
+        raise ValueError("POM method patch is empty")
+    method.status = PageObjectMethodStatus.approved.value
+    method.updated_at = datetime.utcnow()
+    return {
+        "kind": HealingProposalKind.pom_method_patch.value,
+        "pageObjectMethodId": method.id,
+        "changedFields": changed_fields,
+    }
+
+
 def apply_healing_proposal(session: Session, project: Project, proposal: HealingProposal) -> dict:
     if proposal.project_id != project.id:
         raise ValueError("Healing proposal does not belong to project")
@@ -476,25 +692,34 @@ def apply_healing_proposal(session: Session, project: Project, proposal: Healing
         }
     if proposal.status != HealingProposalStatus.accepted.value:
         raise ValueError("Healing proposal must be accepted before apply")
-    if proposal.kind != HealingProposalKind.selector_replace.value:
+    if proposal.kind not in {
+        HealingProposalKind.selector_replace.value,
+        HealingProposalKind.wait_adjust.value,
+        HealingProposalKind.assertion_update.value,
+        HealingProposalKind.pom_method_patch.value,
+    }:
         raise ValueError("Unsupported healing proposal kind")
-    if not proposal.page_object_method_id or not proposal.structured_step_id:
-        raise ValueError("Healing proposal target is incomplete")
-
-    method = session.get(PageObjectMethod, proposal.page_object_method_id)
-    step = session.get(StructuredStep, proposal.structured_step_id)
-    if not method or not step or step.page_object_method_id != method.id:
-        raise ValueError("Healing proposal target is missing")
-    flow = session.get(StructuredFlow, step.structured_flow_id)
-    if not flow or flow.project_id != project.id:
-        raise ValueError("Healing proposal target flow is missing")
+    method, step, flow = _target_method_step_flow(session, project, proposal)
 
     original_selector = method.selector
+    original_method_type = method.method_type
+    original_value_template = method.value_template
     original_body_plan_json = method.body_plan_json
     original_status = method.status
     original_updated_at = method.updated_at
-    mutation = _patch_method_selector(method, proposal.old_value, proposal.new_value)
+    original_assertion_json = step.assertion_json
+    original_wait_json = step.wait_json
+    original_step_updated_at = step.updated_at
+    if proposal.kind == HealingProposalKind.selector_replace.value:
+        mutation = _patch_method_selector(method, proposal.old_value, proposal.new_value)
+    elif proposal.kind == HealingProposalKind.wait_adjust.value:
+        mutation = _patch_wait_adjust(method, step, proposal)
+    elif proposal.kind == HealingProposalKind.assertion_update.value:
+        mutation = _patch_assertion_update(method, step, proposal)
+    else:
+        mutation = _patch_pom_method(method, proposal)
     session.add(method)
+    session.add(step)
     session.flush()
 
     try:
@@ -507,10 +732,16 @@ def apply_healing_proposal(session: Session, project: Project, proposal: Healing
         )
     except GenerationConflictError:
         method.selector = original_selector
+        method.method_type = original_method_type
+        method.value_template = original_value_template
         method.body_plan_json = original_body_plan_json
         method.status = original_status
         method.updated_at = original_updated_at
+        step.assertion_json = original_assertion_json
+        step.wait_json = original_wait_json
+        step.updated_at = original_step_updated_at
         session.add(method)
+        session.add(step)
         session.commit()
         raise
 
@@ -576,6 +807,421 @@ def _candidate_evidence(
                 "diagnosis_reason": diagnosis.reason,
             })
     return evidence
+
+
+def _artifact_metadata(session: Session, artifact_ids: list[str]) -> list[tuple[str, dict]]:
+    if not artifact_ids:
+        return []
+    artifacts = session.exec(select(ArtifactAsset).where(ArtifactAsset.id.in_(artifact_ids))).all()
+    metadata: list[tuple[str, dict]] = []
+    for artifact in artifacts:
+        if not artifact.metadata_json:
+            continue
+        try:
+            parsed = json.loads(artifact.metadata_json)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(parsed, dict) and artifact.id:
+            metadata.append((artifact.id, parsed))
+    return metadata
+
+
+def _metadata_proposal_hint(session: Session, diagnosis) -> tuple[str | None, dict]:
+    artifact_ids = list(dict.fromkeys([
+        *diagnosis.evidence_artifact_ids,
+        *diagnosis.target.artifact_ids,
+    ]))
+    for artifact_id, metadata in _artifact_metadata(session, artifact_ids):
+        for key in ("healing_proposal", "healingProposal", "proposal"):
+            value = metadata.get(key)
+            if not isinstance(value, dict):
+                continue
+            kind = value.get("kind") or metadata.get("proposal_kind") or metadata.get("proposalKind")
+            if kind in _EXTENDED_PROPOSAL_KINDS:
+                return str(kind), {"sourceArtifactId": artifact_id, **value}
+        kind = metadata.get("proposal_kind") or metadata.get("proposalKind")
+        if kind in _EXTENDED_PROPOSAL_KINDS:
+            return str(kind), {"sourceArtifactId": artifact_id, **metadata}
+    return None, {}
+
+
+def _proposal_target_for_diagnosis(
+    session: Session,
+    project: Project,
+    diagnosis,
+) -> tuple[PageObjectMethod, StructuredStep, StructuredFlow] | None:
+    target = diagnosis.target
+    if target.status != "resolved" or not target.page_object_method_id or not target.structured_step_id:
+        return None
+    proposal = HealingProposal(
+        project_id=project.id or "",
+        automation_key=diagnosis.automation_key or "",
+        page_object_method_id=target.page_object_method_id,
+        structured_step_id=target.structured_step_id,
+        kind=HealingProposalKind.pom_method_patch.value,
+        new_value="{}",
+    )
+    try:
+        return _target_method_step_flow(session, project, proposal)
+    except ValueError:
+        return None
+
+
+def _body_plan_index(value: object, allowed_indexes: list[int]) -> int | None:
+    requested = _as_int(value)
+    if requested is not None:
+        index = requested - 1
+        return index if index in allowed_indexes else None
+    return allowed_indexes[0] if allowed_indexes else None
+
+
+def _extract_timeout_ms(error: str | None) -> int | None:
+    if not error:
+        return None
+    match = re.search(r"(?P<ms>\d{3,6})\s*ms", error, re.IGNORECASE)
+    return _as_int(match.group("ms")) if match else None
+
+
+def _extract_assertion_actual(error: str | None) -> str | None:
+    if not error:
+        return None
+    patterns = [
+        r"(?:Received|Actual)(?: string)?:\s*['\"](?P<value>[^'\"]+)['\"]",
+        r"(?:Received|Actual)(?: string)?:\s*(?P<value>[^\r\n]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, error, re.IGNORECASE)
+        if match:
+            value = match.group("value").strip()
+            if value:
+                return value
+    return None
+
+
+def _extended_evidence(
+    *,
+    kind: str,
+    diagnosis,
+    method: PageObjectMethod,
+    step: StructuredStep,
+    proposal_data: dict,
+) -> list[dict]:
+    evidence = [{
+        "type": "extended_proposal",
+        "kind": kind,
+        "diagnosis_reason": diagnosis.reason,
+        "diagnosis_disposition": diagnosis.disposition,
+        "page_object_method_id": method.id,
+        "structured_step_id": step.id,
+        "proposal_input_keys": sorted(
+            key for key in proposal_data
+            if key not in {"sourceArtifactId", "sourceArtifactID"}
+        ),
+    }]
+    source_artifact_id = proposal_data.get("sourceArtifactId") or proposal_data.get("sourceArtifactID")
+    if source_artifact_id:
+        evidence[0]["source_artifact_id"] = source_artifact_id
+    for artifact_id in diagnosis.evidence_artifact_ids:
+        evidence.append({
+            "type": "diagnosis_artifact",
+            "artifact_id": artifact_id,
+            "diagnosis_reason": diagnosis.reason,
+        })
+    return evidence
+
+
+def _wait_adjust_spec(
+    *,
+    result: ExecutionResult,
+    diagnosis,
+    method: PageObjectMethod,
+    step: StructuredStep,
+    proposal_data: dict,
+) -> dict | None:
+    plan = _load_body_plan(method)
+    wait_indexes = [
+        index
+        for index, entry in enumerate(plan)
+        if entry.get("action") == "wait"
+    ]
+    index = _body_plan_index(
+        proposal_data.get("bodyPlanIndex") or proposal_data.get("body_plan_index"),
+        wait_indexes,
+    )
+    if index is None:
+        return None
+    entry = plan[index]
+    old_timeout = _entry_timeout_ms(entry)
+    requested_timeout = (
+        proposal_data.get("timeoutMs")
+        or proposal_data.get("timeout_ms")
+        or proposal_data.get("timeout")
+    )
+    new_timeout = _as_int(requested_timeout)
+    if new_timeout is None:
+        base_timeout = old_timeout or _extract_timeout_ms(result.error) or 5000
+        new_timeout = max(10000, min(60000, base_timeout * 2))
+    if old_timeout == new_timeout:
+        return None
+    old_value = {
+        "bodyPlanIndex": index + 1,
+        "timeoutMs": old_timeout,
+        "entry": entry,
+    }
+    new_value = {
+        "bodyPlanIndex": index + 1,
+        "timeoutMs": new_timeout,
+    }
+    return {
+        "kind": HealingProposalKind.wait_adjust.value,
+        "old_value": _json_payload(old_value),
+        "new_value": _json_payload(new_value),
+        "confidence": _clamped_confidence(proposal_data.get("confidence"), 0.74),
+        "evidence": _extended_evidence(
+            kind=HealingProposalKind.wait_adjust.value,
+            diagnosis=diagnosis,
+            method=method,
+            step=step,
+            proposal_data=proposal_data,
+        ),
+        "reason": "wait_adjust_patch_proposed",
+    }
+
+
+def _assertion_update_spec(
+    *,
+    result: ExecutionResult,
+    diagnosis,
+    method: PageObjectMethod,
+    step: StructuredStep,
+    proposal_data: dict,
+) -> dict | None:
+    plan = _load_body_plan(method)
+    assertion_indexes = [
+        index
+        for index, entry in enumerate(plan)
+        if str(entry.get("action", "")).startswith("assert_")
+    ]
+    index = _body_plan_index(
+        proposal_data.get("bodyPlanIndex") or proposal_data.get("body_plan_index"),
+        assertion_indexes,
+    )
+    if index is None:
+        return None
+    entry = plan[index]
+    new_value = (
+        proposal_data.get("value")
+        or proposal_data.get("expectedValue")
+        or proposal_data.get("expected_value")
+        or proposal_data.get("actualValue")
+        or proposal_data.get("actual_value")
+        or _extract_assertion_actual(result.error)
+    )
+    if new_value is None:
+        return None
+    old_value = {
+        "bodyPlanIndex": index + 1,
+        "value": entry.get("value"),
+        "entry": entry,
+    }
+    new_value_payload = {
+        "bodyPlanIndex": index + 1,
+        "value": str(new_value),
+    }
+    if old_value["value"] == new_value_payload["value"]:
+        return None
+    return {
+        "kind": HealingProposalKind.assertion_update.value,
+        "old_value": _json_payload(old_value),
+        "new_value": _json_payload(new_value_payload),
+        "confidence": _clamped_confidence(proposal_data.get("confidence"), 0.7),
+        "evidence": _extended_evidence(
+            kind=HealingProposalKind.assertion_update.value,
+            diagnosis=diagnosis,
+            method=method,
+            step=step,
+            proposal_data=proposal_data,
+        ),
+        "reason": "assertion_update_patch_proposed",
+    }
+
+
+def _pom_method_patch_spec(
+    *,
+    diagnosis,
+    method: PageObjectMethod,
+    step: StructuredStep,
+    proposal_data: dict,
+) -> dict | None:
+    new_value: dict = {}
+    if "bodyPlan" in proposal_data or "body_plan" in proposal_data:
+        new_value["bodyPlan"] = _validated_patch_body_plan(
+            proposal_data.get("bodyPlan") or proposal_data.get("body_plan")
+        )
+    if "methodType" in proposal_data or "method_type" in proposal_data:
+        new_value["methodType"] = proposal_data.get("methodType") or proposal_data.get("method_type")
+    if "selector" in proposal_data:
+        new_value["selector"] = proposal_data.get("selector")
+    if "valueTemplate" in proposal_data or "value_template" in proposal_data:
+        new_value["valueTemplate"] = proposal_data.get("valueTemplate") or proposal_data.get("value_template")
+    if not new_value:
+        return None
+    old_value = {
+        "bodyPlan": _load_body_plan(method),
+        "methodType": method.method_type,
+        "selector": method.selector,
+        "valueTemplate": method.value_template,
+    }
+    return {
+        "kind": HealingProposalKind.pom_method_patch.value,
+        "old_value": _json_payload(old_value),
+        "new_value": _json_payload(new_value),
+        "confidence": _clamped_confidence(proposal_data.get("confidence"), 0.62),
+        "evidence": _extended_evidence(
+            kind=HealingProposalKind.pom_method_patch.value,
+            diagnosis=diagnosis,
+            method=method,
+            step=step,
+            proposal_data=proposal_data,
+        ),
+        "reason": "pom_method_patch_proposed",
+    }
+
+
+def _infer_extended_kind(result: ExecutionResult, method: PageObjectMethod) -> str | None:
+    error = (result.error or "").lower()
+    plan = _load_body_plan(method)
+    if "timeout" in error and any(entry.get("action") == "wait" for entry in plan):
+        return HealingProposalKind.wait_adjust.value
+    assertion_terms = {"assert", "expect", "expected", "received", "actual"}
+    if any(term in error for term in assertion_terms) and any(
+        str(entry.get("action", "")).startswith("assert_")
+        for entry in plan
+    ):
+        return HealingProposalKind.assertion_update.value
+    return None
+
+
+def _extended_proposal_spec(
+    session: Session,
+    project: Project,
+    result: ExecutionResult,
+    diagnosis,
+    requested_kind: str | None,
+    requested_proposal: dict | None,
+) -> dict | None:
+    target = _proposal_target_for_diagnosis(session, project, diagnosis)
+    if target is None:
+        return None
+    method, step, _flow = target
+    hint_kind, hint_proposal = _metadata_proposal_hint(session, diagnosis)
+    proposal_data = requested_proposal if requested_proposal else hint_proposal
+    proposal_data = proposal_data or {}
+    kind = requested_kind or hint_kind or _infer_extended_kind(result, method)
+    if kind not in _EXTENDED_PROPOSAL_KINDS:
+        return None
+    if kind == HealingProposalKind.wait_adjust.value:
+        return _wait_adjust_spec(
+            result=result,
+            diagnosis=diagnosis,
+            method=method,
+            step=step,
+            proposal_data=proposal_data,
+        )
+    if kind == HealingProposalKind.assertion_update.value:
+        return _assertion_update_spec(
+            result=result,
+            diagnosis=diagnosis,
+            method=method,
+            step=step,
+            proposal_data=proposal_data,
+        )
+    return _pom_method_patch_spec(
+        diagnosis=diagnosis,
+        method=method,
+        step=step,
+        proposal_data=proposal_data,
+    )
+
+
+def _create_extended_healing_proposal(
+    session: Session,
+    project: Project,
+    result: ExecutionResult,
+    diagnosis,
+    base: dict,
+    requested_kind: str | None,
+    requested_proposal: dict | None,
+) -> dict | None:
+    spec = _extended_proposal_spec(
+        session,
+        project,
+        result,
+        diagnosis,
+        requested_kind,
+        requested_proposal,
+    )
+    if spec is None:
+        return None
+    target = diagnosis.target
+    target_proposals = session.exec(
+        select(HealingProposal)
+        .where(HealingProposal.project_id == project.id)
+        .where(HealingProposal.execution_result_id == result.id)
+        .where(HealingProposal.page_object_method_id == target.page_object_method_id)
+        .where(HealingProposal.structured_step_id == target.structured_step_id)
+        .where(HealingProposal.kind == spec["kind"])
+        .order_by(HealingProposal.created_at)
+    ).all()
+    existing = next(
+        (
+            proposal
+            for proposal in target_proposals
+            if proposal.old_value == spec["old_value"] and proposal.new_value == spec["new_value"]
+        ),
+        None,
+    )
+    if existing:
+        return {
+            **base,
+            "status": "existing",
+            "reason": "matching_proposal_exists",
+            "proposal": _proposal_payload(existing),
+        }
+    if target_proposals:
+        existing_target = target_proposals[0]
+        return {
+            **base,
+            "status": "existing",
+            "reason": "target_proposal_exists",
+            "proposal": _proposal_payload(existing_target),
+        }
+
+    proposal = HealingProposal(
+        id=new_id("heal"),
+        project_id=project.id or "",
+        automation_key=result.automation_key,
+        execution_result_id=result.id,
+        page_object_method_id=target.page_object_method_id,
+        structured_step_id=target.structured_step_id,
+        kind=spec["kind"],
+        old_value=spec["old_value"],
+        new_value=spec["new_value"],
+        confidence=spec["confidence"],
+        status=HealingProposalStatus.proposed.value,
+        evidence_json=_json_payload(spec["evidence"]),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    session.add(proposal)
+    session.commit()
+    session.refresh(proposal)
+    return {
+        **base,
+        "status": "created",
+        "reason": spec["reason"],
+        "proposal": _proposal_payload(proposal),
+    }
 
 
 def _auto_apply_decision_entry(policy: dict) -> dict:
@@ -666,11 +1312,13 @@ def _finalize_selector_healing_response(
     }
 
 
-def create_selector_healing_proposal(
+def create_healing_proposal(
     session: Session,
     project: Project,
     execution_run: ExecutionRun,
     result: ExecutionResult,
+    requested_kind: str | None = None,
+    requested_proposal: dict | None = None,
 ) -> dict:
     if execution_run.project_id != project.id:
         raise ValueError("Execution does not belong to project")
@@ -686,7 +1334,37 @@ def create_selector_healing_proposal(
         "automationKey": result.automation_key,
         "diagnosis": diagnosis.model_dump(),
     }
+    requested_proposal = requested_proposal or {}
+    if requested_kind in _EXTENDED_PROPOSAL_KINDS:
+        extended = _create_extended_healing_proposal(
+            session,
+            project,
+            result,
+            diagnosis,
+            base,
+            requested_kind,
+            requested_proposal,
+        )
+        if extended is not None:
+            return extended
+        return {
+            **base,
+            "status": "not_applicable",
+            "reason": f"kind:{requested_kind};target:{target.status}",
+            "proposal": None,
+        }
     if diagnosis.disposition != "selector_changed" or target.status != "resolved":
+        extended = _create_extended_healing_proposal(
+            session,
+            project,
+            result,
+            diagnosis,
+            base,
+            None,
+            requested_proposal,
+        )
+        if extended is not None:
+            return extended
         return {
             **base,
             "status": "not_applicable",
@@ -785,3 +1463,12 @@ def create_selector_healing_proposal(
         "proposal": _proposal_payload(proposal),
     }
     return _finalize_selector_healing_response(session, project, proposal, diagnosis, response)
+
+
+def create_selector_healing_proposal(
+    session: Session,
+    project: Project,
+    execution_run: ExecutionRun,
+    result: ExecutionResult,
+) -> dict:
+    return create_healing_proposal(session, project, execution_run, result)

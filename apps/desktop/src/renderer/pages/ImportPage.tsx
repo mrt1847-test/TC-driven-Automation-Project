@@ -40,7 +40,7 @@ type ImportSummary = {
 type IntegrationSettings = {
   testrailClone?: { baseUrl?: string; enabled?: boolean }
   testrail?: { baseUrl?: string; enabled?: boolean }
-  googleSheets?: { enabled?: boolean }
+  googleSheets?: { enabled?: boolean; spreadsheetId?: string }
 }
 
 const SOURCE_OPTIONS: { value: ImportSourceType; label: string }[] = [
@@ -86,6 +86,7 @@ export function ImportPage() {
     queryFn: () => api.settings.get() as Promise<{ integrations?: IntegrationSettings }>
   })
   const integrations = settingsQuery.data?.integrations || {}
+  const googleSheetsSpreadsheetId = spreadsheetId.trim() || integrations.googleSheets?.spreadsheetId || ''
 
   function buildExcelRequest() {
     return {
@@ -109,12 +110,40 @@ export function ImportPage() {
     }
   }
 
+  async function runTestrailConnector(action: 'preview' | 'import'): Promise<NormalizedTestCase[]> {
+    const body = buildTestrailRequest()
+    if (window.electronAPI?.testrailImport) {
+      const result = await window.electronAPI.testrailImport(project!.id, action, body)
+      if (!result.ok) throw new Error(result.message)
+      if (!Array.isArray(result.cases)) throw new Error('TestRail connector returned an unexpected response.')
+      return result.cases as NormalizedTestCase[]
+    }
+    const fallbackBody = { ...body, mock: true }
+    return action === 'preview'
+      ? api.cases.previewTestrail(project!.id, fallbackBody)
+      : api.cases.importTestrail(project!.id, fallbackBody)
+  }
+
   function buildGoogleSheetsRequest() {
     return {
-      spreadsheet_id: spreadsheetId.trim(),
+      spreadsheet_id: googleSheetsSpreadsheetId,
       sheet_name: sheetName.trim() || 'Cases',
       column_mapping: columnMapping
     }
+  }
+
+  async function runGoogleSheetsConnector(action: 'preview' | 'import'): Promise<NormalizedTestCase[]> {
+    const body = buildGoogleSheetsRequest()
+    if (window.electronAPI?.googleSheetsImport) {
+      const result = await window.electronAPI.googleSheetsImport(project!.id, action, body)
+      if (!result.ok) throw new Error(result.message)
+      if (!Array.isArray(result.cases)) throw new Error('Google Sheets connector returned an unexpected response.')
+      return result.cases as NormalizedTestCase[]
+    }
+    const fallbackBody = { ...body, mock: true }
+    return action === 'preview'
+      ? api.cases.previewGoogleSheets(project!.id, fallbackBody)
+      : api.cases.importGoogleSheets(project!.id, fallbackBody)
   }
 
   async function pickFile() {
@@ -179,13 +208,37 @@ export function ImportPage() {
   })
 
   const testrailPreviewMut = useMutation({
-    mutationFn: () => api.cases.previewTestrail(project!.id, buildTestrailRequest()),
+    mutationFn: () => runTestrailConnector('preview'),
     onSuccess: (data) => setTestrailPreview(data)
   })
 
+  const testrailImportMut = useMutation({
+    mutationFn: () => runTestrailConnector('import'),
+    onSuccess: (cases) => {
+      setImportSummary({
+        imported: cases.length,
+        sampleTitles: cases.slice(0, 5).map((item) => item.title)
+      })
+      setTestrailPreview(null)
+      qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+    }
+  })
+
   const sheetsPreviewMut = useMutation({
-    mutationFn: () => api.cases.previewGoogleSheets(project!.id, buildGoogleSheetsRequest()),
+    mutationFn: () => runGoogleSheetsConnector('preview'),
     onSuccess: (data) => setSheetsPreview(data)
+  })
+
+  const sheetsImportMut = useMutation({
+    mutationFn: () => runGoogleSheetsConnector('import'),
+    onSuccess: (cases) => {
+      setImportSummary({
+        imported: cases.length,
+        sampleTitles: cases.slice(0, 5).map((item) => item.title)
+      })
+      setSheetsPreview(null)
+      qc.invalidateQueries({ queryKey: ['cases', project?.id] })
+    }
   })
 
   if (!project) return <p>Select a project on Dashboard first.</p>
@@ -384,7 +437,7 @@ export function ImportPage() {
             baseUrl={integrations.testrail?.baseUrl}
           />
           <p className="text-xs text-slate-500">
-            API credentials and durable import are configured in Settings. Preview uses the partial Worker connector response.
+            API credentials are configured in Settings and used through the secure desktop credential path.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs text-slate-400">
@@ -412,23 +465,34 @@ export function ImportPage() {
               />
             </label>
           </div>
-          <button
-            className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
-            disabled={!testrailProjectId || testrailPreviewMut.isPending}
-            type="button"
-            onClick={() => testrailPreviewMut.mutate()}
-          >
-            {testrailPreviewMut.isPending ? 'Previewing...' : 'Preview'}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
+              disabled={!testrailProjectId || testrailPreviewMut.isPending}
+              type="button"
+              onClick={() => testrailPreviewMut.mutate()}
+            >
+              {testrailPreviewMut.isPending ? 'Previewing...' : 'Preview'}
+            </button>
+            <button
+              className="px-4 py-2 bg-green-600 rounded disabled:opacity-50"
+              disabled={!testrailProjectId || testrailImportMut.isPending}
+              type="button"
+              onClick={() => testrailImportMut.mutate()}
+            >
+              {testrailImportMut.isPending ? 'Importing...' : 'Import from TestRail'}
+            </button>
+          </div>
           {testrailPreviewMut.isError && (
-            <p className="text-sm text-red-400">Preview failed. Check project/suite IDs and TestRail integration settings.</p>
+            <p className="text-sm text-red-400">{mutationErrorText(testrailPreviewMut.error, 'Preview failed. Check project/suite IDs and TestRail integration settings.')}</p>
+          )}
+          {testrailImportMut.isError && (
+            <p className="text-sm text-red-400">{mutationErrorText(testrailImportMut.error, 'Import failed. Preview first to confirm connector access.')}</p>
           )}
           {testrailPreview && (
-            <>
-              <ConnectorCasePreviewTable cases={testrailPreview} />
-              <p className="text-xs text-slate-500">Import persistence lands with C1-05 durable connector work.</p>
-            </>
+            <ConnectorCasePreviewTable cases={testrailPreview} />
           )}
+          {importSummary && <ImportSummaryBanner summary={importSummary} />}
         </section>
       )}
 
@@ -440,13 +504,13 @@ export function ImportPage() {
             label="Google Sheets"
           />
           <p className="text-xs text-slate-500">
-            OAuth or service account setup is managed in Settings. Preview uses the partial Worker connector response.
+            OAuth or service account credentials are configured in Settings and used through the secure desktop credential path.
           </p>
           <label className="block text-xs text-slate-400">
             Spreadsheet ID
             <input
               className={`${inputClass} mt-1`}
-              placeholder="Spreadsheet ID from the sheet URL"
+              placeholder={integrations.googleSheets?.spreadsheetId || 'Spreadsheet ID from the sheet URL'}
               value={spreadsheetId}
               onChange={(e) => {
                 setSpreadsheetId(e.target.value)
@@ -467,23 +531,34 @@ export function ImportPage() {
             />
           </label>
           <ColumnMappingFields mapping={columnMapping} onChange={updateColumnMapping} />
-          <button
-            className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
-            disabled={!spreadsheetId || sheetsPreviewMut.isPending}
-            type="button"
-            onClick={() => sheetsPreviewMut.mutate()}
-          >
-            {sheetsPreviewMut.isPending ? 'Previewing...' : 'Preview'}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
+              disabled={!googleSheetsSpreadsheetId || sheetsPreviewMut.isPending}
+              type="button"
+              onClick={() => sheetsPreviewMut.mutate()}
+            >
+              {sheetsPreviewMut.isPending ? 'Previewing...' : 'Preview'}
+            </button>
+            <button
+              className="px-4 py-2 bg-green-600 rounded disabled:opacity-50"
+              disabled={!googleSheetsSpreadsheetId || sheetsImportMut.isPending}
+              type="button"
+              onClick={() => sheetsImportMut.mutate()}
+            >
+              {sheetsImportMut.isPending ? 'Importing...' : 'Import from Google Sheets'}
+            </button>
+          </div>
           {sheetsPreviewMut.isError && (
-            <p className="text-sm text-red-400">Preview failed. Check spreadsheet ID, sheet name, and column mapping.</p>
+            <p className="text-sm text-red-400">{mutationErrorText(sheetsPreviewMut.error, 'Preview failed. Check spreadsheet ID, sheet name, and column mapping.')}</p>
+          )}
+          {sheetsImportMut.isError && (
+            <p className="text-sm text-red-400">{mutationErrorText(sheetsImportMut.error, 'Import failed. Preview first to confirm connector access.')}</p>
           )}
           {sheetsPreview && (
-            <>
-              <ConnectorCasePreviewTable cases={sheetsPreview} />
-              <p className="text-xs text-slate-500">Import persistence lands with C1-06 durable connector work.</p>
-            </>
+            <ConnectorCasePreviewTable cases={sheetsPreview} />
           )}
+          {importSummary && <ImportSummaryBanner summary={importSummary} />}
         </section>
       )}
     </div>
@@ -493,6 +568,10 @@ export function ImportPage() {
 function formatCell(value: unknown) {
   if (value == null || value === '') return '—'
   return String(value)
+}
+
+function mutationErrorText(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
 }
 
 function ColumnMappingFields({

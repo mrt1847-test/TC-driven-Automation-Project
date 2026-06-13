@@ -1,6 +1,6 @@
 # Generated Project Spec
 
-Last aligned: 2026-06-05
+Last aligned: 2026-06-13
 
 The generated automation project is the final executable automation artifact.
 Webwright `final_script.py` is raw input material; it is not the final project.
@@ -356,6 +356,20 @@ Page object code generation normalizes persisted Playwright locator expressions:
   flow files call these scoped names while mappings and step labels keep the
   shorter reviewed display text.
 
+Generated Python files include protected regions for small user-maintained
+extensions. Regions are marked with:
+
+```python
+# <tc-protected name="...">
+# </tc-protected>
+```
+
+The generator currently emits `generated-page-helpers` in
+`pages/generated_page.py`, `flow-helpers` in each flow class,
+`test-imports` at the top of each generated test file, and `test-setup` inside
+each generated test function. Regeneration preserves the body of valid matching
+regions, but the markers themselves are generated content.
+
 Method body rendering (C8-11) consumes the full ordered
 `PageObjectMethod.body_plan_json`:
 
@@ -412,7 +426,9 @@ Selected regeneration must:
 - keep unrelated `tests/`, `flows/`, `pages/`, `artifacts/runs/`, and
   `mappings/cases.yaml` entries;
 - return an affected-file summary to Studio;
-- respect edited-file conflict guards before overwriting generated source.
+- respect edited-file conflict guards before overwriting generated source;
+- preserve valid protected-region bodies while still treating marker edits and
+  unprotected source edits as generated-file edits/conflicts.
 
 TC retire/delete cleanup must:
 

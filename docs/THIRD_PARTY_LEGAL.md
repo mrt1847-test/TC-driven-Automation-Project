@@ -60,18 +60,29 @@ End users should receive `THIRD_PARTY_NOTICES.txt` inside the installed app reso
 Run before release packaging:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/validate-third-party.ps1
+npm run validate:third-party
 ```
 
-Live runtime staging also asserts `LICENSE` and `VENDORED_VERSION.txt` on the Webwright
-source tree before copy.
+Equivalently, run the underlying strict gate directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/validate-third-party.ps1 -Strict
+```
+
+The strict gate validates vendored Webwright attribution, Electron packaging of
+`runtime-staging` into `resources/runtime`, staged `THIRD_PARTY_NOTICES.txt`,
+`runtime-manifest.json`, required notice sections, notice freshness against
+source attribution/license files, and packaged `win-unpacked` runtime notices
+when an unpacked release is already present locally. Live runtime staging also
+asserts `LICENSE` and `VENDORED_VERSION.txt` on the Webwright source tree
+before copy.
 
 ## Maintainer checklist
 
 - [ ] `third_party/webwright/LICENSE` unchanged from upstream MIT text
 - [ ] `VENDORED_VERSION.txt` matches the vendored commit
 - [ ] Local patches listed in `third_party/NOTICE.md`
-- [ ] `scripts/validate-third-party.ps1` passes
+- [ ] `npm run validate:third-party` passes
 - [ ] `npm run prepare-runtime` produces `runtime-staging/THIRD_PARTY_NOTICES.txt`
 - [ ] Installed `resources/runtime/THIRD_PARTY_NOTICES.txt` opens from Settings (packaged app)
 - [ ] No use of upstream `webwright_logo.svg` as the Studio product icon without separate approval

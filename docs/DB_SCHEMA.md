@@ -1,6 +1,6 @@
 # DB Schema
 
-Last aligned: 2026-06-05
+Last aligned: 2026-06-13
 
 This document defines the relational schema needed to support TC import, Webwright raw action extraction, mapping review, structuring, project generation, execution, and result export.
 
@@ -84,6 +84,7 @@ payload history.
 CREATE TABLE project_prompt_contexts (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   batch_prompt TEXT NOT NULL DEFAULT '',
+  selected_preset_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -151,9 +152,10 @@ CREATE INDEX idx_webwright_prompt_payloads_key
 
 Built-in presets use stable IDs and `project_id = NULL`. Project presets are
 scoped to one project and stay separate from selected batch/case prompt context.
-Prompt payload rows are append-only snapshots of the final prompt and selected
-components used for one `webwright_runs` row; they do not mutate composer or
-preset definitions.
+`project_prompt_contexts.selected_preset_id` stores the GUI's last selected
+built-in or project-owned preset ID for continuity. Prompt payload rows are
+append-only snapshots of the final prompt and selected components used for one
+`webwright_runs` row; they do not mutate composer or preset definitions.
 
 ## Webwright Raw Layer
 
@@ -274,6 +276,13 @@ Suggested `healing_proposals.kind` values:
 - `wait_adjust`
 - `assertion_update`
 - `pom_method_patch`
+
+C12-13 stores `wait_adjust`, `assertion_update`, and `pom_method_patch`
+payloads as compact JSON in `old_value` and `new_value`. Their
+`evidence_json` rows must include the proposal kind, diagnosis reason,
+resolved POM/structured-step target, relevant diagnosis artifacts, and source
+artifact hint when present. `selector_replace` keeps its existing selector
+string values for backward compatibility.
 
 Suggested `healing_proposals.status` values:
 

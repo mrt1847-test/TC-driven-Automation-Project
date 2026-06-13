@@ -211,7 +211,7 @@ def _add_execution_asset(
 def index_execution_failure_artifacts(session: Session, run: ExecutionRun) -> list[ArtifactAsset]:
     results = session.exec(select(ExecutionResult).where(ExecutionResult.execution_run_id == run.id)).all()
     failed_results = [result for result in results if result.status == "failed"]
-    if run.status != "failed" and not failed_results:
+    if run.status not in {"failed", "cancelled"} and not failed_results:
         return []
 
     _delete_existing_assets(session, ArtifactAssetSourceType.execution_run.value, run.id)

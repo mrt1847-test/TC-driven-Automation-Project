@@ -1,6 +1,6 @@
 # Structuring Spec
 
-Last aligned: 2026-06-11
+Last aligned: 2026-06-13
 
 This document defines how Webwright raw output becomes a maintainable
 Playwright pytest project.
@@ -202,6 +202,11 @@ Planner requirements:
 - replace credential-like raw `fill` literals with `${env.*}` placeholders
   before persisting planner entries, including password fields, values matching
   known secret environment values, and secret-looking token/key strings;
+- rank persisted selector candidates before persisting executable selectors:
+  prefer compatible high-confidence `test_id`, then role/accessibility, then
+  stable text, then CSS, with XPath last; preserve the raw selector when
+  candidates are missing, low-confidence, ambiguous, incompatible with the
+  action type, or are already bound as post-failure healing evidence;
 - mark unsupported actions as `custom` and require review before generation;
 - keep method names deterministic and scoped by stable case identity plus TC
   step index before the readable method base name, e.g.
@@ -223,6 +228,10 @@ Persisted planner entry contract:
 - credential placeholder substitutions set `requiresReview=true`,
   `reviewReason=credential_value_placeholder`, and non-secret metadata naming
   the placeholder/source category, never the original literal;
+- selector candidate substitutions add `selectorCandidate` metadata containing
+  the raw selector, selected candidate ID/type/value/confidence, runner-up
+  candidate IDs/provenance, and fallback reason when raw selector fallback is
+  used;
 - PageObjectMethod names must not be reused across different cases unless a
   future explicit dedupe layer proves identical canonical body plans and
   selector/value semantics; the current short-term policy keeps even identical
@@ -295,7 +304,45 @@ Regeneration must be deterministic:
 - if the source changed and the file was edited, mark conflict instead of
   silently overwriting;
 - if the source changed and the file was untouched, regenerate and update hash;
-- protected regions may be introduced later, but conflict detection comes first.
+- protected regions preserve explicitly marked manual code blocks while keeping
+  conflict detection for unprotected generated code.
+
+## Generated Protected Regions
+
+C7-14 introduces protected regions for generated Python files that are expected
+to host small user-maintained extensions. Regions use comment markers:
+
+```python
+# <tc-protected name="test-imports">
+# </tc-protected>
+```
+
+Generated region names are unique per file. Current generated regions are:
+
+- `pages/generated_page.py`: `generated-page-helpers` inside
+  `GeneratedPage`;
+- `flows/{automation_key}_flow.py`: `flow-helpers` inside the flow class;
+- `tests/test_{automation_key}.py`: `test-imports` at module level and
+  `test-setup` inside the test function.
+
+Before regeneration preflight, Worker merges the current on-disk body of each
+matching protected region into the newly planned content. Generated-file status
+hashing ignores protected region bodies, so edits inside valid protected
+regions do not appear as `edited` and do not block source-driven regeneration.
+The generated-file `content_hash` for files with protected regions is therefore
+an effective generated hash: markers and unprotected generated content count,
+protected body text does not.
+
+Safety rules:
+
+- protected region begin/end markers and names are generated content; editing,
+  removing, duplicating, or malformed nesting those markers is not protected;
+- unprotected edits are still detected from the effective hash and become
+  `edited` or `conflict` according to the normal stale/source-change rules;
+- when source data changes and only protected bodies were edited, regeneration
+  rewrites the generated sections and preserves the protected body;
+- protected regions do not apply to runtime manifests or other strict machine
+  contracts.
 
 ## Selected Raw Refresh Merge
 
@@ -418,8 +465,31 @@ C7-10 implementation behavior:
   then return to `generated` after successful regeneration updates metadata;
 - source-changed and edited files are marked `conflict` and block file writes
   before any overwrite;
-- generated-file status is surfaced in `/generated-files` metadata and
-  `structure/validate` issues when `edited`, `stale`, or `conflict`.
+- generated-file status is surfaced in `/generated-files` metadata,
+  `/generated-files/status` project summaries, and `structure/validate` issues
+  when `edited`, `stale`, or `conflict`.
+
+C7-13 implementation behavior:
+
+- `/projects/{project_id}/generated-files/status` refreshes tracked
+  generated-file status at project scope without requiring per-case validation;
+- the status summary preserves already-known source-change `stale` and
+  `conflict` states while still detecting new on-disk edits from stored hashes;
+- responses include project-level counts, severity-ordered file rows,
+  automation key, primary source, resolved origin context where available,
+  hash/edit/source-change flags, obsolete rows, and GUI guidance for clean,
+  edited, stale, conflict, or obsolete files.
+
+C7-14 implementation behavior:
+
+- generated page, flow, and test Python files include stable protected-region
+  markers for user-maintained helpers/imports/setup snippets;
+- generation merges existing protected-region bodies into planned content
+  before status preflight, dry-run summaries, and actual writes;
+- `GeneratedFile.content_hash` and generated-file status refresh ignore valid
+  protected-region bodies while still counting marker/outside edits;
+- selected/full regeneration preserves protected content through source changes
+  and still blocks unprotected edits as edited/conflict.
 
 ## TC Retire / Delete Cleanup
 
@@ -482,6 +552,13 @@ C12-10 disposition binding behavior:
 - step count mismatch;
 - unsupported actions requiring manual review;
 - stale/conflict status for generated files when known.
+
+D5-08 Mapping Review consumes this Worker validation for the selected case and
+renders it together with the local draft preflight. Draft issues cover unsaved
+GUI edits; Worker issues cover the persisted structured flow, saved mappings,
+and generated-file status. If the Worker validation request fails, Mapping
+Review should show the failure inline without clearing the selected TC or the
+local draft.
 
 ## Self-Healing Relationship
 
@@ -548,6 +625,9 @@ Done:
   marks planned source changes as stale/conflict before incremental rewrites,
   blocks source-changed edited files, and exposes generated-file status through
   file metadata and structure validation.
+- C7-13 project-level generated-file status summary exposes the same
+  edited/stale/conflict/obsolete state, resolved source/origin context, and
+  GUI guidance through `/generated-files/status`.
 - C8-06 full/selected generation guard runs before rewrite/delete, blocks
   edited/conflict tracked files with deterministic summaries, and keeps
   unchanged regeneration byte-stable.
@@ -597,3 +677,14 @@ Done:
   prevents cross-case overwrite for same-named steps, keeps readable mapping
   names unchanged, and repairs legacy shared methods into scoped methods during
   selected raw refresh before updating the selected case.
+- C7-16 body-plan selector ranking consumes extraction-time `SelectorCandidate`
+  rows by `sourceRawActionId`, chooses compatible high-confidence selectors
+  using the stability order `test_id > role > text > css > xpath`, emits the
+  chosen selector into `body_plan_json`, stores raw/chosen/runner-up provenance
+  for review and healing, preserves raw selectors for missing, low-confidence,
+  ambiguous, incompatible, or healing-only candidates, and reuses the same
+  ranking path during selected raw refresh merge.
+- C7-14 generated protected regions preserve valid user-maintained helper,
+  import, and setup blocks in generated Python files by merging region bodies
+  before regeneration and hashing generated files with protected bodies
+  normalized out, while continuing to flag unprotected edits as edited/conflict.

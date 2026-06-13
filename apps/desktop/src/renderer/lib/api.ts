@@ -132,6 +132,7 @@ export const api = {
   settings: {
     get: () => request<Record<string, unknown>>('/settings'),
     update: (body: unknown) => request('/settings', { method: 'PUT', body: JSON.stringify(body) }),
+    connectorCredentials: () => request<ConnectorCredentialsResponse>('/settings/connector-credentials'),
     validate: () => request('/settings/validate', { method: 'POST' })
   },
   projects: {
@@ -164,11 +165,21 @@ export const api = {
         body: JSON.stringify(body)
       }),
     previewTestrail: (projectId: string, body: unknown) =>
+      request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/testrail/preview`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    importTestrail: (projectId: string, body: unknown) =>
       request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/testrail`, {
         method: 'POST',
         body: JSON.stringify(body)
       }),
     previewGoogleSheets: (projectId: string, body: unknown) =>
+      request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/google-sheets/preview`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    importGoogleSheets: (projectId: string, body: unknown) =>
       request<NormalizedTestCase[]>(`/projects/${projectId}/cases/import/google-sheets`, {
         method: 'POST',
         body: JSON.stringify(body)
@@ -176,12 +187,39 @@ export const api = {
   },
   webwright: {
     list: (projectId: string) => request<WebwrightRun[]>(`/projects/${projectId}/webwright-runs`),
-    run: (projectId: string, body: { caseIds: string[] }) =>
+    run: (projectId: string, body: {
+      caseIds: string[]
+      presetId?: string | null
+      modelConfig?: string
+      environment?: string
+      startUrlOverride?: string | null
+    }) =>
       request<JobResponse>(`/projects/${projectId}/webwright-runs`, { method: 'POST', body: JSON.stringify(body) }),
     retry: (projectId: string, runId: string) =>
       request<JobResponse>(`/projects/${projectId}/webwright-runs/${runId}/retry`, { method: 'POST' }),
     cancel: (projectId: string, runId: string) =>
       request<WebwrightRun>(`/projects/${projectId}/webwright-runs/${runId}/cancel`, { method: 'POST' })
+  },
+  prompts: {
+    composer: (projectId: string) =>
+      request<PromptComposerResponse>(`/projects/${projectId}/prompt-composer`),
+    saveComposer: (projectId: string, body: PromptComposerUpdateRequest) =>
+      request<PromptComposerResponse>(`/projects/${projectId}/prompt-composer`, {
+        method: 'PUT',
+        body: JSON.stringify(body)
+      }),
+    presets: (projectId: string) =>
+      request<PromptPresetsResponse>(`/projects/${projectId}/prompt-presets`),
+    savePresets: (projectId: string, body: PromptPresetUpdateRequest) =>
+      request<PromptPresetsResponse>(`/projects/${projectId}/prompt-presets`, {
+        method: 'PUT',
+        body: JSON.stringify(body)
+      }),
+    preview: (projectId: string, body: PromptPreviewRequest) =>
+      request<PromptPreviewResponse>(`/projects/${projectId}/prompt-preview`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      })
   },
   mapping: {
     actions: (projectId: string, caseId: string) =>
@@ -215,6 +253,8 @@ export const api = {
       request(`/projects/${projectId}/cases/${caseId}/mappings`),
     save: (projectId: string, caseId: string, body: unknown) =>
       request(`/projects/${projectId}/cases/${caseId}/mappings`, { method: 'PUT', body: JSON.stringify(body) }),
+    validateStructure: (projectId: string, caseId: string) =>
+      request<StructureValidationResponse>(`/projects/${projectId}/cases/${caseId}/structure/validate`),
     normalize: (projectId: string, caseId: string) =>
       request(`/projects/${projectId}/cases/${caseId}/normalize`, { method: 'POST' })
   },
@@ -286,10 +326,10 @@ export const api = {
       }),
     rerunFailed: (projectId: string, id: string) =>
       request<JobResponse>(`/projects/${projectId}/executions/${id}/rerun-failed`, { method: 'POST' }),
-    export: (projectId: string, id: string, target: string, preview = false) =>
+    export: (projectId: string, id: string, target: string, preview = false, config?: Record<string, unknown>) =>
       request(`/projects/${projectId}/executions/${id}/export/${target}`, {
         method: 'POST',
-        body: JSON.stringify({ preview })
+        body: JSON.stringify({ preview, config: config || {} })
       })
   },
   healing: {
@@ -361,6 +401,102 @@ export interface WebwrightRun {
   error_message?: string
   started_at?: string | null
   ended_at?: string | null
+}
+
+export interface ConnectorCredentialDescriptor {
+  kind: string
+  account: string
+  label: string
+  requiredFor?: string[]
+}
+
+export interface ConnectorCredentialInfo {
+  id: string
+  enabled: boolean
+  config: Record<string, unknown>
+  credentials: ConnectorCredentialDescriptor[]
+  presenceSource: string
+}
+
+export interface ConnectorCredentialsResponse {
+  service: string
+  storage: string
+  secretsReturned: false
+  mask: string
+  connectors: Record<string, ConnectorCredentialInfo>
+}
+
+export interface StructureValidationResponse {
+  ok: boolean
+  issues: string[]
+  flowId?: string | null
+}
+
+export interface PromptComposerResponse {
+  projectId: string
+  batchPrompt: string
+  selectedPresetId?: string | null
+  caseOverrides: Record<string, string>
+  overrides: Array<{
+    caseId: string
+    automationKey: string
+    promptOverride: string
+    updatedAt?: string | null
+  }>
+}
+
+export interface PromptComposerUpdateRequest {
+  batchPrompt: string
+  selectedPresetId?: string | null
+  caseOverrides: Record<string, string>
+}
+
+export interface PromptPreset {
+  id: string
+  projectId?: string | null
+  category: string
+  name: string
+  guidance: string
+  isBuiltin: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface PromptPresetsResponse {
+  projectId: string
+  presets: PromptPreset[]
+}
+
+export interface PromptPresetUpdateRequest {
+  presets: Array<{
+    id?: string | null
+    category: string
+    name: string
+    guidance: string
+  }>
+}
+
+export interface PromptPreviewRequest {
+  caseId: string
+  presetId?: string | null
+  environment?: string
+  startUrlOverride?: string | null
+}
+
+export interface PromptPreviewResponse {
+  projectId: string
+  caseId: string
+  automationKey: string
+  environment: string
+  startUrl: string
+  preset: PromptPreset | null
+  parts: {
+    basePrompt: string
+    presetGuidance: string
+    batchPrompt: string
+    casePromptOverride: string
+  }
+  prompt: string
 }
 
 export interface JobResponse {

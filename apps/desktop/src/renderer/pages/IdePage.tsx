@@ -354,11 +354,24 @@ export function IdePage() {
     }
   })
 
+  async function runExport(preview: boolean) {
+    if (!project || !selectedExecution?.id) throw new Error('Select an execution first.')
+    if (exportTarget === 'testrail' && window.electronAPI?.testrailExport) {
+      const result = await window.electronAPI.testrailExport(project.id, selectedExecution.id, preview)
+      if (!result.ok) throw new Error(result.message)
+      return result.result
+    }
+    if (exportTarget === 'google-sheets' && window.electronAPI?.googleSheetsExport) {
+      const result = await window.electronAPI.googleSheetsExport(project.id, selectedExecution.id, preview)
+      if (!result.ok) throw new Error(result.message)
+      return result.result
+    }
+    const config = ['testrail', 'google-sheets'].includes(exportTarget) && !preview ? { mock: true } : undefined
+    return api.executions.export(project.id, selectedExecution.id, exportTarget, preview, config)
+  }
+
   const exportMut = useMutation({
-    mutationFn: (preview: boolean) => {
-      if (!project || !selectedExecution?.id) throw new Error('Select an execution first.')
-      return api.executions.export(project.id, selectedExecution.id, exportTarget, preview)
-    },
+    mutationFn: (preview: boolean) => runExport(preview),
     onSuccess: (result, preview) => {
       setExportPreview(result)
       setExportErrorGuide(buildExportOutcomeGuide(result, preview, exportTarget))

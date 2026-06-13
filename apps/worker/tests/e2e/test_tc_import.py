@@ -61,8 +61,8 @@ def test_excel_preview_import_and_list_handoff(client: TestClient, project_id: s
 
 def test_testrail_connector_preview(client: TestClient, project_id: str) -> None:
     response = client.post(
-        f"/projects/{project_id}/cases/import/testrail",
-        json={"project_id": 12, "suite_id": 3},
+        f"/projects/{project_id}/cases/import/testrail/preview",
+        json={"project_id": 12, "suite_id": 3, "mock": True},
     )
     assert response.status_code == 200
     cases = response.json()

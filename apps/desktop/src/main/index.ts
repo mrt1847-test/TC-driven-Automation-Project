@@ -207,6 +207,202 @@ ipcMain.handle('credential-get', async (_e, service: string, account: string) =>
   return { ok: false as const, message: result.message }
 })
 
+async function workerGetJson(path: string): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+  try {
+    const response = await fetch(`${WORKER_URL}${path}`)
+    if (!response.ok) {
+      return { ok: false, message: await workerErrorMessage(response) }
+    }
+    return { ok: true, data: await response.json() }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: false, message }
+  }
+}
+
+async function workerPostJson(
+  path: string,
+  body: unknown
+): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+  try {
+    const response = await fetch(`${WORKER_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      return { ok: false, message: await workerErrorMessage(response) }
+    }
+    return { ok: true, data: await response.json() }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: false, message }
+  }
+}
+
+async function workerErrorMessage(response: Response): Promise<string> {
+  const text = await response.text()
+  if (!text) return response.statusText || `HTTP ${response.status}`
+  try {
+    const parsed = JSON.parse(text)
+    const detail = parsed?.detail
+    if (typeof detail === 'string' && detail.trim()) return detail.trim()
+    if (detail) return JSON.stringify(detail)
+    return JSON.stringify(parsed)
+  } catch {
+    return text
+  }
+}
+
+ipcMain.handle('testrail-import', async (_e, projectId: string, action: 'preview' | 'import', body: Record<string, unknown>) => {
+  const settingsResult = await workerGetJson('/settings')
+  if (!settingsResult.ok) {
+    return { ok: false as const, message: settingsResult.message }
+  }
+  const settings = settingsResult.data as { integrations?: { testrail?: Record<string, unknown> } }
+  const integration = settings.integrations?.testrail || {}
+  const baseUrl = typeof integration.baseUrl === 'string' ? integration.baseUrl : ''
+  const username = typeof integration.username === 'string' ? integration.username : ''
+  if (!baseUrl.trim() || !username.trim()) {
+    return { ok: false as const, message: 'Configure TestRail base URL and username in Settings.' }
+  }
+
+  const credential = await getCredential('tc-studio', 'connector:testrail:apiToken')
+  if (!credential.ok) {
+    return { ok: false as const, message: 'Store a TestRail API token in Settings before importing.' }
+  }
+
+  const path = `/projects/${encodeURIComponent(projectId)}/cases/import/testrail${action === 'preview' ? '/preview' : ''}`
+  const result = await workerPostJson(path, {
+    ...body,
+    baseUrl,
+    username,
+    apiToken: credential.password
+  })
+  if (!result.ok) {
+    return { ok: false as const, message: result.message }
+  }
+  return { ok: true as const, cases: result.data }
+})
+
+ipcMain.handle('google-sheets-import', async (_e, projectId: string, action: 'preview' | 'import', body: Record<string, unknown>) => {
+  const settingsResult = await workerGetJson('/settings')
+  if (!settingsResult.ok) {
+    return { ok: false as const, message: settingsResult.message }
+  }
+  const settings = settingsResult.data as { integrations?: { googleSheets?: Record<string, unknown> } }
+  const integration = settings.integrations?.googleSheets || {}
+  const defaultSpreadsheetId = typeof integration.spreadsheetId === 'string' ? integration.spreadsheetId : ''
+  const spreadsheetId = typeof body.spreadsheet_id === 'string' && body.spreadsheet_id.trim()
+    ? body.spreadsheet_id
+    : defaultSpreadsheetId
+  if (!spreadsheetId.trim()) {
+    return { ok: false as const, message: 'Configure a Google Sheets spreadsheet ID in Import or Settings.' }
+  }
+
+  const credential = await getCredential('tc-studio', 'connector:googleSheets:serviceAccountJson')
+  if (!credential.ok) {
+    return { ok: false as const, message: 'Store Google Sheets credential JSON in Settings before importing.' }
+  }
+
+  const path = `/projects/${encodeURIComponent(projectId)}/cases/import/google-sheets${action === 'preview' ? '/preview' : ''}`
+  const result = await workerPostJson(path, {
+    ...body,
+    spreadsheet_id: spreadsheetId,
+    credentialJson: credential.password
+  })
+  if (!result.ok) {
+    return { ok: false as const, message: result.message }
+  }
+  return { ok: true as const, cases: result.data }
+})
+
+ipcMain.handle('testrail-export', async (_e, projectId: string, executionId: string, preview: boolean) => {
+  if (preview) {
+    const previewResult = await workerPostJson(
+      `/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/export/testrail`,
+      { preview: true }
+    )
+    if (!previewResult.ok) {
+      return { ok: false as const, message: previewResult.message }
+    }
+    return { ok: true as const, result: previewResult.data }
+  }
+
+  const settingsResult = await workerGetJson('/settings')
+  if (!settingsResult.ok) {
+    return { ok: false as const, message: settingsResult.message }
+  }
+  const settings = settingsResult.data as { integrations?: { testrail?: Record<string, unknown> } }
+  const integration = settings.integrations?.testrail || {}
+  if (integration.enabled === false) {
+    const mockResult = await workerPostJson(
+      `/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/export/testrail`,
+      { preview: false, config: { mock: true } }
+    )
+    if (!mockResult.ok) {
+      return { ok: false as const, message: mockResult.message }
+    }
+    return { ok: true as const, result: mockResult.data }
+  }
+
+  const credential = await getCredential('tc-studio', 'connector:testrail:apiToken')
+  if (!credential.ok) {
+    return { ok: false as const, message: 'Store a TestRail API token in Settings before exporting results.' }
+  }
+  const result = await workerPostJson(
+    `/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/export/testrail`,
+    { preview: false, config: { apiToken: credential.password } }
+  )
+  if (!result.ok) {
+    return { ok: false as const, message: result.message }
+  }
+  return { ok: true as const, result: result.data }
+})
+
+ipcMain.handle('google-sheets-export', async (_e, projectId: string, executionId: string, preview: boolean) => {
+  if (preview) {
+    const previewResult = await workerPostJson(
+      `/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/export/google-sheets`,
+      { preview: true }
+    )
+    if (!previewResult.ok) {
+      return { ok: false as const, message: previewResult.message }
+    }
+    return { ok: true as const, result: previewResult.data }
+  }
+
+  const settingsResult = await workerGetJson('/settings')
+  if (!settingsResult.ok) {
+    return { ok: false as const, message: settingsResult.message }
+  }
+  const settings = settingsResult.data as { integrations?: { googleSheets?: Record<string, unknown> } }
+  const integration = settings.integrations?.googleSheets || {}
+  if (integration.enabled !== true) {
+    const mockResult = await workerPostJson(
+      `/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/export/google-sheets`,
+      { preview: false, config: { mock: true } }
+    )
+    if (!mockResult.ok) {
+      return { ok: false as const, message: mockResult.message }
+    }
+    return { ok: true as const, result: mockResult.data }
+  }
+
+  const credential = await getCredential('tc-studio', 'connector:googleSheets:serviceAccountJson')
+  if (!credential.ok) {
+    return { ok: false as const, message: 'Store Google Sheets credential JSON in Settings before exporting results.' }
+  }
+  const result = await workerPostJson(
+    `/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/export/google-sheets`,
+    { preview: false, config: { credentialJson: credential.password } }
+  )
+  if (!result.ok) {
+    return { ok: false as const, message: result.message }
+  }
+  return { ok: true as const, result: result.data }
+})
+
 ipcMain.handle('provider-models', async (_e, provider: string) => {
   const credential = await getCredential('tc-studio', provider)
   if (!credential.ok) {

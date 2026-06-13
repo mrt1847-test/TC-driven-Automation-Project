@@ -9,6 +9,7 @@ from worker.core.database import get_session
 from worker.core.config import load_settings, save_settings
 from worker.models.db import Project
 from worker.models.schemas import AppSettings
+from worker.services.connector_credentials import connector_credentials_response
 from worker.services.health import check_health, install_dependencies, project_health_check
 
 router = APIRouter(tags=["settings"])
@@ -28,6 +29,11 @@ def get_settings():
 def update_settings(settings: AppSettings):
     save_settings(settings)
     return load_settings()
+
+
+@router.get("/settings/connector-credentials")
+def get_connector_credentials():
+    return connector_credentials_response(load_settings())
 
 
 @router.post("/settings/validate")

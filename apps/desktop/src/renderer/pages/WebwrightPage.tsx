@@ -1,7 +1,14 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { WebwrightRunErrorPanel } from '@/components/WebwrightRunErrorPanel'
-import { api, connectLogStream, getApiErrorMessage, type TestCase, type WebwrightRun } from '@/lib/api'
+import {
+  api,
+  connectLogStream,
+  getApiErrorMessage,
+  type PromptPreset,
+  type TestCase,
+  type WebwrightRun
+} from '@/lib/api'
 import { describeWebwrightRunError } from '@/lib/webwrightErrors'
 import { useAppStore } from '@/store/appStore'
 
@@ -9,16 +16,9 @@ type AppSettings = {
   webwright?: {
     apiProvider?: string
     modelName?: string
-    promptComposer?: PromptComposerSettings
     [key: string]: unknown
   }
   [key: string]: unknown
-}
-
-type PromptComposerSettings = {
-  batchPrompt?: string
-  caseOverrides?: Record<string, string>
-  presetId?: string
 }
 
 type LlmCheckState = {
@@ -26,39 +26,22 @@ type LlmCheckState = {
   message: string
 }
 
-type PromptPreset = {
-  id: string
-  label: string
+type PromptPresetDraft = {
+  category: string
+  name: string
   guidance: string
 }
 
-const promptPresets: PromptPreset[] = [
-  {
-    id: 'general',
-    label: 'General automation',
-    guidance: 'Prefer stable selectors, explicit waits, readable steps, and assertions tied to the expected result.'
-  },
-  {
-    id: 'login-required',
-    label: 'Login-required flow',
-    guidance: 'Account for authentication setup, session reuse, guarded redirects, and post-login landing state before executing TC steps.'
-  },
-  {
-    id: 'search-flow',
-    label: 'Search flow',
-    guidance: 'Treat query entry, result loading, empty states, and result assertions as first-class checkpoints.'
-  },
-  {
-    id: 'crud-flow',
-    label: 'CRUD flow',
-    guidance: 'Use deterministic test data, verify create/update/delete transitions, and clean up records where the flow allows it.'
-  },
-  {
-    id: 'assertion-heavy',
-    label: 'Assertion-heavy',
-    guidance: 'Favor explicit UI assertions, state checks, and clear failure messages over only navigation or click completion.'
-  }
-]
+const DEFAULT_PROMPT_PRESET_ID = 'preset_builtin_general'
+const EMPTY_PROMPT_PRESETS: PromptPreset[] = []
+
+const legacyPromptPresetIds: Record<string, string> = {
+  general: 'preset_builtin_general',
+  'login-required': 'preset_builtin_login',
+  'search-flow': 'preset_builtin_search',
+  'crud-flow': 'preset_builtin_crud',
+  'assertion-heavy': 'preset_builtin_assertion_heavy'
+}
 
 const statusStyles: Record<string, string> = {
   imported: 'bg-slate-700 text-slate-100',
@@ -98,59 +81,41 @@ function providerLabel(provider: string) {
     : provider.charAt(0).toUpperCase() + provider.slice(1)
 }
 
-function selectedPreset(id: string) {
-  return promptPresets.find((preset) => preset.id === id) || promptPresets[0]
+function normalizePromptPresetId(id?: string | null) {
+  const trimmed = (id || '').trim()
+  if (!trimmed) return DEFAULT_PROMPT_PRESET_ID
+  return legacyPromptPresetIds[trimmed] || trimmed
 }
 
-function parseSteps(stepsJson?: string) {
-  try {
-    const steps = JSON.parse(stepsJson || '[]') as { index?: number; action?: string; expected?: string | null }[]
-    return Array.isArray(steps) ? steps : []
-  } catch {
-    return []
-  }
+function promptPresetOptionLabel(preset: PromptPreset) {
+  return preset.isBuiltin ? preset.name : `${preset.name} (Project)`
 }
 
-function buildPromptPreview(
-  testCase: TestCase | undefined,
-  preset: PromptPreset,
-  batchPrompt: string,
-  caseOverride: string
-) {
-  if (!testCase) return 'Select a TC to preview the prompt payload.'
+function slugPromptPreset(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40) || 'preset'
+}
 
-  const steps = parseSteps(testCase.steps_json)
-  const stepText = steps.length
-    ? steps.map((step, index) => {
-      const stepNo = step.index ?? index + 1
-      const expected = step.expected ? `\n   Expected: ${step.expected}` : ''
-      return `${stepNo}. ${step.action || 'Untitled step'}${expected}`
-    }).join('\n')
-    : 'No structured steps available.'
-
+function makeProjectPromptPresetId(draft: PromptPresetDraft) {
   return [
-    'You are generating a Playwright Python automation draft for the following QA test case.',
-    '',
-    `Automation Key: ${testCase.automation_key}`,
-    `Title: ${testCase.title}`,
-    `Start URL: ${testCase.start_url || 'Use configured/default start URL'}`,
-    `Priority: ${testCase.priority || 'Not specified'}`,
-    '',
-    'Preset Guidance:',
-    preset.guidance,
-    '',
-    'Batch Shared Prompt:',
-    batchPrompt.trim() || 'None',
-    '',
-    'Selected TC Override:',
-    caseOverride.trim() || 'None',
-    '',
-    'Steps:',
-    stepText,
-    '',
-    'Expected Result:',
-    testCase.expected_result || 'As described in steps'
-  ].join('\n')
+    'preset_project',
+    slugPromptPreset(draft.category),
+    slugPromptPreset(draft.name),
+    Date.now().toString(36)
+  ].join('_')
+}
+
+function toProjectPresetInput(preset: PromptPreset) {
+  return {
+    id: preset.id,
+    category: preset.category,
+    name: preset.name,
+    guidance: preset.guidance
+  }
 }
 
 export function WebwrightPage() {
@@ -170,10 +135,17 @@ export function WebwrightPage() {
   })
   const [batchPrompt, setBatchPrompt] = useState('')
   const [casePromptOverrides, setCasePromptOverrides] = useState<Record<string, string>>({})
-  const [promptPresetId, setPromptPresetId] = useState('general')
-  const [promptStatus, setPromptStatus] = useState('Prompt changes not saved yet.')
+  const [promptPresetId, setPromptPresetId] = useState(DEFAULT_PROMPT_PRESET_ID)
+  const [promptDraft, setPromptDraft] = useState<PromptPresetDraft>({
+    category: 'custom',
+    name: '',
+    guidance: ''
+  })
+  const [promptDirty, setPromptDirty] = useState(false)
+  const [promptStatus, setPromptStatus] = useState('Prompt composer loading from Worker.')
   const [runActionError, setRunActionError] = useState<string | null>(null)
   const seededCaseIdRef = useRef<string | null>(null)
+  const promptComposerProjectRef = useRef<string | null>(null)
   const qc = useQueryClient()
   const selectedCaseId = storeSelectedCase?.project_id === project?.id ? storeSelectedCase.id : null
 
@@ -187,22 +159,82 @@ export function WebwrightPage() {
     enabled: !!project,
     refetchInterval: 3000
   })
+  const promptCase = cases.find((c) => c.id === selectedCaseId) || cases.find((c) => selected.includes(c.id))
+  const caseOverride = promptCase ? casePromptOverrides[promptCase.id] || '' : ''
+
   const { data: runs = [] } = useQuery({
     queryKey: ['webwright-runs', project?.id],
     queryFn: () => api.webwright.list(project!.id),
     enabled: !!project,
     refetchInterval: 3000
   })
+  const promptComposerQuery = useQuery({
+    queryKey: ['prompt-composer', project?.id],
+    queryFn: () => api.prompts.composer(project!.id),
+    enabled: !!project
+  })
+  const promptPresetsQuery = useQuery({
+    queryKey: ['prompt-presets', project?.id],
+    queryFn: () => api.prompts.presets(project!.id),
+    enabled: !!project
+  })
+  const promptPresets = promptPresetsQuery.data?.presets ?? EMPTY_PROMPT_PRESETS
+  const selectedPromptPreset = promptPresets.find((preset) => preset.id === promptPresetId) || promptPresets[0] || null
+  const selectedPresetIsProject = Boolean(selectedPromptPreset && !selectedPromptPreset.isBuiltin)
+  const promptPreviewQuery = useQuery({
+    queryKey: ['prompt-preview', project?.id, promptCase?.id, promptPresetId],
+    queryFn: () => api.prompts.preview(project!.id, {
+      caseId: promptCase!.id,
+      presetId: promptPresetId || undefined
+    }),
+    enabled: !!project && !!promptCase && !!promptPresetId
+  })
 
   useEffect(() => {
     const savedProvider = (settings as AppSettings | undefined)?.webwright?.apiProvider
     if (savedProvider) setApiProvider(savedProvider)
     setModelName((settings as AppSettings | undefined)?.webwright?.modelName || '')
-    const promptComposer = (settings as AppSettings | undefined)?.webwright?.promptComposer
-    setBatchPrompt(promptComposer?.batchPrompt || '')
-    setCasePromptOverrides(promptComposer?.caseOverrides || {})
-    setPromptPresetId(promptComposer?.presetId || 'general')
   }, [settings])
+
+  useEffect(() => {
+    if (!project) {
+      promptComposerProjectRef.current = null
+      setBatchPrompt('')
+      setCasePromptOverrides({})
+      setPromptPresetId(DEFAULT_PROMPT_PRESET_ID)
+      setPromptDirty(false)
+      return
+    }
+    if (!promptComposerQuery.data) return
+    const switchingProject = promptComposerProjectRef.current !== project.id
+    if (!switchingProject && promptDirty) return
+    promptComposerProjectRef.current = project.id
+    setBatchPrompt(promptComposerQuery.data.batchPrompt || '')
+    setCasePromptOverrides(promptComposerQuery.data.caseOverrides || {})
+    setPromptPresetId(normalizePromptPresetId(promptComposerQuery.data.selectedPresetId))
+    setPromptDirty(false)
+    setPromptStatus('Prompt composer loaded from Worker.')
+  }, [project, promptComposerQuery.data, promptDirty])
+
+  useEffect(() => {
+    if (!promptPresets.length) return
+    if (promptPresets.some((preset) => preset.id === promptPresetId)) return
+    setPromptPresetId(promptPresets[0]?.id || DEFAULT_PROMPT_PRESET_ID)
+    setPromptDirty(true)
+    setPromptStatus('Prompt preset changed. Save Prompt to persist the selected preset.')
+  }, [promptPresets, promptPresetId])
+
+  useEffect(() => {
+    if (!selectedPromptPreset) {
+      setPromptDraft({ category: 'custom', name: '', guidance: '' })
+      return
+    }
+    setPromptDraft({
+      category: selectedPromptPreset.category,
+      name: selectedPromptPreset.name,
+      guidance: selectedPromptPreset.guidance
+    })
+  }, [selectedPromptPreset])
 
   useEffect(() => {
     if (!selectedCaseId || seededCaseIdRef.current === selectedCaseId) return
@@ -213,7 +245,7 @@ export function WebwrightPage() {
 
   const runMut = useMutation({
     mutationFn: async (caseIds: string[]) => {
-      const res = await api.webwright.run(project!.id, { caseIds })
+      const res = await api.webwright.run(project!.id, { caseIds, presetId: promptPresetId || undefined })
       connectLogStream(res.jobId, appendLog)
       return res
     },
@@ -342,30 +374,85 @@ export function WebwrightPage() {
 
   const savePromptMut = useMutation({
     mutationFn: async () => {
-      const current = (settings as AppSettings | undefined) || await api.settings.get() as AppSettings
+      if (!project) throw new Error('Select a project first.')
       const cleanedOverrides = Object.fromEntries(
         Object.entries(casePromptOverrides).filter(([, value]) => value.trim().length > 0)
       )
-      const next: AppSettings = {
-        ...current,
-        webwright: {
-          ...(current.webwright || {}),
-          promptComposer: {
-            batchPrompt,
-            caseOverrides: cleanedOverrides,
-            presetId: promptPresetId
-          }
-        }
-      }
-      return api.settings.update(next) as Promise<AppSettings>
+      const composer = await api.prompts.saveComposer(project.id, {
+        batchPrompt,
+        selectedPresetId: promptPresetId || null,
+        caseOverrides: cleanedOverrides
+      })
+      return { projectId: project.id, composer }
     },
-    onSuccess: (saved) => {
-      qc.setQueryData(['settings'], saved)
-      qc.invalidateQueries({ queryKey: ['settings'] })
-      setPromptStatus('Prompt composer saved.')
+    onSuccess: ({ projectId, composer }) => {
+      qc.setQueryData(['prompt-composer', projectId], composer)
+      qc.invalidateQueries({ queryKey: ['prompt-preview', projectId] })
+      setPromptDirty(false)
+      setPromptStatus('Prompt composer saved to Worker.')
     },
     onError: (error) => {
-      setPromptStatus(error instanceof Error ? error.message : 'Prompt composer save failed.')
+      setPromptStatus(getApiErrorMessage(error, 'Prompt composer save failed.'))
+    }
+  })
+
+  const savePresetMut = useMutation({
+    mutationFn: async () => {
+      if (!project) throw new Error('Select a project first.')
+      const category = promptDraft.category.trim()
+      const name = promptDraft.name.trim()
+      const guidance = promptDraft.guidance.trim()
+      if (!category || !name || !guidance) {
+        throw new Error('Project preset requires category, name, and guidance.')
+      }
+      const presetId = selectedPresetIsProject && selectedPromptPreset?.id
+        ? selectedPromptPreset.id
+        : makeProjectPromptPresetId({ category, name, guidance })
+      const presets = [
+        ...promptPresets
+          .filter((preset) => !preset.isBuiltin && preset.id !== presetId)
+          .map(toProjectPresetInput),
+        { id: presetId, category, name, guidance }
+      ]
+      const response = await api.prompts.savePresets(project.id, { presets })
+      return { projectId: project.id, presetId, response }
+    },
+    onSuccess: ({ projectId, presetId, response }) => {
+      qc.setQueryData(['prompt-presets', projectId], response)
+      qc.invalidateQueries({ queryKey: ['prompt-preview', projectId] })
+      setPromptPresetId(presetId)
+      setPromptDirty(true)
+      setPromptStatus('Project prompt preset saved. Save Prompt to persist the selected preset.')
+    },
+    onError: (error) => {
+      setPromptStatus(getApiErrorMessage(error, 'Project prompt preset save failed.'))
+    }
+  })
+
+  const deletePresetMut = useMutation({
+    mutationFn: async () => {
+      if (!project) throw new Error('Select a project first.')
+      if (!selectedPromptPreset || selectedPromptPreset.isBuiltin) {
+        throw new Error('Select a project preset to delete.')
+      }
+      const presets = promptPresets
+        .filter((preset) => !preset.isBuiltin && preset.id !== selectedPromptPreset.id)
+        .map(toProjectPresetInput)
+      const response = await api.prompts.savePresets(project.id, { presets })
+      return { projectId: project.id, response }
+    },
+    onSuccess: ({ projectId, response }) => {
+      const fallbackPresetId = response.presets.find((preset) => preset.id === DEFAULT_PROMPT_PRESET_ID)?.id
+        || response.presets[0]?.id
+        || DEFAULT_PROMPT_PRESET_ID
+      qc.setQueryData(['prompt-presets', projectId], response)
+      qc.invalidateQueries({ queryKey: ['prompt-preview', projectId] })
+      setPromptPresetId(fallbackPresetId)
+      setPromptDirty(true)
+      setPromptStatus('Project prompt preset deleted. Save Prompt to persist the selected preset.')
+    },
+    onError: (error) => {
+      setPromptStatus(getApiErrorMessage(error, 'Project prompt preset delete failed.'))
     }
   })
 
@@ -388,10 +475,23 @@ export function WebwrightPage() {
 
   if (!project) return <p>Select a project first.</p>
 
-  const promptCase = cases.find((c) => c.id === selectedCaseId) || cases.find((c) => selected.includes(c.id))
-  const caseOverride = promptCase ? casePromptOverrides[promptCase.id] || '' : ''
-  const preset = selectedPreset(promptPresetId)
-  const promptPreview = buildPromptPreview(promptCase, preset, batchPrompt, caseOverride)
+  const promptApiError = promptComposerQuery.isError
+    ? getApiErrorMessage(promptComposerQuery.error, 'Prompt composer load failed.')
+    : promptPresetsQuery.isError
+      ? getApiErrorMessage(promptPresetsQuery.error, 'Prompt preset load failed.')
+      : null
+  const promptPreview = !promptCase
+    ? 'Select a TC to preview the prompt payload.'
+    : promptPreviewQuery.isLoading
+      ? 'Loading Worker prompt preview...'
+      : promptPreviewQuery.isError
+        ? getApiErrorMessage(promptPreviewQuery.error, 'Prompt preview failed.')
+        : promptPreviewQuery.data?.prompt || 'No prompt preview available.'
+  const promptStatusClass = promptApiError || promptStatus.toLowerCase().includes('failed')
+    ? 'text-red-400'
+    : promptDirty
+      ? 'text-amber-400'
+      : 'text-slate-500'
 
   return (
     <div className="space-y-4">
@@ -498,7 +598,7 @@ export function WebwrightPage() {
           </div>
           <button
             className="px-3 py-2 bg-blue-600 rounded text-sm disabled:opacity-50"
-            disabled={savePromptMut.isPending}
+            disabled={savePromptMut.isPending || promptPresetsQuery.isLoading}
             onClick={() => savePromptMut.mutate()}
           >
             {savePromptMut.isPending ? 'Saving...' : 'Save Prompt'}
@@ -512,6 +612,7 @@ export function WebwrightPage() {
               value={batchPrompt}
               onChange={(e) => {
                 setBatchPrompt(e.target.value)
+                setPromptDirty(true)
                 setPromptStatus('Prompt changes not saved yet.')
               }}
               placeholder="Shared domain hints, auth notes, selector preferences, assertion guidance..."
@@ -529,6 +630,7 @@ export function WebwrightPage() {
                   ...current,
                   [promptCase.id]: e.target.value
                 }))
+                setPromptDirty(true)
                 setPromptStatus('Prompt changes not saved yet.')
               }}
               placeholder="Extra instructions only for the selected TC..."
@@ -540,26 +642,82 @@ export function WebwrightPage() {
             Prompt preset
             <select
               className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-slate-100"
+              disabled={promptPresetsQuery.isLoading || !promptPresets.length}
               value={promptPresetId}
               onChange={(e) => {
                 setPromptPresetId(e.target.value)
+                setPromptDirty(true)
                 setPromptStatus('Prompt changes not saved yet.')
               }}
             >
               {promptPresets.map((preset) => (
-                <option key={preset.id} value={preset.id}>{preset.label}</option>
+                <option key={preset.id} value={preset.id}>{promptPresetOptionLabel(preset)}</option>
               ))}
             </select>
-            <div className="mt-2 text-xs text-slate-500">{preset.guidance}</div>
+            <div className="mt-2 text-xs text-slate-500">
+              {selectedPromptPreset?.guidance || 'Worker prompt presets are not loaded yet.'}
+            </div>
           </label>
-          <div className="text-xs text-slate-400">
-            Prompt preview
+          <div className="space-y-2 text-xs text-slate-400">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,160px)_minmax(0,1fr)]">
+              <label>
+                Preset category
+                <input
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-slate-100"
+                  value={promptDraft.category}
+                  onChange={(e) => setPromptDraft((current) => ({ ...current, category: e.target.value }))}
+                  placeholder="custom"
+                />
+              </label>
+              <label>
+                Project preset name
+                <input
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-slate-100"
+                  value={promptDraft.name}
+                  onChange={(e) => setPromptDraft((current) => ({ ...current, name: e.target.value }))}
+                  placeholder="Project flow preset"
+                />
+              </label>
+            </div>
+            <label className="block">
+              Project preset guidance
+              <textarea
+                className="mt-1 h-20 w-full resize-y rounded border border-slate-700 bg-slate-950 p-2 text-sm text-slate-100"
+                value={promptDraft.guidance}
+                onChange={(e) => setPromptDraft((current) => ({ ...current, guidance: e.target.value }))}
+                placeholder="Reusable prompt guidance for this project..."
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="px-3 py-2 bg-slate-700 rounded text-sm text-slate-100 disabled:opacity-50"
+                disabled={savePresetMut.isPending || deletePresetMut.isPending || promptPresetsQuery.isLoading}
+                onClick={() => savePresetMut.mutate()}
+              >
+                {savePresetMut.isPending
+                  ? 'Saving...'
+                  : selectedPresetIsProject ? 'Update Project Preset' : 'Save as Project Preset'}
+              </button>
+              <button
+                className="px-3 py-2 bg-red-900 rounded text-sm text-red-50 disabled:opacity-50"
+                disabled={!selectedPresetIsProject || deletePresetMut.isPending || savePresetMut.isPending}
+                onClick={() => deletePresetMut.mutate()}
+              >
+                {deletePresetMut.isPending ? 'Deleting...' : 'Delete Project Preset'}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="text-xs text-slate-400">
+          Prompt preview
+          {promptDirty && (
+            <span className="ml-2 text-amber-400">Preview reflects the last saved Worker prompt.</span>
+          )}
             <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
               {promptPreview}
             </pre>
-          </div>
         </div>
-        <div className="text-xs text-slate-500">{promptStatus}</div>
+        <div className={`text-xs ${promptStatusClass}`}>{promptApiError || promptStatus}</div>
       </section>
       {runActionError && (
         <div className="rounded border border-red-800 bg-red-950/30 p-3 text-sm text-red-100">

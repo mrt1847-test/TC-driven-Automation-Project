@@ -14,12 +14,12 @@ from worker.models.schemas import (
     ExportRequest,
     HealingProposalCreateRequest,
 )
-from worker.services.healing_proposals import create_selector_healing_proposal
+from worker.services.healing_proposals import create_healing_proposal as create_healing_proposal_service
 from worker.services.retire_disposition import (
     preview_retire_from_failure_disposition,
     retire_from_failure_disposition,
 )
-from worker.services.project_runner import rerun_failed, run_project
+from worker.services.project_runner import cancel_execution_run, rerun_failed, run_project
 from worker.services.failure_disposition import diagnose_execution_failures
 from worker.services.result_export import (
     ExportValidationError,
@@ -105,7 +105,14 @@ def create_healing_proposal(
     if not result or result.execution_run_id != execution_id:
         raise HTTPException(404, "Execution result not found")
     try:
-        return create_selector_healing_proposal(session, project, run, result)
+        return create_healing_proposal_service(
+            session,
+            project,
+            run,
+            result,
+            requested_kind=request.kind,
+            requested_proposal=request.proposal,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -170,11 +177,13 @@ async def rerun_failed_execution(project_id: str, execution_id: str, background:
 
 
 @router.post("/{execution_id}/cancel")
-def cancel_execution(project_id: str, execution_id: str, session: Session = Depends(get_session)):
+async def cancel_execution(project_id: str, execution_id: str, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
     run.status = "cancelled"
     session.add(run)
     session.commit()
+    await cancel_execution_run(execution_id)
+    session.refresh(run)
     return run
 
 
@@ -198,7 +207,7 @@ async def export_tc(project_id: str, execution_id: str, request: ExportRequest, 
 async def export_tr(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
     try:
-        return await export_testrail(session, run, request.preview)
+        return await export_testrail(session, run, request.preview, request.config)
     except (ExportValidationError, FileNotFoundError) as exc:
         _raise_export_error(exc)
 
@@ -216,6 +225,6 @@ def export_xl(project_id: str, execution_id: str, request: ExportRequest, sessio
 async def export_gs(project_id: str, execution_id: str, request: ExportRequest, session: Session = Depends(get_session)):
     run = _get_execution_run(session, project_id, execution_id)
     try:
-        return await export_google_sheets(session, run, request.preview)
+        return await export_google_sheets(session, run, request.preview, request.config)
     except (ExportValidationError, FileNotFoundError) as exc:
         _raise_export_error(exc)

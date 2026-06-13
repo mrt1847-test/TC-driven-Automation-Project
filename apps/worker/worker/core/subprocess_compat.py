@@ -34,6 +34,9 @@ class _PopenProcess:
     def kill(self) -> None:
         self._popen.kill()
 
+    def terminate(self) -> None:
+        self._popen.terminate()
+
     async def communicate(self) -> tuple[bytes, bytes]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._popen.communicate)
